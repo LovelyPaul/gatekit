@@ -10,6 +10,6 @@
 - Templates, heading maps, presets: data files under `plugin/spec-kit/`, not prompt prose.
 - No absolute personal paths. No files > 1 MB. CI enforces both.
 - Output language follows the detected `output_lang`; never default to Korean.
-- TDD: write the failing test first, then the minimum implementation. Run `python3 -m unittest discover -s plugin/tests` before claiming anything.
+- TDD: write the failing test first, then the minimum implementation. Run `cd plugin && python3 -m unittest discover -s tests` before claiming anything.
 - Commits: one logical unit each, message states what and why. Do not push without the owner's instruction.
 - Clean-room rule: do not copy code from other projects. Patterns are fine; code is not.

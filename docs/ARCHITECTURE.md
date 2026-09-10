@@ -62,7 +62,7 @@ gatekit/
 │   │   ├── templates/{ko,en}/01-prd.md … 05-gate.md, RECOVERY.md, PROGRESS.md
 │   │   └── heading-map.json             # canonical headings per file per language
 │   ├── policy/language.md questioning.md verification.md   # loaded at runtime by commands
-│   └── tests/                           # unittest, run with: python3 -m unittest discover -s plugin/tests
+│   └── tests/                           # unittest, run with: cd plugin && python3 -m unittest discover -s tests
 ├── tools/                               # CI gates (stdlib)
 ├── docs/ARCHITECTURE.md (this), decisions/ADR-*.md
 ├── .github/workflows/ci.yml
@@ -273,7 +273,7 @@ runs `check` and the user confirms.
 
 ## 13. Testing convention
 
-`python3 -m unittest discover -s plugin/tests -v` must pass with no network
+`cd plugin && python3 -m unittest discover -s tests -v` must pass with no network
 and no external binaries. Tests that need a binary (`claude`, `codex`) use a
 fake executable created in a temp dir and prepended to `PATH`. Every gate has at
 least three tests: allow, deny/block, internal-error-still-exits-0. Fixtures

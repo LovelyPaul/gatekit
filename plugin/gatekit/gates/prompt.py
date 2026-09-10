@@ -1,0 +1,90 @@
+"""UserPromptSubmit gate — bootstrap the session and tell Claude the rules.
+
+This gate never blocks. It does two things on every prompt:
+
+1. **Ensures a ledger exists** for the session and refreshes ``output_lang``
+   from the prompt text, so the language decision is made once, from the user's
+   own words, and every later gate and command reads the same answer.
+2. **Injects a short context block** (≤ 600 characters) naming the output
+   language, the active pipeline, the question budget and the number of
+   unresolved gate items — the state Claude would otherwise have to guess at.
+
+An empty prompt leaves the stored language alone: submitting a blank line is
+not evidence that the user switched to English.
+"""
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
+if __name__ == "__main__" or __package__ in (None, ""):  # pragma: no cover
+    from _bootstrap import ensure_package_path
+
+    ensure_package_path()
+else:
+    from ._bootstrap import ensure_package_path
+
+    ensure_package_path()
+
+from gatekit import approval, contract, hookio, lang, ledger, paths  # noqa: E402
+
+
+def _gate_state(root) -> str:
+    """One-word summary of whether the completion gate is settled."""
+    gate_md = paths.spec_dir(root) / "05-gate.md"
+    if not gate_md.is_file():
+        return "no gate spec"
+    status = approval.check(root, "spec/05-gate.md")
+    if status == "ok":
+        return "gate approved"
+    if status == "fail":
+        return "gate approval STALE (re-approve)"
+    return "gate NOT approved"
+
+
+def build_context(root, led: "ledger.Ledger") -> str:
+    """Compose the ≤600 char context block injected into the conversation."""
+    questions = led.data.get("questions", {})
+    asked = questions.get("asked", 0)
+    max_calls = questions.get("max_calls", 2)
+    pipeline = led.data.get("active_pipeline") or "none"
+
+    parts: List[str] = [
+        f"gatekit: output_lang={led.output_lang} (reply in this language;"
+        " never translate identifiers)",
+        f"pipeline={pipeline}",
+        f"questions={asked}/{max_calls}",
+        _gate_state(root),
+    ]
+
+    contract_status = contract.status(root)
+    if contract_status != "unverified":
+        parts.append(f"contract={contract_status}")
+
+    return " | ".join(parts)
+
+
+def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Refresh the ledger from this prompt and return the context payload."""
+    root = hookio.event_root(event)
+    session = hookio.session_id(event)
+    text = event.get("prompt")
+    text = text if isinstance(text, str) else ""
+
+    led = ledger.Ledger.load(root, session)
+
+    # An empty prompt carries no language signal, so keep what we had.
+    if text.strip():
+        led.set_output_lang(lang.detect(text))
+
+    led.append_event("prompt", {"chars": len(text)})
+    led.save()
+
+    return hookio.add_context(build_context(root, led))
+
+
+def main() -> None:  # pragma: no cover - exercised via subprocess tests
+    hookio.run(handle)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    main()

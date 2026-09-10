@@ -1,0 +1,179 @@
+"""Tests for gates/prompt.py — ledger bootstrap, language detection, context."""
+from __future__ import annotations
+
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from gatekit import hookio, ledger  # noqa: E402
+from gatekit.gates import prompt as prompt_gate  # noqa: E402
+
+GATE_SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "gatekit" / "gates" / "prompt.py"
+
+
+class PromptProject(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(os.path.realpath(self._tmp.name))
+        (self.root / ".gatekit").mkdir()
+        self.session = "sess-prompt"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def event(self, prompt_text: str, session: str = "") -> dict:
+        return {
+            "session_id": session or self.session,
+            "hook_event_name": "UserPromptSubmit",
+            "cwd": str(self.root),
+            "prompt": prompt_text,
+        }
+
+    def led(self, session: str = "") -> ledger.Ledger:
+        return ledger.Ledger.load(self.root, session or self.session)
+
+    def context_of(self, result) -> str:
+        return result["hookSpecificOutput"]["additionalContext"]
+
+
+class TestLedgerBootstrap(PromptProject):
+    def test_creates_ledger_file(self) -> None:
+        prompt_gate.handle(self.event("hello"))
+        self.assertTrue(ledger.Ledger.exists(self.root, self.session))
+
+    def test_never_blocks(self) -> None:
+        """UserPromptSubmit has no deny path; output is context or nothing."""
+        result = prompt_gate.handle(self.event("hello"))
+        if result is not None:
+            self.assertNotIn("permissionDecision", json.dumps(result))
+            self.assertNotIn("decision", result)
+
+    def test_records_prompt_event(self) -> None:
+        prompt_gate.handle(self.event("hello"))
+        kinds = [e["kind"] for e in self.led().data["events"]]
+        self.assertIn("prompt", kinds)
+
+    def test_separate_sessions_have_separate_ledgers(self) -> None:
+        prompt_gate.handle(self.event("안녕하세요", session="s-ko"))
+        prompt_gate.handle(self.event("hello there", session="s-en"))
+        self.assertEqual(self.led("s-ko").data["output_lang"], "ko")
+        self.assertEqual(self.led("s-en").data["output_lang"], "en")
+
+
+class TestLanguageDetection(PromptProject):
+    def test_korean_prompt_stores_ko(self) -> None:
+        prompt_gate.handle(self.event("로그인 화면을 만들어줘"))
+        self.assertEqual(self.led().data["output_lang"], "ko")
+
+    def test_english_prompt_stores_en(self) -> None:
+        prompt_gate.handle(self.event("build the login screen"))
+        self.assertEqual(self.led().data["output_lang"], "en")
+
+    def test_language_is_refreshed_on_each_prompt(self) -> None:
+        prompt_gate.handle(self.event("로그인 화면을 만들어줘"))
+        self.assertEqual(self.led().data["output_lang"], "ko")
+        prompt_gate.handle(self.event("now switch to english please"))
+        self.assertEqual(self.led().data["output_lang"], "en")
+
+    def test_empty_prompt_keeps_previous_language(self) -> None:
+        prompt_gate.handle(self.event("로그인 화면을 만들어줘"))
+        prompt_gate.handle(self.event(""))
+        self.assertEqual(self.led().data["output_lang"], "ko")
+
+    def test_context_reports_the_language(self) -> None:
+        result = prompt_gate.handle(self.event("hello"))
+        self.assertIn("en", self.context_of(result))
+
+
+class TestContextPayload(PromptProject):
+    def test_shape_is_user_prompt_submit(self) -> None:
+        result = prompt_gate.handle(self.event("hello"))
+        block = result["hookSpecificOutput"]
+        self.assertEqual(block["hookEventName"], "UserPromptSubmit")
+        self.assertIn("additionalContext", block)
+
+    def test_context_within_600_chars(self) -> None:
+        led = self.led()
+        led.data["active_pipeline"] = "build"
+        led.data["questions"]["asked"] = 7
+        led.save()
+        result = prompt_gate.handle(self.event("x" * 3000))
+        self.assertLessEqual(len(self.context_of(result)), hookio.MAX_CONTEXT_CHARS)
+
+    def test_context_mentions_pipeline(self) -> None:
+        led = self.led()
+        led.data["active_pipeline"] = "build"
+        led.save()
+        self.assertIn("build", self.context_of(prompt_gate.handle(self.event("go"))))
+
+    def test_context_mentions_question_budget(self) -> None:
+        led = self.led()
+        led.data["questions"]["asked"] = 2
+        led.data["questions"]["max_calls"] = 2
+        led.save()
+        context = self.context_of(prompt_gate.handle(self.event("go")))
+        self.assertIn("2", context)
+
+    def test_context_reports_unresolved_gate_count(self) -> None:
+        (self.root / "spec").mkdir()
+        (self.root / "spec" / "05-gate.md").write_text("# Gate\n", encoding="utf-8")
+        context = self.context_of(prompt_gate.handle(self.event("go")))
+        self.assertTrue(context)
+
+
+class TestSubprocess(PromptProject):
+    def _run(self, event: dict) -> "tuple[int, str, str]":
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+        proc = subprocess.run(
+            [sys.executable, str(GATE_SCRIPT)],
+            input=json.dumps(event),
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
+        )
+        return proc.returncode, proc.stdout, proc.stderr
+
+    def test_allow_with_context_via_subprocess(self) -> None:
+        code, out, err = self._run(self.event("hello"))
+        self.assertEqual(code, 0, err)
+        payload = json.loads(out)
+        self.assertEqual(
+            payload["hookSpecificOutput"]["hookEventName"], "UserPromptSubmit"
+        )
+
+    def test_korean_detected_via_subprocess(self) -> None:
+        code, _, err = self._run(self.event("로그인 화면을 만들어줘"))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.led().data["output_lang"], "ko")
+
+    def test_internal_error_exits_zero_and_logs(self) -> None:
+        runs = self.root / ".gatekit" / "runs"
+        runs.mkdir(parents=True, exist_ok=True)
+        (runs / f"{self.session}.json").mkdir()
+        code, _, err = self._run(self.event("hello"))
+        self.assertEqual(code, 0, err)
+        self.assertNotIn("Traceback", err)
+        self.assertTrue((runs / "hook-errors.log").is_file())
+
+    def test_empty_stdin_exits_zero(self) -> None:
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+        proc = subprocess.run(
+            [sys.executable, str(GATE_SCRIPT)],
+            input="",
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+
+if __name__ == "__main__":  # pragma: no cover
+    unittest.main()
