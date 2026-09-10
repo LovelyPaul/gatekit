@@ -43,3 +43,17 @@ gatekit은 Claude Code 플러그인이다. `CLAUDE.md`에 산문으로 적던 �
 - 이 매뉴얼의 모든 CLI 예시는 `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" <서브커맨드>` 형식이다. 이유는 `08-cli.md`에 있다.
 - 식별자(파일명·명령·플래그·JSON 키·펜스 이름·`ok`/`warn`/`fail`/`unverified`)는 번역하지 않는다.
 - 현재 버전은 0.1.0이다.
+
+## 노션으로 내보내기
+
+이 매뉴얼을 노션에 넣으려면 임포트 번들을 만든다.
+
+```bash
+python3 tools/build_manual_bundle.py
+```
+
+`dist/gatekit 사용자 매뉴얼.zip`이 생기고, 노션에서 Import → Markdown & CSV로
+올리면 부모 페이지 1개와 하위 페이지 12개 트리로 들어간다.
+
+저장소가 정본이다. 내용을 고칠 때는 `docs/manual/`을 고치고 번들을 다시 만들어
+재임포트한다. 노션 쪽만 고치면 두 사본이 갈라진다.

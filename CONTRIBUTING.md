@@ -83,3 +83,15 @@ worth restating here because they're easy to violate by accident:
 
 `tools/gate_skill_size.py` and `tools/gate_forbidden_phrases.py` enforce
 both of these in CI.
+
+## The manual
+
+`docs/manual/` is the source of truth. `tools/gate_manual_accuracy.py` fails the
+build if a page cites a command, subcommand or spec file that does not exist, so
+rename anything in `plugin/` and the manual has to follow in the same commit.
+
+To produce the Notion import bundle:
+
+```bash
+python3 tools/build_manual_bundle.py
+```

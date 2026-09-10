@@ -526,5 +526,52 @@ class TestCleanRoom(unittest.TestCase):
             self.assertEqual(proc.returncode, 0, proc.stdout)
 
 
+class TestManualBundle(unittest.TestCase):
+    """The Notion bundle must keep the tree and survive Korean filenames."""
+
+    def _repo(self, root: pathlib.Path) -> None:
+        minimal_clean_repo(root)
+        write(root / "docs" / "manual" / "00-index.md", "# 색인\n\n- [소개](01-intro.md)\n")
+        write(root / "docs" / "manual" / "01-intro.md", "# 소개\n\n본문\n")
+
+    def _build(self, root: pathlib.Path, out: pathlib.Path, title: str = "매뉴얼"):
+        return subprocess.run(
+            [sys.executable, str(TOOLS_DIR / "build_manual_bundle.py"),
+             "--root", str(root), "--out", str(out), "--title", title],
+            capture_output=True, text=True, timeout=30)
+
+    def test_bundle_has_parent_and_children(self) -> None:
+        import zipfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            self._repo(root)
+            out = root / "out.zip"
+            proc = self._build(root, out)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            with zipfile.ZipFile(out) as z:
+                names = z.namelist()
+            self.assertIn("매뉴얼.md", names)
+            self.assertIn("매뉴얼/00-index.md", names)
+            self.assertIn("매뉴얼/01-intro.md", names)
+
+    def test_filenames_carry_the_utf8_flag(self) -> None:
+        import zipfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            self._repo(root)
+            out = root / "out.zip"
+            self._build(root, out)
+            with zipfile.ZipFile(out) as z:
+                self.assertTrue(all(i.flag_bits & 0x800 for i in z.infolist()),
+                                "UTF-8 filename flag missing; Korean titles would mangle")
+
+    def test_missing_manual_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            minimal_clean_repo(root)
+            proc = self._build(root, root / "out.zip")
+            self.assertEqual(proc.returncode, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
