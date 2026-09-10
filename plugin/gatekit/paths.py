@@ -121,3 +121,12 @@ def relative_to_root(root: pathlib.Path, target: pathlib.Path) -> Optional[str]:
         return real_target.relative_to(real_root).as_posix()
     except (ValueError, OSError):
         return None
+
+
+def cli_invocation() -> str:
+    """The one CLI form that works from a user's project directory.
+
+    Used for every user-facing fix string so a copy-pasted remedy runs
+    without PYTHONPATH: ``python3 "<plugin>/bin/gatekit.py"``.
+    """
+    return 'python3 "%s"' % (plugin_root() / "bin" / "gatekit.py")

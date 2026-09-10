@@ -52,7 +52,7 @@ _MESSAGES = {
         "stale": (
             "gatekit: .gatekit/contract.json no longer matches spec/05-gate.md, so "
             "completion cannot be judged (contract_stale). "
-            "Run `python3 -m gatekit contract derive`, then finish the work."
+            "Run `" + paths.cli_invocation() + " contract derive`, then finish the work."
         ),
     },
     "ko": {
@@ -65,7 +65,7 @@ _MESSAGES = {
         "stale": (
             "gatekit: .gatekit/contract.json 이 spec/05-gate.md 와 더 이상 일치하지 "
             "않아 완료 여부를 판정할 수 없습니다 (contract_stale). "
-            "`python3 -m gatekit contract derive` 를 실행한 뒤 작업을 마치세요."
+            "`" + paths.cli_invocation() + " contract derive` 를 실행한 뒤 작업을 마치세요."
         ),
     },
 }

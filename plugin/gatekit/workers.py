@@ -13,6 +13,7 @@ worker.
 from __future__ import annotations
 
 import json
+
 import shutil
 import subprocess
 import sys
@@ -85,7 +86,7 @@ def resolve(root, name: Optional[str] = None) -> dict:
     enabled = bool(entry.get("enabled", False))
     if not enabled:
         raise ValueError(
-            "backend %r is disabled; run: python3 -m gatekit workers enable %s"
+            "backend %r is disabled; run: " + paths.cli_invocation() + " workers enable %s"
             % (resolved_name, resolved_name)
         )
 

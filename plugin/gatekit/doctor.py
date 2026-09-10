@@ -156,7 +156,7 @@ def axis_project_state(root) -> dict:
     if not state.is_dir():
         return _axis("project state", verdict.UNVERIFIED,
                      "no .gatekit/ in this project yet",
-                     "python3 -m gatekit doctor --root <project>  # after /gatekit:setup")
+                     paths.cli_invocation() + " doctor --root <project>  # after /gatekit:setup")
     problems = []
     cfg = state / "config.json"
     if cfg.is_file():
@@ -204,7 +204,7 @@ def axis_spec_set(root) -> dict:
             "%s %s" % (f.get("file", "?"), f.get("message", "")) for f in bad[:3]
         )
     return _axis("spec set", v, detail,
-                 "python3 -m gatekit spec validate" if v != verdict.OK else "")
+                 (paths.cli_invocation() + " spec validate") if v != verdict.OK else "")
 
 
 # ------------------------------------------------------------------- axis 5
@@ -223,10 +223,10 @@ def axis_contract_freshness(root) -> dict:
     if v == verdict.UNVERIFIED:
         return _axis("contract freshness", verdict.UNVERIFIED,
                      "no .gatekit/contract.json yet",
-                     "python3 -m gatekit contract derive")
+                     paths.cli_invocation() + " contract derive")
     return _axis("contract freshness", verdict.FAIL,
                  "contract is stale: spec/05-gate.md changed since it was derived",
-                 "python3 -m gatekit contract derive")
+                 paths.cli_invocation() + " contract derive")
 
 
 # ------------------------------------------------------------------- axis 6
@@ -243,7 +243,7 @@ def axis_workers(root) -> dict:
     v = result.get("verdict", verdict.UNVERIFIED)
     fix = ""
     if v == verdict.FAIL:
-        fix = "install the %s CLI, or: python3 -m gatekit workers set-default <name>" % name
+        fix = "install the %s CLI, or: %s workers set-default <name>" % (name, paths.cli_invocation())
     return _axis("workers", v, "default backend %s — %s" % (name, result.get("detail", "")), fix)
 
 
