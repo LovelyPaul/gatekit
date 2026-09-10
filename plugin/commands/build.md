@@ -104,14 +104,24 @@ stop redelegating** and switch to diagnosis mode:
 
 ## Step 5 — update progress
 
-When every task is terminal, write `spec/PROGRESS.md` in `output_lang`:
+When every task is terminal, update `spec/PROGRESS.md` in `output_lang`.
 
-- the job id and its backend,
-- one line per task: id, final state, gates passed of total,
+If the file does not exist, copy
+`${CLAUDE_PLUGIN_ROOT}/spec-kit/templates/<output_lang>/PROGRESS.md` first and
+fill it in. **Keep the template's headings exactly** — `spec validate` requires
+them and rejects a heading from the other language. Add your content under the
+existing headings; never invent a replacement heading:
+
+- current status: the job id, its backend, and whether the build is done,
+- milestones: one line per task — id, final state, gates passed of total,
+- failed attempts: every redelegated task with the gate that failed and what
+  changed on the retry,
 - tasks left blocked, with the failing gate named,
 - the timestamp.
 
-Report the same table in chat. State verdicts as they are. A `timeout` is not a
+Then run `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" spec validate` and fix
+any PROGRESS.md finding before reporting. Report the same table in chat. State
+verdicts as they are. A `timeout` is not a
 pass, and a task whose gates never ran is `unverified`, not done.
 
 ## Step 6 — hand off

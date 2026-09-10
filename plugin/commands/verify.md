@@ -55,9 +55,15 @@ The rest of the evaluator's prompt says, in `output_lang`:
   `ok / warn / fail / unverified`. A step you could not run is `unverified`;
   never round it to either side.
 - Do not fix anything you find. Report it.
-- Append a `## last verification` section to `spec/PROGRESS.md` with the
-  timestamp, the aggregate verdict, and one line per criterion and per E2E step.
-  This file is the one exception to read-only; nothing else may be written.
+- Record the result under the **last-verification heading that already exists**
+  in `spec/PROGRESS.md` (`## 마지막 검증` in Korean, `## Last verification` in
+  English). Do not add a heading in another language — `spec validate` treats
+  that as cross-language residue and fails. If the file or the heading is
+  missing, copy
+  `${CLAUDE_PLUGIN_ROOT}/spec-kit/templates/<output_lang>/PROGRESS.md` first.
+  Write the timestamp, the aggregate verdict, and one line per criterion and per
+  E2E step. This file is the one exception to read-only; nothing else may be
+  written.
 - Reply with the verdict table only. Do not paste command transcripts.
 
 ## Step 3 — re-run the contract yourself
@@ -95,6 +101,8 @@ Rules for the report:
 
 ## Step 5 — leave the trail
 
-Confirm `spec/PROGRESS.md` now carries the evaluator's `## last verification`
-section. If the evaluator could not write it, write it yourself from its reply
-and say that you did.
+Confirm `spec/PROGRESS.md` carries the evaluator's result under the
+last-verification heading for `output_lang`. If the evaluator could not write
+it, write it yourself from its reply and say that you did. Then run
+`python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" spec validate` and fix any
+PROGRESS.md finding before reporting.
