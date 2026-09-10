@@ -278,3 +278,77 @@ and no external binaries. Tests that need a binary (`claude`, `codex`) use a
 fake executable created in a temp dir and prepended to `PATH`. Every gate has at
 least three tests: allow, deny/block, internal-error-still-exits-0. Fixtures
 under `plugin/tests/fixtures/` are small text files only.
+
+## 14. Module interfaces (exact signatures other modules may import)
+
+```python
+# paths.py
+def project_root(cwd: str | None = None) -> pathlib.Path
+def state_dir(root: pathlib.Path) -> pathlib.Path      # root / ".gatekit"
+def spec_dir(root: pathlib.Path) -> pathlib.Path       # root / "spec"
+def plugin_root() -> pathlib.Path                      # directory containing plugin.json (parent of gatekit/)
+
+# config.py
+DEFAULTS: dict
+def load(root: pathlib.Path) -> dict                   # deep-merged with DEFAULTS; missing file → DEFAULTS
+def save(root: pathlib.Path, cfg: dict) -> None        # atomic
+
+# lang.py
+def detect(text: str) -> str                           # "ko" | "en"
+def run(argv: list[str]) -> int
+
+# verdict.py
+OK, WARN, FAIL, UNVERIFIED = "ok", "warn", "fail", "unverified"
+ORDER: list[str]
+def aggregate(verdicts) -> str
+def render(verdict: str, lang: str) -> str
+
+# ledger.py
+class Ledger:
+    data: dict
+    @classmethod
+    def load(cls, root: pathlib.Path, session_id: str) -> "Ledger"   # creates if missing
+    def save(self) -> None                                          # atomic
+    def append_event(self, kind: str, detail: dict | None = None) -> None
+    def add_scope(self, owner: str, write_scope: list[str]) -> None
+    def scope_conflicts(self, write_scope: list[str]) -> list[dict]  # existing scopes that intersect (glob-aware)
+def run(argv: list[str]) -> int
+
+# hookio.py
+def read_event() -> dict
+def run(handler) -> None                               # never raises; always exit 0
+def deny(reason: str) -> dict                          # PreToolUse deny payload
+def block_stop(reason: str) -> dict                    # Stop block payload
+def add_context(text: str) -> dict                     # UserPromptSubmit payload
+def log_error(root: pathlib.Path, event_name: str, err: BaseException) -> None
+
+# approval.py
+def sha256_file(path: pathlib.Path) -> str
+def check(root: pathlib.Path, relpath: str) -> str     # ok | fail | unverified
+def approve(root: pathlib.Path, relpath: str, note: str = "", by: str = "user") -> dict
+def run(argv: list[str]) -> int
+
+# contract.py
+def derive(root: pathlib.Path) -> dict                 # writes .gatekit/contract.json, returns it
+def status(root: pathlib.Path) -> str                  # ok (fresh) | fail (stale) | unverified (absent)
+def execute(root: pathlib.Path, total_budget_s: float = 45.0) -> dict   # {"verdict", "criteria":[...], "reasons":[...]}
+def run(argv: list[str]) -> int
+
+# spec.py
+def validate(root: pathlib.Path, lang: str | None = None) -> dict      # {"verdict", "findings":[{"file","verdict","message"}], "lang"}
+def parse_fences(text: str, name: str) -> list[dict]                   # all ```<name> JSON fences
+def run(argv: list[str]) -> int
+
+# jobs.py
+def run(argv: list[str]) -> int                        # start / status / wait / results / redelegate / clean
+def load_tasks(root: pathlib.Path) -> list[dict]       # from spec/04-tasks.md via spec.parse_fences
+
+# workers.py
+def resolve(root: pathlib.Path, name: str | None = None) -> dict   # backend dict incl. name, argv, enabled, unsafe
+def check(root: pathlib.Path, name: str) -> dict       # {"name","verdict","detail"}
+def run(argv: list[str]) -> int
+
+# doctor.py
+def diagnose(root: pathlib.Path) -> dict               # {"verdict","axes":[{"axis","verdict","detail","fix"}]}
+def run(argv: list[str]) -> int
+```
