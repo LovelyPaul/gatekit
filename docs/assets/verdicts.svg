@@ -1,0 +1,167 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="960" viewBox="0 0 1440 960" font-family="-apple-system, BlinkMacSystemFont, &quot;Apple SD Gothic Neo&quot;, &quot;Noto Sans KR&quot;, &quot;Malgun Gothic&quot;, sans-serif">
+
+  <rect x="0" y="0" width="1440" height="960" fill="#FBF9F5"/>
+
+  <!-- ===== Title ===== -->
+  <text x="72" y="72" font-size="34" font-weight="700" fill="#12312E">4상태 판정 어휘</text>
+  <text x="72" y="104" font-size="17" fill="#6B6459">gatekit 의 모든 검사는 이 넷 중 하나를 낸다. JSON 에는 언제나 영어 토큰이 들어간다.</text>
+
+  <!-- ===== Four state cards ===== -->
+  <!-- ok -->
+  <g>
+    <rect x="72" y="152" width="300" height="176" rx="12" fill="#FFFFFF" stroke="#1E7A4C" stroke-width="2"/>
+    <rect x="72" y="152" width="300" height="8" rx="4" fill="#1E7A4C"/>
+    <circle cx="112" cy="200" r="16" fill="#E3F2E9"/>
+    <path d="M 105 200 L 110 206 L 120 194" stroke="#1E7A4C" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="142" y="208" font-size="24" font-weight="700" fill="#1E7A4C" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">ok</text>
+    <line x1="96" y1="230" x2="348" y2="230" stroke="#EDE7DC" stroke-width="1.5"/>
+    <text x="96" y="258" font-size="16" font-weight="600" fill="#12312E">검사했고, 성립한다</text>
+    <text x="96" y="290" font-size="13.5" fill="#6B6459">기준이 실행됐고 기대한 종료 코드가</text>
+    <text x="96" y="310" font-size="13.5" fill="#6B6459">나왔고 선언한 산출물이 있다.</text>
+  </g>
+
+  <!-- warn -->
+  <g>
+    <rect x="400" y="152" width="300" height="176" rx="12" fill="#FFFFFF" stroke="#B8860B" stroke-width="2"/>
+    <rect x="400" y="152" width="300" height="8" rx="4" fill="#B8860B"/>
+    <circle cx="440" cy="200" r="16" fill="#FBF1DA"/>
+    <path d="M 440 191 L 440 201" stroke="#8A6410" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="440" cy="208" r="1.8" fill="#8A6410"/>
+    <text x="470" y="208" font-size="24" font-weight="700" fill="#8A6410" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">warn</text>
+    <line x1="424" y1="230" x2="676" y2="230" stroke="#EDE7DC" stroke-width="1.5"/>
+    <text x="424" y="258" font-size="16" font-weight="600" fill="#12312E">검사했고, 동작한다</text>
+    <text x="424" y="290" font-size="13.5" fill="#6B6459">통과했지만 알아둘 것이 있다.</text>
+    <text x="424" y="310" font-size="13.5" fill="#6B6459">진행을 막지는 않는다.</text>
+  </g>
+
+  <!-- fail -->
+  <g>
+    <rect x="728" y="152" width="300" height="176" rx="12" fill="#FFFFFF" stroke="#B3382C" stroke-width="2"/>
+    <rect x="728" y="152" width="300" height="8" rx="4" fill="#B3382C"/>
+    <circle cx="768" cy="200" r="16" fill="#F8E7E4"/>
+    <path d="M 762 194 L 774 206 M 774 194 L 762 206" stroke="#B3382C" stroke-width="3" stroke-linecap="round"/>
+    <text x="798" y="208" font-size="24" font-weight="700" fill="#B3382C" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">fail</text>
+    <line x1="752" y1="230" x2="1004" y2="230" stroke="#EDE7DC" stroke-width="1.5"/>
+    <text x="752" y="258" font-size="16" font-weight="600" fill="#12312E">검사했고, 깨져 있다</text>
+    <text x="752" y="290" font-size="13.5" fill="#6B6459">기준이 실행됐고 결과가 틀렸다.</text>
+    <text x="752" y="310" font-size="13.5" fill="#6B6459">선언한 산출물이 없어도 fail 이다.</text>
+  </g>
+
+  <!-- unverified -->
+  <g>
+    <rect x="1056" y="152" width="312" height="176" rx="12" fill="#F1F3F5" stroke="#4A5764" stroke-width="2.5"/>
+    <rect x="1056" y="152" width="312" height="8" rx="4" fill="#4A5764"/>
+    <circle cx="1096" cy="200" r="16" fill="#FFFFFF" stroke="#4A5764" stroke-width="1.5" stroke-dasharray="4 3"/>
+    <text x="1096" y="207" font-size="17" font-weight="700" fill="#4A5764" text-anchor="middle">?</text>
+    <text x="1126" y="208" font-size="24" font-weight="700" fill="#2F3A45" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">unverified</text>
+    <line x1="1080" y1="230" x2="1344" y2="230" stroke="#D5DAE0" stroke-width="1.5"/>
+    <text x="1080" y="258" font-size="16" font-weight="700" fill="#12312E">검사하지 않았다</text>
+    <text x="1080" y="290" font-size="13.5" fill="#5A6672">타임아웃, 예산 소진, 실행 불가.</text>
+    <text x="1080" y="310" font-size="13.5" fill="#5A6672">결과를 모르는 상태 그 자체다.</text>
+  </g>
+
+  <!-- ===== The core rule ===== -->
+  <rect x="72" y="364" width="1296" height="196" rx="14" fill="#0E5C55"/>
+  <text x="104" y="404" font-size="22" font-weight="700" fill="#FFFFFF">unverified 는 통과로도 실패로도 반올림하지 않는다</text>
+
+  <!-- three-state (wrong) -->
+  <rect x="104" y="424" width="580" height="112" rx="10" fill="#0A4A44"/>
+  <text x="128" y="452" font-size="14" font-weight="700" fill="#8FBDB6" letter-spacing="1">3상태 어휘라면</text>
+
+  <rect x="128" y="466" width="128" height="34" rx="6" fill="#123F3A" stroke="#2F6B64" stroke-width="1.2"/>
+  <text x="192" y="488" font-size="13" fill="#9FCCC4" text-anchor="middle">확인 못 했다</text>
+
+  <path d="M 260 483 L 282 470 M 260 483 L 282 496" stroke="#5E938C" stroke-width="2" fill="none"/>
+  <path d="M 282 470 L 272 470 L 278 477 Z" fill="#5E938C"/>
+  <path d="M 282 496 L 272 496 L 278 489 Z" fill="#5E938C"/>
+
+  <rect x="292" y="452" width="176" height="30" rx="6" fill="#123F3A" stroke="#2F6B64" stroke-width="1.2"/>
+  <text x="380" y="472" font-size="13" fill="#9FCCC4" text-anchor="middle">통과로 반올림</text>
+  <rect x="292" y="490" width="176" height="30" rx="6" fill="#123F3A" stroke="#2F6B64" stroke-width="1.2"/>
+  <text x="380" y="510" font-size="13" fill="#9FCCC4" text-anchor="middle">실패로 반올림</text>
+
+  <text x="484" y="465" font-size="12" fill="#7FB0A9">시간 초과된 테스트가</text>
+  <text x="484" y="481" font-size="12" fill="#7FB0A9">통과로 보고된다</text>
+  <text x="484" y="504" font-size="12" fill="#7FB0A9">아직 못 도는 검사가 결함이 되어</text>
+  <text x="484" y="520" font-size="12" fill="#7FB0A9">신뢰를 잃는다</text>
+
+  <!-- four-state (right) -->
+  <rect x="716" y="424" width="620" height="112" rx="10" fill="#FFFFFF"/>
+  <text x="744" y="452" font-size="14" font-weight="700" fill="#0E5C55" letter-spacing="1">gatekit 의 4상태</text>
+
+  <rect x="744" y="466" width="128" height="34" rx="6" fill="#F1F3F5" stroke="#4A5764" stroke-width="1.4"/>
+  <text x="808" y="488" font-size="13" fill="#2F3A45" text-anchor="middle">확인 못 했다</text>
+
+  <path d="M 880 483 L 912 483" stroke="#4A5764" stroke-width="2"/>
+  <path d="M 912 483 L 904 478 L 904 488 Z" fill="#4A5764"/>
+
+  <rect x="920" y="464" width="180" height="38" rx="6" fill="#4A5764"/>
+  <text x="1010" y="488" font-size="14.5" font-weight="700" fill="#FFFFFF" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">unverified</text>
+
+  <text x="744" y="522" font-size="12.5" fill="#4A443B">네 번째 상태가 그 반올림을 없앤다. 이게 없으면 타임아웃 한 번으로 미검증 코드가 "완료"로 보고된다.</text>
+
+  <!-- ===== Real example ===== -->
+  <text x="72" y="616" font-size="20" font-weight="700" fill="#12312E">실제 사례 — Quicknote 6단계 verify</text>
+  <text x="72" y="642" font-size="14.5" fill="#6B6459">독립 평가자가 기준 8개를 실행했다. 집계 판정은 ok 가 아니라 unverified 였다.</text>
+
+  <!-- criteria bar -->
+  <rect x="72" y="664" width="640" height="52" rx="8" fill="#FFFFFF" stroke="#DCD5C8" stroke-width="1.5"/>
+  <text x="96" y="696" font-size="14" fill="#6B6459">기준 8개</text>
+
+  <rect x="176" y="676" width="42" height="28" rx="4" fill="#1E7A4C"/>
+  <rect x="222" y="676" width="42" height="28" rx="4" fill="#1E7A4C"/>
+  <rect x="268" y="676" width="42" height="28" rx="4" fill="#1E7A4C"/>
+  <rect x="314" y="676" width="42" height="28" rx="4" fill="#1E7A4C"/>
+  <rect x="360" y="676" width="42" height="28" rx="4" fill="#1E7A4C"/>
+  <rect x="406" y="676" width="42" height="28" rx="4" fill="#1E7A4C"/>
+  <rect x="452" y="676" width="42" height="28" rx="4" fill="#4A5764"/>
+  <rect x="498" y="676" width="42" height="28" rx="4" fill="#4A5764"/>
+
+  <text x="560" y="690" font-size="13" fill="#1E7A4C">6 × ok</text>
+  <text x="560" y="708" font-size="13" fill="#2F3A45">2 × unverified</text>
+
+  <!-- aggregate -->
+  <path d="M 728 690 L 760 690" stroke="#C9C1B2" stroke-width="2.5"/>
+  <path d="M 760 690 L 750 684 L 750 696 Z" fill="#C9C1B2"/>
+  <rect x="772" y="664" width="264" height="52" rx="8" fill="#4A5764"/>
+  <text x="796" y="686" font-size="12.5" fill="#B9C3CD">집계 판정</text>
+  <text x="796" y="706" font-size="17" font-weight="700" fill="#FFFFFF" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">unverified</text>
+
+  <text x="1060" y="682" font-size="13" fill="#6B6459">집계 규칙 — 하나라도 fail 이면 fail,</text>
+  <text x="1060" y="702" font-size="13" fill="#6B6459">아니면 하나라도 unverified 면 unverified,</text>
+  <text x="1060" y="722" font-size="13" fill="#6B6459">아니면 warn, 그 외 ok.</text>
+
+  <!-- ===== Table of the two timed-out criteria ===== -->
+  <rect x="72" y="744" width="800" height="140" rx="10" fill="#FFFFFF" stroke="#4A5764" stroke-width="1.8"/>
+  <line x1="72" y1="782" x2="872" y2="782" stroke="#D5DAE0" stroke-width="1.5"/>
+  <line x1="72" y1="832" x2="872" y2="832" stroke="#EDE7DC" stroke-width="1.2"/>
+
+  <text x="96" y="772" font-size="13" font-weight="700" fill="#6B6459">기준</text>
+  <text x="452" y="772" font-size="13" font-weight="700" fill="#6B6459">판정</text>
+  <text x="596" y="772" font-size="13" font-weight="700" fill="#6B6459">실측</text>
+  <text x="756" y="772" font-size="13" font-weight="700" fill="#6B6459">당시 예산</text>
+
+  <text x="96" y="812" font-size="13.5" fill="#2E2A24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">task-note-update-works</text>
+  <rect x="452" y="796" width="104" height="24" rx="5" fill="#4A5764"/>
+  <text x="504" y="813" font-size="12.5" font-weight="700" fill="#FFFFFF" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">unverified</text>
+  <text x="596" y="812" font-size="13.5" fill="#2E2A24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">6.61~6.65s</text>
+  <text x="756" y="812" font-size="13.5" fill="#2E2A24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">5s</text>
+
+  <text x="96" y="862" font-size="13.5" fill="#2E2A24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">task-full-suite-gate-works</text>
+  <rect x="452" y="846" width="104" height="24" rx="5" fill="#4A5764"/>
+  <text x="504" y="863" font-size="12.5" font-weight="700" fill="#FFFFFF" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">unverified</text>
+  <text x="596" y="862" font-size="13.5" fill="#2E2A24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">24.5s</text>
+  <text x="756" y="862" font-size="13.5" fill="#2E2A24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">10s</text>
+
+  <!-- ===== The point ===== -->
+  <rect x="896" y="744" width="472" height="140" rx="10" fill="#F1F3F5" stroke="#4A5764" stroke-width="1.8"/>
+  <text x="924" y="778" font-size="16" font-weight="700" fill="#12312E">구현 결함이 아니었다</text>
+  <text x="924" y="806" font-size="13.5" fill="#3E4A56">두 테스트 모두 손으로 돌리면 통과했다.</text>
+  <text x="924" y="828" font-size="13.5" fill="#3E4A56">예산이 실측보다 작았을 뿐이다.</text>
+  <text x="924" y="858" font-size="13.5" font-weight="700" fill="#2F3A45">그래도 ok 로 올리지 않았다. 검사가 끝나지</text>
+  <text x="924" y="878" font-size="13.5" font-weight="700" fill="#2F3A45">못했으므로 unverified 다.</text>
+
+  <!-- ===== Footer ===== -->
+  <text x="72" y="924" font-size="13.5" fill="#6B6459">이후 실측 49초를 근거로 gatekit-budget 을 180초로 선언하고 재승인하자 8/8 ok, 총 49.4초가 나왔다. 추측이 아니라 측정 후 선언이다.</text>
+
+</svg>

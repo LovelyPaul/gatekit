@@ -1,5 +1,7 @@
 # 핵심 개념
 
+![4상태 판정 어휘](../assets/verdicts.svg)
+
 ## 4상태 판정 어휘
 
 gatekit의 모든 검사는 `ok` / `warn` / `fail` / `unverified` 중 하나를 낸다. JSON에는 언제나 이 영어 토큰이 들어가고, 화면에 보이는 라벨만 언어에 따라 바뀐다.

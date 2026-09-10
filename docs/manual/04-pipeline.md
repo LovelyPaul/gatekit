@@ -1,5 +1,7 @@
 # 파이프라인 전체 흐름
 
+![gatekit 파이프라인](../assets/pipeline.svg)
+
 ## 전체 다이어그램
 
 ```text

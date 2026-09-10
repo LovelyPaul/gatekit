@@ -1,0 +1,186 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="880" viewBox="0 0 1440 880" font-family="-apple-system, BlinkMacSystemFont, &quot;Apple SD Gothic Neo&quot;, &quot;Noto Sans KR&quot;, &quot;Malgun Gothic&quot;, sans-serif">
+
+  <rect x="0" y="0" width="1440" height="880" fill="#FBF9F5"/>
+
+  <!-- ===== Title ===== -->
+  <text x="72" y="72" font-size="34" font-weight="700" fill="#12312E">gatekit 파이프라인</text>
+  <text x="72" y="104" font-size="17" fill="#6B6459">한 문장 아이디어에서 검증된 완료까지, 여섯 단계</text>
+
+  <!-- ===== Side panel: doctor / setup ===== -->
+  <rect x="1054" y="46" width="314" height="118" rx="10" fill="#FFFFFF" stroke="#DCD5C8" stroke-width="1.5"/>
+  <rect x="1054" y="46" width="4" height="118" rx="2" fill="#8C8577"/>
+  <text x="1078" y="76" font-size="14" font-weight="700" fill="#6B6459" letter-spacing="1.2">파이프라인 밖</text>
+  <text x="1078" y="106" font-size="16" font-weight="600" fill="#12312E" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">/gatekit:doctor</text>
+  <text x="1262" y="106" font-size="13" fill="#6B6459">아무 때나</text>
+  <text x="1078" y="136" font-size="16" font-weight="600" fill="#12312E" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">/gatekit:setup</text>
+  <text x="1262" y="136" font-size="13" fill="#6B6459">프로젝트 최초 1회</text>
+  <text x="1078" y="156" font-size="13" fill="#8C8577">설치·상태 7축 진단 / config·워커 점검</text>
+
+  <!-- ===== Rail ===== -->
+  <line x1="72" y1="286" x2="1368" y2="286" stroke="#DCD5C8" stroke-width="2"/>
+
+  <!-- ===== Stage 1 : interview ===== -->
+  <g>
+    <rect x="72" y="196" width="196" height="180" rx="12" fill="#FFFFFF" stroke="#0E5C55" stroke-width="2"/>
+    <rect x="72" y="196" width="196" height="42" rx="12" fill="#0E5C55"/>
+    <rect x="72" y="226" width="196" height="12" fill="#0E5C55"/>
+    <circle cx="98" cy="217" r="12" fill="#FFFFFF"/>
+    <text x="98" y="222" font-size="14" font-weight="700" fill="#0E5C55" text-anchor="middle">1</text>
+    <text x="120" y="223" font-size="17" font-weight="700" fill="#FFFFFF">interview</text>
+    <text x="90" y="266" font-size="13" fill="#0E5C55" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">/gatekit:interview</text>
+    <line x1="90" y1="282" x2="250" y2="282" stroke="#EDE7DC" stroke-width="1.5"/>
+    <text x="90" y="304" font-size="12" fill="#8C8577" letter-spacing="0.8">산출물</text>
+    <text x="90" y="326" font-size="13.5" fill="#2E2A24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">spec/01-prd.md</text>
+    <text x="90" y="346" font-size="11.5" fill="#2E2A24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">spec/03-architecture.md</text>
+    <text x="90" y="366" font-size="12" fill="#8C8577">문제·목표·수용 기준·가정 원장</text>
+  </g>
+  <path d="M 268 286 L 296 286" stroke="#0E5C55" stroke-width="2.5" fill="none"/>
+  <path d="M 296 286 L 288 281 L 288 291 Z" fill="#0E5C55"/>
+
+  <!-- ===== Stage 2 : mockup (optional) ===== -->
+  <g>
+    <rect x="300" y="196" width="196" height="180" rx="12" fill="#FFFFFF" stroke="#0E5C55" stroke-width="2" stroke-dasharray="7 5"/>
+    <rect x="300" y="196" width="196" height="42" rx="12" fill="#4E8C84"/>
+    <rect x="300" y="226" width="196" height="12" fill="#4E8C84"/>
+    <circle cx="326" cy="217" r="12" fill="#FFFFFF"/>
+    <text x="326" y="222" font-size="14" font-weight="700" fill="#4E8C84" text-anchor="middle">2</text>
+    <text x="348" y="223" font-size="17" font-weight="700" fill="#FFFFFF">mockup</text>
+    <rect x="426" y="206" width="58" height="22" rx="11" fill="#FFFFFF" fill-opacity="0.26" stroke="#FFFFFF" stroke-width="1.1"/>
+    <text x="455" y="222" font-size="11.5" font-weight="700" fill="#FFFFFF" text-anchor="middle">선택</text>
+    <text x="318" y="266" font-size="13" fill="#0E5C55" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">/gatekit:mockup</text>
+    <line x1="318" y1="282" x2="478" y2="282" stroke="#EDE7DC" stroke-width="1.5"/>
+    <text x="318" y="304" font-size="12" fill="#8C8577" letter-spacing="0.8">산출물</text>
+    <text x="318" y="326" font-size="12.5" fill="#2E2A24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">spec/02-screens.md</text>
+    <text x="318" y="346" font-size="13.5" fill="#2E2A24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">spec/tokens.json</text>
+    <text x="318" y="366" font-size="12" fill="#8C8577">01의 가정 원장에 gap 행 추가</text>
+  </g>
+  <path d="M 496 286 L 524 286" stroke="#0E5C55" stroke-width="2.5" fill="none"/>
+  <path d="M 524 286 L 516 281 L 516 291 Z" fill="#0E5C55"/>
+
+  <!-- ===== Stage 3 : tasks ===== -->
+  <g>
+    <rect x="528" y="196" width="196" height="180" rx="12" fill="#FFFFFF" stroke="#0E5C55" stroke-width="2"/>
+    <rect x="528" y="196" width="196" height="42" rx="12" fill="#0E5C55"/>
+    <rect x="528" y="226" width="196" height="12" fill="#0E5C55"/>
+    <circle cx="554" cy="217" r="12" fill="#FFFFFF"/>
+    <text x="554" y="222" font-size="14" font-weight="700" fill="#0E5C55" text-anchor="middle">3</text>
+    <text x="576" y="223" font-size="17" font-weight="700" fill="#FFFFFF">tasks</text>
+    <text x="546" y="266" font-size="13" fill="#0E5C55" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">/gatekit:tasks</text>
+    <line x1="546" y1="282" x2="706" y2="282" stroke="#EDE7DC" stroke-width="1.5"/>
+    <text x="546" y="304" font-size="12" fill="#8C8577" letter-spacing="0.8">산출물</text>
+    <text x="546" y="326" font-size="13.5" fill="#2E2A24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">spec/04-tasks.md</text>
+    <text x="546" y="346" font-size="12" fill="#8C8577">gatekit-task 펜스로 작업 분해</text>
+    <text x="546" y="366" font-size="12" fill="#8C8577">게이트 없음. 계획만 한다</text>
+  </g>
+  <path d="M 724 286 L 752 286" stroke="#0E5C55" stroke-width="2.5" fill="none"/>
+  <path d="M 752 286 L 744 281 L 744 291 Z" fill="#0E5C55"/>
+
+  <!-- ===== Stage 4 : gate (human approval) ===== -->
+  <g>
+    <rect x="756" y="184" width="196" height="204" rx="12" fill="#FFFFFF" stroke="#B8860B" stroke-width="2.5"/>
+    <rect x="756" y="184" width="196" height="42" rx="12" fill="#8A6410"/>
+    <rect x="756" y="214" width="196" height="12" fill="#8A6410"/>
+    <circle cx="782" cy="205" r="12" fill="#FFFFFF"/>
+    <text x="782" y="210" font-size="14" font-weight="700" fill="#8A6410" text-anchor="middle">4</text>
+    <text x="804" y="211" font-size="17" font-weight="700" fill="#FFFFFF">gate</text>
+    <text x="774" y="254" font-size="13" fill="#8A6410" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">/gatekit:gate</text>
+
+    <rect x="774" y="266" width="160" height="30" rx="6" fill="#FBF1DA" stroke="#D9AE4A" stroke-width="1.2"/>
+    <text x="854" y="286" font-size="14" font-weight="700" fill="#8A6410" text-anchor="middle">사람이 승인한다</text>
+
+    <text x="774" y="320" font-size="12" fill="#8C8577" letter-spacing="0.8">산출물</text>
+    <text x="774" y="340" font-size="12" fill="#2E2A24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">spec/05-gate.md</text>
+    <text x="774" y="358" font-size="12" fill="#2E2A24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">.gatekit/contract.json</text>
+    <text x="774" y="376" font-size="12" fill="#2E2A24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">.gatekit/approvals.json</text>
+  </g>
+  <path d="M 952 286 L 980 286" stroke="#0E5C55" stroke-width="2.5" fill="none"/>
+  <path d="M 980 286 L 972 281 L 972 291 Z" fill="#0E5C55"/>
+
+  <!-- ===== Stage 5 : build ===== -->
+  <g>
+    <rect x="984" y="196" width="196" height="180" rx="12" fill="#FFFFFF" stroke="#0E5C55" stroke-width="2"/>
+    <rect x="984" y="196" width="196" height="42" rx="12" fill="#0E5C55"/>
+    <rect x="984" y="226" width="196" height="12" fill="#0E5C55"/>
+    <circle cx="1010" cy="217" r="12" fill="#FFFFFF"/>
+    <text x="1010" y="222" font-size="14" font-weight="700" fill="#0E5C55" text-anchor="middle">5</text>
+    <text x="1032" y="223" font-size="17" font-weight="700" fill="#FFFFFF">build</text>
+    <text x="1002" y="266" font-size="13" fill="#0E5C55" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">/gatekit:build</text>
+    <line x1="1002" y1="282" x2="1162" y2="282" stroke="#EDE7DC" stroke-width="1.5"/>
+    <text x="1002" y="304" font-size="12" fill="#8C8577" letter-spacing="0.8">산출물</text>
+    <text x="1002" y="326" font-size="11.5" fill="#2E2A24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">.gatekit/jobs/&lt;job_id&gt;/</text>
+    <text x="1002" y="346" font-size="12.5" fill="#2E2A24" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">spec/PROGRESS.md</text>
+    <text x="1002" y="366" font-size="12" fill="#8C8577">워커가 코드를 쓴다</text>
+  </g>
+  <path d="M 1180 286 L 1208 286" stroke="#0E5C55" stroke-width="2.5" fill="none"/>
+  <path d="M 1208 286 L 1200 281 L 1200 291 Z" fill="#0E5C55"/>
+
+  <!-- ===== Stage 6 : verify ===== -->
+  <g>
+    <rect x="1212" y="196" width="156" height="180" rx="12" fill="#FFFFFF" stroke="#0E5C55" stroke-width="2"/>
+    <rect x="1212" y="196" width="156" height="42" rx="12" fill="#0E5C55"/>
+    <rect x="1212" y="226" width="156" height="12" fill="#0E5C55"/>
+    <circle cx="1238" cy="217" r="12" fill="#FFFFFF"/>
+    <text x="1238" y="222" font-size="14" font-weight="700" fill="#0E5C55" text-anchor="middle">6</text>
+    <text x="1260" y="223" font-size="17" font-weight="700" fill="#FFFFFF">verify</text>
+    <text x="1230" y="266" font-size="13" fill="#0E5C55" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">/gatekit:verify</text>
+    <line x1="1230" y1="282" x2="1350" y2="282" stroke="#EDE7DC" stroke-width="1.5"/>
+    <text x="1230" y="304" font-size="12" fill="#8C8577" letter-spacing="0.8">산출물</text>
+    <text x="1230" y="326" font-size="13" fill="#2E2A24">독립 평가자 판정표</text>
+    <text x="1230" y="346" font-size="13" fill="#2E2A24">마지막 검증 기록</text>
+    <text x="1230" y="366" font-size="12" fill="#8C8577">producer ≠ evaluator</text>
+  </g>
+
+  <!-- ===== Write-gate band ===== -->
+  <!-- closed segment -->
+  <rect x="72" y="452" width="782" height="52" rx="8" fill="#F3EEE4" stroke="#DCD5C8" stroke-width="1.5"/>
+  <text x="96" y="474" font-size="14.5" font-weight="700" fill="#6B6459">쓰기 게이트 — 닫힘</text>
+  <text x="96" y="494" font-size="13" fill="#8C8577">소스 파일 수정 거부. spec/** · .gatekit/** · docs/** · README* · 루트 *.md 만 쓸 수 있다</text>
+
+  <!-- open segment -->
+  <rect x="866" y="452" width="502" height="52" rx="8" fill="#E4F0EC" stroke="#0E5C55" stroke-width="1.8"/>
+  <text x="890" y="474" font-size="14.5" font-weight="700" fill="#0E5C55">쓰기 게이트 — 열림</text>
+  <text x="890" y="494" font-size="13" fill="#3A5F59">워커는 자기 태스크의 write_scope 안에서만 쓴다 (규칙 b, 더 엄격)</text>
+
+  <!-- approval drop line -->
+  <line x1="854" y1="388" x2="854" y2="452" stroke="#B8860B" stroke-width="2.5" stroke-dasharray="6 4"/>
+  <path d="M 854 452 L 849 442 L 859 442 Z" fill="#B8860B"/>
+  <rect x="700" y="400" width="308" height="34" rx="17" fill="#FBF1DA" stroke="#D9AE4A" stroke-width="1.5"/>
+  <text x="854" y="422" font-size="14.5" font-weight="700" fill="#8A6410" text-anchor="middle">승인이 여기서 쓰기 게이트를 연다</text>
+
+  <!-- Stop gate marker at the end -->
+  <line x1="1290" y1="504" x2="1290" y2="556" stroke="#0E5C55" stroke-width="2.5"/>
+  <path d="M 1290 556 L 1285 546 L 1295 546 Z" fill="#0E5C55"/>
+
+  <!-- ===== Bottom notes ===== -->
+  <rect x="72" y="568" width="398" height="122" rx="10" fill="#FFFFFF" stroke="#DCD5C8" stroke-width="1.5"/>
+  <rect x="72" y="568" width="4" height="122" rx="2" fill="#0E5C55"/>
+  <text x="96" y="598" font-size="15" font-weight="700" fill="#12312E">되돌아가는 경로</text>
+  <text x="96" y="624" font-size="13" fill="#4A443B">05-gate.md 를 고치면 승인이 만료되고</text>
+  <text x="96" y="644" font-size="13" fill="#4A443B">계약이 stale이 된다. 다시 파생하고 다시 승인한다.</text>
+  <text x="96" y="670" font-size="13" fill="#4A443B">verify 가 ok 가 아니면 build 로 되돌린다.</text>
+
+  <rect x="490" y="568" width="398" height="122" rx="10" fill="#FFFFFF" stroke="#DCD5C8" stroke-width="1.5"/>
+  <rect x="490" y="568" width="4" height="122" rx="2" fill="#B3382C"/>
+  <text x="514" y="598" font-size="15" font-weight="700" fill="#12312E">3회 연속 실패</text>
+  <text x="514" y="624" font-size="13" fill="#4A443B">태스크가 3회 연속 실패하면 build 는 재위임을</text>
+  <text x="514" y="644" font-size="13" fill="#4A443B">멈추고 spec/RECOVERY.md 에 진단을 쓴 뒤 정지한다.</text>
+  <text x="514" y="670" font-size="13" fill="#4A443B">코드를 직접 고치지 않는다.</text>
+
+  <rect x="908" y="568" width="460" height="122" rx="10" fill="#FFFFFF" stroke="#0E5C55" stroke-width="1.8"/>
+  <rect x="908" y="568" width="4" height="122" rx="2" fill="#0E5C55"/>
+  <text x="932" y="598" font-size="15" font-weight="700" fill="#12312E">Stop 게이트가 계약을 실행한다</text>
+  <text x="932" y="624" font-size="13" fill="#4A443B">세션을 끝내려 하면 완료 계약이 실행된다.</text>
+  <text x="932" y="644" font-size="13" fill="#4A443B">fail 이나 unverified 가 있으면 최대 3회까지 종료를 막는다.</text>
+  <text x="932" y="670" font-size="13" fill="#4A443B">build 가 전부 passed 여도 계약 통과와는 다르다.</text>
+
+  <!-- ===== Footer ===== -->
+  <line x1="72" y1="736" x2="1368" y2="736" stroke="#EDE7DC" stroke-width="1.5"/>
+  <text x="72" y="768" font-size="13" fill="#8C8577">단계마다 걸리는 게이트</text>
+  <text x="72" y="796" font-size="13.5" fill="#4A443B">1~2단계 question 게이트가 질문 예산을 관리한다 (interview 기본 2회)</text>
+  <text x="72" y="820" font-size="13.5" fill="#4A443B">3단계 게이트 없음</text>
+  <text x="72" y="844" font-size="13.5" fill="#4A443B">4단계 승인이 쓰기 게이트를 연다</text>
+  <text x="620" y="796" font-size="13.5" fill="#4A443B">5단계 write 게이트가 write_scope 를 강제한다</text>
+  <text x="620" y="820" font-size="13.5" fill="#4A443B">6단계 spawn 게이트가 평가자 범위를 검사한다</text>
+  <text x="620" y="844" font-size="13.5" fill="#4A443B">종료 시 stop 게이트가 완료 계약을 실행한다</text>
+
+</svg>

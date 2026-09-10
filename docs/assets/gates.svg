@@ -1,0 +1,167 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="920" viewBox="0 0 1440 920" font-family="-apple-system, BlinkMacSystemFont, &quot;Apple SD Gothic Neo&quot;, &quot;Noto Sans KR&quot;, &quot;Malgun Gothic&quot;, sans-serif">
+
+  <rect x="0" y="0" width="1440" height="920" fill="#FBF9F5"/>
+
+  <!-- ===== Title ===== -->
+  <text x="72" y="72" font-size="34" font-weight="700" fill="#12312E">훅 게이트 5개</text>
+  <text x="72" y="104" font-size="17" fill="#6B6459">Claude Code 세션 한 번에서 게이트가 걸리는 지점</text>
+
+  <!-- legend -->
+  <rect x="1084" y="46" width="284" height="66" rx="10" fill="#FFFFFF" stroke="#DCD5C8" stroke-width="1.5"/>
+  <rect x="1106" y="66" width="14" height="14" rx="3" fill="#B3382C"/>
+  <text x="1130" y="78" font-size="14" fill="#4A443B">차단한다</text>
+  <rect x="1226" y="66" width="14" height="14" rx="3" fill="#8C8577"/>
+  <text x="1250" y="78" font-size="14" fill="#4A443B">차단하지 않는다</text>
+  <text x="1106" y="100" font-size="13" fill="#8C8577">plugin/hooks/hooks.json 에 등록된다</text>
+
+  <!-- ===== Session timeline rail ===== -->
+  <text x="72" y="158" font-size="13" fill="#8C8577" letter-spacing="1">세션 타임라인</text>
+  <line x1="96" y1="196" x2="1344" y2="196" stroke="#C9C1B2" stroke-width="3"/>
+  <path d="M 1344 196 L 1332 189 L 1332 203 Z" fill="#C9C1B2"/>
+  <text x="96" y="184" font-size="13" fill="#8C8577">세션 시작</text>
+  <text x="1344" y="184" font-size="13" fill="#8C8577" text-anchor="end">세션 종료</text>
+
+  <!-- ===== Gate 1 : prompt ===== -->
+  <circle cx="180" cy="196" r="9" fill="#8C8577"/>
+  <line x1="180" y1="205" x2="180" y2="248" stroke="#C9C1B2" stroke-width="2"/>
+  <g>
+    <rect x="72" y="248" width="228" height="192" rx="12" fill="#FFFFFF" stroke="#DCD5C8" stroke-width="1.8"/>
+    <rect x="72" y="248" width="228" height="6" rx="3" fill="#8C8577"/>
+    <text x="96" y="286" font-size="20" font-weight="700" fill="#12312E">prompt</text>
+    <rect x="188" y="270" width="90" height="22" rx="11" fill="#EFEBE2"/>
+    <text x="233" y="286" font-size="12.5" font-weight="700" fill="#6B6459" text-anchor="middle">차단 안 함</text>
+    <text x="96" y="312" font-size="13" fill="#0E5C55" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">UserPromptSubmit</text>
+    <line x1="96" y1="326" x2="276" y2="326" stroke="#EDE7DC" stroke-width="1.5"/>
+    <text x="96" y="350" font-size="13.5" fill="#2E2A24">막는 것 — 없다</text>
+    <text x="96" y="376" font-size="13" fill="#6B6459">세션 원장을 만들고 출력 언어를</text>
+    <text x="96" y="396" font-size="13" fill="#6B6459">감지한다. 600자 이내 컨텍스트</text>
+    <text x="96" y="416" font-size="13" fill="#6B6459">블록을 대화에 주입한다.</text>
+  </g>
+
+  <!-- ===== Gate 2 : write ===== -->
+  <circle cx="440" cy="196" r="9" fill="#B3382C"/>
+  <line x1="440" y1="205" x2="440" y2="248" stroke="#C9C1B2" stroke-width="2"/>
+  <g>
+    <rect x="332" y="248" width="228" height="192" rx="12" fill="#FFFFFF" stroke="#B3382C" stroke-width="1.8"/>
+    <rect x="332" y="248" width="228" height="6" rx="3" fill="#B3382C"/>
+    <text x="356" y="286" font-size="20" font-weight="700" fill="#12312E">write</text>
+    <rect x="466" y="270" width="70" height="22" rx="11" fill="#F8E7E4"/>
+    <text x="501" y="286" font-size="12.5" font-weight="700" fill="#B3382C" text-anchor="middle">차단한다</text>
+    <text x="356" y="312" font-size="13" fill="#0E5C55" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">PreToolUse</text>
+    <line x1="356" y1="326" x2="536" y2="326" stroke="#EDE7DC" stroke-width="1.5"/>
+    <text x="356" y="350" font-size="13.5" fill="#2E2A24">막는 것 — 승인 전 소스 쓰기</text>
+    <text x="356" y="376" font-size="13" fill="#6B6459">Write · Edit · MultiEdit ·</text>
+    <text x="356" y="396" font-size="13" fill="#6B6459">NotebookEdit 직전. 규칙 (a) 스펙</text>
+    <text x="356" y="416" font-size="13" fill="#6B6459">먼저, 규칙 (b) 태스크 쓰기 범위.</text>
+  </g>
+
+  <!-- ===== Gate 3 : spawn ===== -->
+  <circle cx="700" cy="196" r="9" fill="#B3382C"/>
+  <line x1="700" y1="205" x2="700" y2="248" stroke="#C9C1B2" stroke-width="2"/>
+  <g>
+    <rect x="592" y="248" width="228" height="192" rx="12" fill="#FFFFFF" stroke="#B3382C" stroke-width="1.8"/>
+    <rect x="592" y="248" width="228" height="6" rx="3" fill="#B3382C"/>
+    <text x="616" y="286" font-size="20" font-weight="700" fill="#12312E">spawn</text>
+    <rect x="726" y="270" width="70" height="22" rx="11" fill="#F8E7E4"/>
+    <text x="761" y="286" font-size="12.5" font-weight="700" fill="#B3382C" text-anchor="middle">차단한다</text>
+    <text x="616" y="312" font-size="13" fill="#0E5C55" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">PreToolUse</text>
+    <line x1="616" y1="326" x2="796" y2="326" stroke="#EDE7DC" stroke-width="1.5"/>
+    <text x="616" y="350" font-size="13" fill="#2E2A24">막는 것 — 범위 없는 서브에이전트</text>
+    <text x="616" y="376" font-size="12.5" fill="#6B6459">Agent · Task 직전. gatekit-scope</text>
+    <text x="616" y="396" font-size="13" fill="#6B6459">펜스를 JSON으로 파싱한다.</text>
+    <text x="616" y="416" font-size="13" fill="#6B6459">활성 범위와 겹치면 거부한다.</text>
+  </g>
+
+  <!-- ===== Gate 4 : question ===== -->
+  <circle cx="960" cy="196" r="9" fill="#8C8577"/>
+  <line x1="960" y1="205" x2="960" y2="248" stroke="#C9C1B2" stroke-width="2"/>
+  <g>
+    <rect x="852" y="248" width="228" height="192" rx="12" fill="#FFFFFF" stroke="#DCD5C8" stroke-width="1.8"/>
+    <rect x="852" y="248" width="228" height="6" rx="3" fill="#8C8577"/>
+    <text x="876" y="286" font-size="20" font-weight="700" fill="#12312E">question</text>
+    <rect x="968" y="270" width="90" height="22" rx="11" fill="#EFEBE2"/>
+    <text x="1013" y="286" font-size="12.5" font-weight="700" fill="#6B6459" text-anchor="middle">차단 안 함</text>
+    <text x="876" y="312" font-size="13" fill="#0E5C55" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">PostToolUse</text>
+    <line x1="876" y1="326" x2="1056" y2="326" stroke="#EDE7DC" stroke-width="1.5"/>
+    <text x="876" y="350" font-size="13.5" fill="#2E2A24">막는 것 — 없다. 채널이 없다</text>
+    <text x="876" y="376" font-size="12.5" fill="#6B6459">AskUserQuestion 직후. 질문 수를</text>
+    <text x="876" y="396" font-size="12.5" fill="#6B6459">센다. interview 기본 2회, 초과하면</text>
+    <text x="876" y="416" font-size="13" fill="#6B6459">budget_exceeded 를 기록한다.</text>
+  </g>
+
+  <!-- ===== Gate 5 : stop ===== -->
+  <circle cx="1220" cy="196" r="9" fill="#B3382C"/>
+  <line x1="1220" y1="205" x2="1220" y2="248" stroke="#C9C1B2" stroke-width="2"/>
+  <g>
+    <rect x="1112" y="248" width="256" height="192" rx="12" fill="#FFFFFF" stroke="#B3382C" stroke-width="1.8"/>
+    <rect x="1112" y="248" width="256" height="6" rx="3" fill="#B3382C"/>
+    <text x="1136" y="286" font-size="20" font-weight="700" fill="#12312E">stop</text>
+    <rect x="1230" y="270" width="114" height="22" rx="11" fill="#F8E7E4"/>
+    <text x="1287" y="286" font-size="12.5" font-weight="700" fill="#B3382C" text-anchor="middle">차단한다 · 최대 3회</text>
+    <text x="1136" y="312" font-size="13" fill="#0E5C55" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">Stop</text>
+    <line x1="1136" y1="326" x2="1344" y2="326" stroke="#EDE7DC" stroke-width="1.5"/>
+    <text x="1136" y="350" font-size="13.5" fill="#2E2A24">막는 것 — 계약 미통과 상태의 종료</text>
+    <text x="1136" y="376" font-size="13" fill="#6B6459">세션이 끝나려 할 때 완료 계약을</text>
+    <text x="1136" y="396" font-size="13" fill="#6B6459">실행한다. fail 이나 unverified 가</text>
+    <text x="1136" y="416" font-size="13" fill="#6B6459">하나라도 있으면 종료를 막는다.</text>
+  </g>
+
+  <!-- ===== Stop gate 3-block cap detail ===== -->
+  <rect x="760" y="504" width="608" height="182" rx="12" fill="#FFFFFF" stroke="#B3382C" stroke-width="1.8"/>
+  <text x="788" y="540" font-size="18" font-weight="700" fill="#12312E">stop 게이트의 3회 차단 상한</text>
+
+  <!-- block counter -->
+  <rect x="788" y="562" width="128" height="42" rx="8" fill="#F8E7E4" stroke="#E0A79E" stroke-width="1.2"/>
+  <text x="852" y="580" font-size="12" fill="#B3382C" text-anchor="middle">1회 차단</text>
+  <text x="852" y="597" font-size="12.5" fill="#8A3A30" text-anchor="middle">실패 기준 안내</text>
+
+  <path d="M 924 583 L 946 583" stroke="#C9C1B2" stroke-width="2"/>
+  <path d="M 946 583 L 938 578 L 938 588 Z" fill="#C9C1B2"/>
+
+  <rect x="954" y="562" width="128" height="42" rx="8" fill="#F8E7E4" stroke="#E0A79E" stroke-width="1.2"/>
+  <text x="1018" y="580" font-size="12" fill="#B3382C" text-anchor="middle">2회 차단</text>
+  <text x="1018" y="597" font-size="12.5" fill="#8A3A30" text-anchor="middle">실패 기준 안내</text>
+
+  <path d="M 1090 583 L 1112 583" stroke="#C9C1B2" stroke-width="2"/>
+  <path d="M 1112 583 L 1104 578 L 1104 588 Z" fill="#C9C1B2"/>
+
+  <rect x="1120" y="562" width="128" height="42" rx="8" fill="#F8E7E4" stroke="#E0A79E" stroke-width="1.2"/>
+  <text x="1184" y="580" font-size="12" fill="#B3382C" text-anchor="middle">3회 차단</text>
+  <text x="1184" y="597" font-size="12.5" fill="#8A3A30" text-anchor="middle">실패 기준 안내</text>
+
+  <path d="M 1256 583 L 1278 583" stroke="#C9C1B2" stroke-width="2"/>
+  <path d="M 1278 583 L 1270 578 L 1270 588 Z" fill="#C9C1B2"/>
+
+  <rect x="1286" y="562" width="58" height="42" rx="8" fill="#EFEBE2" stroke="#C9C1B2" stroke-width="1.2"/>
+  <text x="1315" y="588" font-size="12.5" font-weight="700" fill="#6B6459" text-anchor="middle">통과</text>
+
+  <text x="788" y="634" font-size="13.5" fill="#4A443B">block_count 가 3에 도달하면 게이트는 물러나고 종료를 허용한다.</text>
+  <text x="788" y="656" font-size="13.5" fill="#4A443B">만족시킬 수 없는 게이트가 사용자를 인질로 잡으면 안 되기 때문이다.</text>
+  <text x="788" y="678" font-size="13.5" font-weight="700" fill="#B3382C">물러나도 판정은 기록된다. stop.final_verdict 는 절대 공란이 아니다.</text>
+
+  <!-- ===== exit 0 rule ===== -->
+  <rect x="72" y="504" width="640" height="182" rx="12" fill="#0E5C55"/>
+  <text x="100" y="540" font-size="18" font-weight="700" fill="#FFFFFF">모든 훅은 언제나 exit 0 이다</text>
+  <text x="100" y="572" font-size="14" fill="#BFDCD6">차단은 종료 코드가 아니라 stdout 의 JSON 으로 표현된다.</text>
+
+  <rect x="100" y="588" width="270" height="34" rx="6" fill="#0A4A44"/>
+  <text x="116" y="610" font-size="13" fill="#9FCCC4" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">PreToolUse → deny</text>
+  <rect x="386" y="588" width="270" height="34" rx="6" fill="#0A4A44"/>
+  <text x="402" y="610" font-size="13" fill="#9FCCC4" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">Stop → block</text>
+
+  <text x="100" y="648" font-size="13.5" fill="#DDEBE8">예외는 .gatekit/runs/hook-errors.log 에 한 줄로 남는다.</text>
+  <text x="100" y="672" font-size="13.5" fill="#DDEBE8">고장 난 훅은 "허용하고 로그를 남긴다"로 격하되지, 세션을 죽이지 않는다.</text>
+
+  <!-- ===== Perf note ===== -->
+  <rect x="72" y="716" width="1296" height="60" rx="10" fill="#FFFFFF" stroke="#DCD5C8" stroke-width="1.5"/>
+  <text x="100" y="742" font-size="15" font-weight="700" fill="#12312E">성능 요구</text>
+  <text x="100" y="764" font-size="13.5" fill="#4A443B">각 게이트는 보통 프로젝트에서 5초 안에 끝나야 한다. Stop 게이트만 계약 실행 때문에 최대 45초까지 허용된다.</text>
+
+  <!-- ===== Footer table ===== -->
+  <text x="72" y="826" font-size="13" fill="#8C8577" letter-spacing="1">차단됐을 때</text>
+  <text x="72" y="854" font-size="13.5" fill="#4A443B">write — /gatekit:gate 로 완료 기준을 만들고 승인한다. 범위 위반이면 태스크를 다시 자른다.</text>
+  <text x="72" y="878" font-size="13.5" fill="#4A443B">spawn — gatekit-scope 펜스를 추가한다. 범위 충돌이면 좁히거나 앞선 에이전트를 기다린다.</text>
+  <text x="760" y="854" font-size="13.5" fill="#4A443B">stop — 메시지에 나온 기준의 원인을 고치고 계약을 다시 실행한다.</text>
+  <text x="760" y="878" font-size="13.5" fill="#4A443B">unverified 가 원인이면 대개 타임아웃이다. 실측 후 gatekit-budget 을 선언한다.</text>
+
+</svg>

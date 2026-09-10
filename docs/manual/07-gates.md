@@ -10,6 +10,8 @@
 | question | `PostToolUse` | `AskUserQuestion` | 아니오 (채널이 없다) |
 | stop | `Stop` | 없음 | 예 (최대 3회) |
 
+![훅 게이트 5개](../assets/gates.svg)
+
 ## prompt 게이트
 
 **언제**: 사용자가 프롬프트를 보낼 때마다.
