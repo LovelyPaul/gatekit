@@ -1,0 +1,44 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: gate_no_abs_paths
+        run: python3 tools/gate_no_abs_paths.py
+
+      - name: gate_skill_size
+        run: python3 tools/gate_skill_size.py
+
+      - name: gate_blob_size
+        run: python3 tools/gate_blob_size.py
+
+      - name: gate_forbidden_phrases
+        run: python3 tools/gate_forbidden_phrases.py
+
+      - name: gate_manifest
+        run: python3 tools/gate_manifest.py
+
+      - name: gate_readme_sync
+        run: python3 tools/gate_readme_sync.py
+
+      - name: gate_command_invocations
+        run: python3 tools/gate_command_invocations.py
+
+      - name: run_tests
+        run: python3 tools/run_tests.py

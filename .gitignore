@@ -4,3 +4,4 @@ __pycache__/
 .gatekit/runs/
 .gatekit/jobs/
 .DS_Store
+.review/

@@ -1,0 +1,133 @@
+# gatekit
+
+상태: 0.1.0 — 초기 단계. 라이선스: MIT.
+
+gatekit은 [Claude Code](https://claude.com/claude-code)에서 AI 보조 개발을
+게이트(hook)로 강제하는 하네스입니다. `CLAUDE.md`나 슬래시 커맨드에 적어두는
+프롬프트 지침을, 실제로 매번 실행되는 훅으로 바꿔줍니다.
+
+## 왜 필요한가
+
+프롬프트 지침은 비결정적으로 발화됩니다. "테스트부터 작성하라"거나
+"`src/`를 건드리기 전에 승인을 받으라"는 `CLAUDE.md`의 문장은, 그 턴에서
+모델이 얼마나 주의를 기울였는지에만 의존합니다. gatekit은 중요한 부분을
+훅이 강제하는 형태로 옮깁니다.
+
+- **게이트는 훅이지 프롬프트가 아닙니다.** `PreToolUse`, `PostToolUse`,
+  `Stop`, `UserPromptSubmit` 훅이 구조화된 상태를 읽고 동작합니다. 모델이
+  기억해서 따라야 하는 지침이 아닙니다.
+- **가정 원장(Assumption Ledger).** 모든 스펙은 사용자를 대신해 내린
+  가정을 명시적으로 기록합니다. 아무것도 조용히 결정되지 않습니다.
+- **해시 고정 승인.** 스펙 파일을 승인하면 그 시점의 SHA-256 해시가
+  기록됩니다. 이후 파일이 바뀌면 승인은 즉시 stale 상태가 되고, 누군가
+  재검토를 기억해야 할 필요가 없습니다.
+- **실행 가능한 완료 계약.** "완료"는 명령어 목록(`gatekit-criterion`
+  블록)입니다. exit 0이고 기대한 산출물을 만들어내거나, 그렇지 않거나
+  둘 중 하나입니다. 자기 신고로 완료를 주장할 수 없습니다.
+- **4단계 판정.** 모든 검사는 `ok`, `warn`, `fail`, `unverified` 중
+  하나를 보고합니다. `unverified`("확인 안 됨")는 절대 통과나 실패로
+  반올림되지 않습니다. 검사를 못 했다면 못 했다고 있는 그대로 말합니다.
+- **워커 교체 가능.** 빌드 작업의 기본 워커는 Claude CLI이고, 설치를
+  확인한 뒤에는 Codex를 선택적으로 쓸 수 있습니다.
+
+## 설치
+
+```
+/plugin marketplace add https://github.com/LovelyPaul/gatekit
+/plugin install gatekit@gatekit
+```
+
+설치 후 Claude Code를 재시작해야 `plugin/hooks/hooks.json`의 훅이
+반영됩니다.
+
+## 세 가지 흐름
+
+gatekit은 아이디어에서 검증된 변경까지 가는 세 가지 경로를 중심으로
+구성됩니다.
+
+1. **인터뷰 → 스펙.** 무엇을 만들지에 대한 짧고 구조화된 인터뷰에
+   답하면, gatekit이 가정 원장을 포함한 `spec/01-prd.md`,
+   `spec/03-architecture.md`를 작성합니다.
+2. **목업 → 스펙.** 시각적 목업이나 기존 화면에서 시작하면, gatekit이
+   `spec/02-screens.md`와 `spec/tokens.json`을 도출합니다. 추측이
+   필요한 부분은 조용히 채우지 않고 원장에 갭 항목으로 기록합니다.
+3. **빌드 → 검증.** 스펙이 승인되면 gatekit이 이를 작업으로 쪼개고
+   완료 계약을 도출한 뒤, 선언된 쓰기 범위 안에서 워커에게 작업을
+   맡깁니다. 이후 독립적으로 검증합니다 — 무언가를 만든 에이전트가
+   그것을 승인하는 에이전트가 되는 일은 없습니다.
+
+## 커맨드
+
+| 커맨드 | 산출물 |
+|---|---|
+| `/gatekit:interview` | `spec/01-prd.md`, `spec/03-architecture.md` |
+| `/gatekit:mockup` | `spec/02-screens.md`, `spec/tokens.json`, 원장 갭 항목 |
+| `/gatekit:tasks` | `spec/04-tasks.md` |
+| `/gatekit:gate` | `spec/05-gate.md`, `.gatekit/contract.json`, 승인 기록 |
+| `/gatekit:build` | `spec/04-tasks.md` 기준 워커 작업 실행 |
+| `/gatekit:verify` | 완료 계약 기준 독립 종단 간(E2E) 검증 |
+| `/gatekit:doctor` | 설치 상태 7축 진단 리포트 |
+| `/gatekit:setup` | 선택적 Codex 백엔드, 기타 설정 |
+
+## `spec/` 구조
+
+기획 단계에서 gatekit이 만드는 모든 것은 사람이 검토하는 평범한
+Markdown/JSON이며, 커밋되는 것을 전제로 합니다.
+
+```
+spec/
+├── 01-prd.md            # 가정 원장 포함
+├── 02-screens.md
+├── 03-architecture.md
+├── 04-tasks.md          # gatekit-task JSON 블록으로 표현된 작업들
+├── 05-gate.md           # gatekit-criterion JSON 블록으로 표현된 완료 기준
+├── RECOVERY.md
+├── PROGRESS.md
+└── tokens.json          # 목업 흐름에서 나온 선택적 산출물
+```
+
+## 상태 저장 구조
+
+런타임 상태는 프로젝트 안 `.gatekit/`에 저장됩니다. `config.json`과
+`approvals.json`은 커밋 대상이고, `runs/`와 `jobs/` 아래는 세션별
+상태로 gitignore 처리됩니다.
+
+```
+.gatekit/
+├── config.json          # 커밋 대상
+├── approvals.json        # 커밋 대상 — 해시 고정 승인
+├── contract.json         # spec/05-gate.md에서 도출
+├── runs/<session_id>.json   # gitignore — 세션 원장
+├── runs/hook-errors.log     # gitignore
+└── jobs/<job_id>/           # gitignore — 워커 작업 상태
+```
+
+## 설정
+
+`.gatekit/config.json`은 스펙 승인 없이는 코드 변경을 막을지
+(`enforce_spec_before_code`, 기본값 켜짐), 빌드가 어떤 워커 백엔드를
+쓸지, 재시도/병렬 처리 한도, 인터뷰 질문 예산을 제어합니다. 전체
+스키마와 기본값은 `docs/ARCHITECTURE.md` §9를 참고하세요.
+
+## 보안 태세
+
+- 워커 샌드박스는 **기본적으로 켜져** 있으며 조용히 꺼지지 않습니다.
+  샌드박스를 우회하는 백엔드는 설정 항목에 `"unsafe": true`를 명시적으로
+  선언해야 하고, 이는 작업 결과 기록에 남습니다.
+- 훅은 내부 오류로 세션을 막지 않습니다. 게이트 스크립트가 깨지면
+  "허용하고 로그를 남기는" 쪽으로 안전하게 저하되며, 세션이 멈추지
+  않습니다.
+- 목업, 스크린샷, 웹에서 가져온 콘텐츠는 항상 데이터로 취급되며,
+  따라야 할 지시로 취급되지 않습니다.
+- 전체 위협 모델과 취약점 제보 방법은 `SECURITY.md`를 참고하세요.
+
+## 상태
+
+**0.1.0 — 초기 단계.** 게이트/원장/계약/승인 커널과 CI 강제 도구의
+핵심은 갖춰져 있으나, 아직 거친 부분이 있을 수 있습니다. 무엇이
+출시되었는지는 `CHANGELOG.md`를, 현재 구조의 배경이 된 아키텍처
+결정은 `docs/decisions/`를 참고하세요.
+
+## 라이선스
+
+MIT — `LICENSE` 참고.
