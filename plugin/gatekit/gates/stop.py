@@ -39,6 +39,8 @@ ENFORCED_PIPELINES = ("build", "verify")
 MAX_BLOCKS = 3
 
 #: Wall-clock ceiling for the contract run inside the Stop hook.
+#: Kept for reference; the effective budget now comes from the contract, which
+#: defaults to contract.TOTAL_BUDGET_S and is capped at contract.MAX_BUDGET_S.
 STOP_BUDGET_S = 45.0
 
 _MESSAGES = {
@@ -104,7 +106,7 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
     # Already inside a stop-hook continuation: never block again.
     if bool(event.get("stop_hook_active")):
-        result = contract.execute(root, total_budget_s=STOP_BUDGET_S)
+        result = contract.execute(root)
         _finish(led, result["verdict"], result["reasons"])
         return hookio.allow()
 
@@ -116,7 +118,7 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     except (TypeError, ValueError):
         block_count = 0
 
-    result = contract.execute(root, total_budget_s=STOP_BUDGET_S)
+    result = contract.execute(root)
     outcome = result["verdict"]
 
     if outcome == verdict.OK:

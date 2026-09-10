@@ -399,3 +399,60 @@ class TestRun(TempProject):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+class TestDeclaredTotalBudget(unittest.TestCase):
+    """spec/05-gate.md may declare its own total budget via a gatekit-budget fence.
+
+    Without this, a suite that is legitimately slower than the 45s default can
+    never reach `ok` through the Stop gate: the criteria pass individually but
+    the run is cut off and reported `unverified`. Observed in the first real
+    end-to-end run, where a 24.5s full-suite criterion was clamped to 20s.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self._tmp.name)
+        (self.root / ".gatekit").mkdir()
+        (self.root / "spec").mkdir()
+        self.addCleanup(self._tmp.cleanup)
+
+    def _write_gate(self, extra: str = "") -> None:
+        (self.root / "spec" / "05-gate.md").write_text(
+            "# gate\n\n## Not counted as done\n\n- nothing\n\n"
+            '```gatekit-criterion\n'
+            '{"id": "quick", "argv": ["python3", "-c", "pass"], "timeout_s": 5}\n'
+            "```\n" + extra,
+            encoding="utf-8",
+        )
+
+    def test_default_budget_when_no_fence(self) -> None:
+        self._write_gate()
+        data = contract.derive(self.root)
+        self.assertEqual(data.get("total_budget_s"), contract.TOTAL_BUDGET_S)
+
+    def test_declared_budget_is_stored_and_used(self) -> None:
+        self._write_gate(
+            '\n```gatekit-budget\n{"total_budget_s": 180}\n```\n'
+        )
+        data = contract.derive(self.root)
+        self.assertEqual(data["total_budget_s"], 180.0)
+        result = contract.execute(self.root)
+        self.assertEqual(result["verdict"], "ok")
+        self.assertEqual(result["total_budget_s"], 180.0)
+
+    def test_explicit_argument_overrides_declared_budget(self) -> None:
+        self._write_gate('\n```gatekit-budget\n{"total_budget_s": 180}\n```\n')
+        contract.derive(self.root)
+        result = contract.execute(self.root, total_budget_s=7)
+        self.assertEqual(result["total_budget_s"], 7.0)
+
+    def test_non_positive_budget_is_rejected(self) -> None:
+        self._write_gate('\n```gatekit-budget\n{"total_budget_s": 0}\n```\n')
+        with self.assertRaises(ValueError):
+            contract.derive(self.root)
+
+    def test_budget_is_capped_so_a_gate_cannot_hang_a_session(self) -> None:
+        self._write_gate('\n```gatekit-budget\n{"total_budget_s": 99999}\n```\n')
+        with self.assertRaises(ValueError):
+            contract.derive(self.root)

@@ -36,7 +36,14 @@ from . import approval, config, paths, verdict
 VERSION = 1
 
 #: Total wall-clock budget for a whole contract run (ARCHITECTURE.md section 5).
+#: A project whose suite is honestly slower may raise it with a
+#: ``gatekit-budget`` fence in spec/05-gate.md, up to MAX_BUDGET_S. Without
+#: that escape hatch a slow-but-passing suite is permanently `unverified`.
 TOTAL_BUDGET_S = 45.0
+
+#: Ceiling for a declared budget. A Stop-gate run that can outlast the user's
+#: patience is worse than one that reports `unverified` and stands down.
+MAX_BUDGET_S = 600.0
 
 #: Per-criterion default when the fence omits ``timeout_s``.
 DEFAULT_TIMEOUT_S = 30
@@ -45,6 +52,9 @@ DEFAULT_TIMEOUT_S = 30
 TAIL_CHARS = 2000
 
 FENCE_NAME = "gatekit-criterion"
+
+#: Optional single fence declaring the run-wide budget.
+BUDGET_FENCE_NAME = "gatekit-budget"
 
 STALE_REASON = "contract_stale"
 
@@ -124,6 +134,31 @@ def gate_file(root: pathlib.Path) -> pathlib.Path:
     return paths.spec_dir(root) / "05-gate.md"
 
 
+def _parse_budget(text: str) -> float:
+    """Return the declared total budget, or the default when none is declared."""
+    fences = parse_fences(text, BUDGET_FENCE_NAME)
+    if not fences:
+        return TOTAL_BUDGET_S
+    if len(fences) > 1:
+        raise ValueError(
+            "spec/05-gate.md declares %d %s fences; exactly one is allowed"
+            % (len(fences), BUDGET_FENCE_NAME)
+        )
+    raw = fences[0].get("total_budget_s")
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        raise ValueError("%s needs a numeric 'total_budget_s'" % BUDGET_FENCE_NAME)
+    value = float(raw)
+    if value <= 0:
+        raise ValueError("total_budget_s must be greater than 0, got %g" % value)
+    if value > MAX_BUDGET_S:
+        raise ValueError(
+            "total_budget_s %g exceeds the %g second ceiling; a gate that runs "
+            "longer should be a build step, not a stop-gate check"
+            % (value, MAX_BUDGET_S)
+        )
+    return value
+
+
 def derive(root: pathlib.Path) -> Dict[str, Any]:
     """Parse ``spec/05-gate.md`` into ``.gatekit/contract.json`` and return it."""
     source = gate_file(root)
@@ -132,6 +167,7 @@ def derive(root: pathlib.Path) -> Dict[str, Any]:
     except OSError as err:
         raise FileNotFoundError(f"cannot read {source}: {err}") from err
 
+    total_budget_s = _parse_budget(text)
     raw_criteria = parse_fences(text, FENCE_NAME)
     criteria = [_normalize_criterion(item, i + 1) for i, item in enumerate(raw_criteria)]
 
@@ -144,6 +180,7 @@ def derive(root: pathlib.Path) -> Dict[str, Any]:
     data = {
         "version": VERSION,
         "source_sha256": approval.sha256_file(source),
+        "total_budget_s": total_budget_s,
         "criteria": criteria,
         "derived_at": _now(),
     }
@@ -283,7 +320,7 @@ def _run_one(
     return result
 
 
-def execute(root: pathlib.Path, total_budget_s: float = TOTAL_BUDGET_S) -> Dict[str, Any]:
+def execute(root: pathlib.Path, total_budget_s: Optional[float] = None) -> Dict[str, Any]:
     """Run every criterion within *total_budget_s* and aggregate the verdict.
 
     Returns ``{"verdict", "criteria", "reasons"}``. ``reasons`` holds short
@@ -313,7 +350,12 @@ def execute(root: pathlib.Path, total_budget_s: float = TOTAL_BUDGET_S) -> Dict[
             "reasons": ["contract has no criteria"],
         }
 
-    deadline = time.monotonic() + float(total_budget_s)
+    if total_budget_s is None:
+        declared = data.get("total_budget_s")
+        budget = float(declared) if isinstance(declared, (int, float)) and not isinstance(declared, bool) else TOTAL_BUDGET_S
+    else:
+        budget = float(total_budget_s)
+    deadline = time.monotonic() + budget
     results: List[Dict[str, Any]] = []
     for crit in criteria:
         results.append(_run_one(root, crit, deadline - time.monotonic()))
@@ -329,6 +371,7 @@ def execute(root: pathlib.Path, total_budget_s: float = TOTAL_BUDGET_S) -> Dict[
     return {
         "verdict": verdict.aggregate(results),
         "criteria": results,
+        "total_budget_s": budget,
         "reasons": reasons,
     }
 
@@ -339,7 +382,8 @@ def run(argv: List[str]) -> int:
     parser.add_argument("action", choices=["derive", "status", "run"])
     parser.add_argument("--root", default=None)
     parser.add_argument("--json", action="store_true", dest="as_json")
-    parser.add_argument("--budget", type=float, default=TOTAL_BUDGET_S)
+    parser.add_argument("--budget", type=float, default=None,
+                        help="override the contract's declared total budget (seconds)")
     try:
         args = parser.parse_args(argv)
     except SystemExit as exc:

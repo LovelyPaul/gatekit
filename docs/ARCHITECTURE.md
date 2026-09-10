@@ -167,7 +167,21 @@ Criteria are declared in `spec/05-gate.md` as fenced JSON blocks:
 
 `gatekit contract run [--json]` executes each criterion with `subprocess.run`
 (no shell), `cwd` = project root, per-criterion timeout = `min(timeout_s, remaining)`
-within a total budget of 45 s. Result per criterion:
+within a run-wide budget. That budget defaults to 45 s and may be raised by a
+single optional fence in `spec/05-gate.md`, capped at 600 s:
+
+````
+```gatekit-budget
+{"total_budget_s": 180}
+```
+````
+
+`derive` stores it as `total_budget_s` in `.gatekit/contract.json`; `execute`
+uses it unless an explicit argument (`--budget`) overrides it. The cap exists
+because the Stop gate runs this: a check that can outlast the user's patience
+is worse than one that reports `unverified` and stands down. A declared budget
+that is absent, non-numeric, zero, negative, duplicated, or above the cap is a
+`derive` error. Result per criterion:
 `{"id", "verdict": "ok|fail|unverified", "exit", "elapsed_s", "stdout_tail", "stderr_tail", "artifact_hashes": {path: sha256}}`.
 Timeout or budget exhaustion → `unverified`, never `ok`. Missing artifact → `fail`.
 Artifact paths must be relative, must not contain `..`, and after

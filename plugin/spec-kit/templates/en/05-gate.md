@@ -32,7 +32,7 @@ Field rules:
 | `id` | Unique. Referencing a task id from 04 clears the traceability warning. |
 | `argv` | Non-empty list of strings. No shell syntax (`&&`, pipes). |
 | `expect.exit` | The exit code that counts as passing. Usually 0. |
-| `timeout_s` | Per-criterion ceiling. The total budget is 45 s. |
+| `timeout_s` | Per-criterion ceiling. The run-wide budget defaults to 45 s and can be raised to at most 600 s with the `gatekit-budget` fence below. |
 | `artifacts` | Relative paths that must exist afterwards. Missing → `fail`. |
 
 ## Not counted as done
@@ -59,3 +59,16 @@ Any of the following means the work is not done. Each one yields `fail` or
 Approval: once a human has read and agreed to this document, run
 `python3 -m gatekit approve spec/05-gate.md`. Editing the document afterwards
 expires the approval and it must be granted again.
+
+## Run budget (optional)
+
+Declare a budget when the criteria together take longer than 45 s. Without it
+the run is cut off at 45 s, so a slow-but-passing suite would stay `unverified`
+forever.
+
+```gatekit-budget
+{"total_budget_s": 180}
+```
+
+The ceiling is 600 s. A check that takes longer belongs in a build step, not in
+the stop gate.

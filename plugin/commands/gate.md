@@ -45,7 +45,10 @@ Requirements:
 - `id` unique, and containing the task id it verifies so traceability holds
 - `argv` a non-empty list of strings, run without a shell — no `&&`, no pipes,
   no redirection. Chain steps by adding more criteria instead.
-- `timeout_s` realistic; the total budget across all criteria is 45 seconds
+- `timeout_s` realistic. The run-wide budget defaults to 45 seconds; if the
+  criteria together need more, add one `gatekit-budget` fence declaring
+  `total_budget_s` (ceiling 600). Measure first, then declare — never raise a
+  budget to hide a slow test you have not looked at
 - `artifacts` only for files the command genuinely produces. A declared
   artifact that does not appear is a `fail`, so do not declare aspirational ones.
 
