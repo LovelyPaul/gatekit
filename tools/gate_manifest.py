@@ -15,7 +15,7 @@ Checks:
   - plugin.json: valid JSON, has required keys (name, version, commands,
     skills, hooks), version is semver, its "commands"/"skills"/"hooks"
     paths resolve under plugin/.
-  - hooks.json (referenced by plugin.json "hooks"): valid JSON, and every
+  - hooks/hooks.json (auto-loaded; must NOT also be listed in plugin.json "hooks"): valid JSON, and every
     command path found inside it — after substituting ${CLAUDE_PLUGIN_ROOT}
     with the plugin directory — resolves to an existing, non-empty file.
   - plugin.json "version" == the version in the top ("## <version> — ...")
@@ -90,7 +90,7 @@ def check_plugin_json(root: pathlib.Path, findings: list[dict]) -> dict | None:
     if data is None:
         return None
 
-    required_keys = ["name", "version", "commands", "skills", "hooks"]
+    required_keys = ["name", "version", "commands", "skills"]
     for key in required_keys:
         if key not in data:
             findings.append({"path": rel, "line": 1, "message": f"missing required key: '{key}'"})
@@ -109,13 +109,24 @@ def check_plugin_json(root: pathlib.Path, findings: list[dict]) -> dict | None:
                     {"path": rel, "line": 1, "message": f"'{key}' path does not exist: {rel_path}"}
                 )
 
+    # Claude Code loads plugin/hooks/hooks.json automatically. Listing it again
+    # under plugin.json "hooks" makes the plugin fail to load ("Duplicate hooks
+    # file detected"), so the key must be absent unless it names an *extra* file.
     hooks_rel = data.get("hooks")
+    standard = plugin_dir / "hooks" / "hooks.json"
     if isinstance(hooks_rel, str):
         hooks_path = (plugin_dir / hooks_rel).resolve()
-        if not hooks_path.is_file():
+        if hooks_path == standard.resolve():
+            findings.append({"path": rel, "line": 1,
+                             "message": "'hooks' must not reference hooks/hooks.json; it is loaded automatically and a duplicate reference fails plugin load"})
+        elif not hooks_path.is_file():
             findings.append({"path": rel, "line": 1, "message": f"'hooks' path does not exist: {hooks_rel}"})
         else:
             check_hooks_json(root, plugin_dir, hooks_path, findings)
+    if standard.is_file():
+        check_hooks_json(root, plugin_dir, standard, findings)
+    else:
+        findings.append({"path": rel, "line": 1, "message": "plugin/hooks/hooks.json is missing; gates would never fire"})
 
     return data
 

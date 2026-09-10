@@ -42,7 +42,7 @@ gatekit/
 │   │   ├── doctor.md      /gatekit:doctor
 │   │   └── setup.md       /gatekit:setup       → optional Codex backend, config
 │   ├── skills/<name>/SKILL.md           # ≤ 40-line NL trigger shims that point at the command
-│   ├── hooks/hooks.json                 # 5 hook registrations (see §3)
+│   ├── hooks/hooks.json                 # 5 hook registrations (see §3); auto-loaded, never listed in plugin.json
 │   ├── gatekit/                         # kernel package (stdlib only)
 │   │   ├── cli.py         dispatcher: python3 -m gatekit <sub>
 │   │   ├── hookio.py      hook stdin/stdout contract, safe wrapper

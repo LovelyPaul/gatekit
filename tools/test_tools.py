@@ -50,7 +50,6 @@ def minimal_clean_repo(root: pathlib.Path) -> None:
         "version": "0.1.0",
         "commands": "./commands",
         "skills": "./skills",
-        "hooks": "./hooks/hooks.json",
     }))
     write(root / "plugin" / "hooks" / "hooks.json", json.dumps({
         "hooks": {
@@ -402,3 +401,25 @@ class TestCommandInvocations(unittest.TestCase):
             (root / "plugin" / "bin" / "gatekit.py").unlink()
             proc = run_gate("gate_command_invocations.py", root)
             self.assertEqual(proc.returncode, 1)
+
+
+class TestManifestHooksDuplicate(unittest.TestCase):
+    def test_duplicate_hooks_reference_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            minimal_clean_repo(root)
+            pj = root / "plugin" / ".claude-plugin" / "plugin.json"
+            data = json.loads(pj.read_text())
+            data["hooks"] = "./hooks/hooks.json"
+            pj.write_text(json.dumps(data))
+            proc = run_gate("gate_manifest.py", root)
+            self.assertEqual(proc.returncode, 1, proc.stdout)
+            self.assertIn("loaded automatically", proc.stdout)
+
+    def test_missing_standard_hooks_file_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            minimal_clean_repo(root)
+            (root / "plugin" / "hooks" / "hooks.json").unlink()
+            proc = run_gate("gate_manifest.py", root)
+            self.assertEqual(proc.returncode, 1, proc.stdout)

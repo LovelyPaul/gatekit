@@ -2,9 +2,10 @@
   "name": "gatekit",
   "version": "0.1.0",
   "description": "Gate-enforced harness: interview → spec, mockup → spec, gated build, evidence-based verify.",
-  "author": { "name": "Paul" },
+  "author": {
+    "name": "Paul"
+  },
   "license": "MIT",
   "commands": "./commands",
-  "skills": "./skills",
-  "hooks": "./hooks/hooks.json"
+  "skills": "./skills"
 }
