@@ -1,0 +1,14 @@
+{
+  "name": "gatekit",
+  "description": "Gate-enforced harness for AI-assisted development: interview → spec, mockup → spec, gated autonomous build, evidence-based verify.",
+  "owner": { "name": "Paul", "url": "https://github.com/lovepaul98" },
+  "plugins": [
+    {
+      "name": "gatekit",
+      "description": "Hook-enforced gates, assumption ledger, hash-anchored approvals, executable completion contracts, and worker-backed builds (Claude CLI default, Codex optional).",
+      "source": "./plugin",
+      "category": "development",
+      "tags": ["harness", "gates", "hooks", "prd", "mockup", "orchestration", "verification"]
+    }
+  ]
+}
