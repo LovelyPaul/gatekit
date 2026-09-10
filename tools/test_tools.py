@@ -352,10 +352,6 @@ class TestReadmeSync(unittest.TestCase):
             self.assertTrue(any("ghost" in f["message"] for f in payload["findings"]))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestCommandInvocations(unittest.TestCase):
     def test_clean_repo_passes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -423,3 +419,112 @@ class TestManifestHooksDuplicate(unittest.TestCase):
             (root / "plugin" / "hooks" / "hooks.json").unlink()
             proc = run_gate("gate_manifest.py", root)
             self.assertEqual(proc.returncode, 1, proc.stdout)
+
+
+class TestManualAccuracy(unittest.TestCase):
+    def _manual_repo(self, root: pathlib.Path) -> None:
+        minimal_clean_repo(root)
+        write(root / "plugin" / "spec-kit" / "templates" / "ko" / "01-prd.md", "# prd\n")
+        write(root / "docs" / "manual" / "00-index.md",
+              "# index\n\n- [소개](01-intro.md)\n")
+        write(root / "docs" / "manual" / "01-intro.md",
+              '# intro\n\n`python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" doctor`\n\n/gatekit:build\n\n01-prd.md\n')
+
+    def test_clean_manual_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            self._manual_repo(root)
+            proc = run_gate("gate_manual_accuracy.py", root)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_module_form_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            self._manual_repo(root)
+            write(root / "docs" / "manual" / "01-intro.md", "# intro\n\npython3 -m gatekit doctor\n")
+            proc = run_gate("gate_manual_accuracy.py", root)
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("launcher", proc.stdout)
+
+    def test_unknown_subcommand_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            self._manual_repo(root)
+            write(root / "docs" / "manual" / "01-intro.md",
+                  '# intro\n\n`python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" frobnicate`\n')
+            proc = run_gate("gate_manual_accuracy.py", root)
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("frobnicate", proc.stdout)
+
+    def test_unknown_slash_command_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            self._manual_repo(root)
+            write(root / "docs" / "manual" / "01-intro.md", "# intro\n\n/gatekit:nosuch\n")
+            proc = run_gate("gate_manual_accuracy.py", root)
+            self.assertEqual(proc.returncode, 1)
+
+    def test_broken_link_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            self._manual_repo(root)
+            write(root / "docs" / "manual" / "00-index.md", "# index\n\n- [x](01-intro.md)\n- [y](99-gone.md)\n")
+            proc = run_gate("gate_manual_accuracy.py", root)
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("99-gone.md", proc.stdout)
+
+    def test_unlinked_page_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            self._manual_repo(root)
+            write(root / "docs" / "manual" / "02-orphan.md", "# orphan\n")
+            proc = run_gate("gate_manual_accuracy.py", root)
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("02-orphan.md", proc.stdout)
+
+
+class TestCleanRoom(unittest.TestCase):
+    def test_clean_repo_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            minimal_clean_repo(root)
+            proc = run_gate("gate_clean_room.py", root)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+
+    def test_foreign_project_name_is_detected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            minimal_clean_repo(root)
+            write(root / "docs" / "manual" / "01-intro.md", "# intro\n\ngptaku 에서 영감을 받았다\n")
+            proc = run_gate("gate_clean_room.py", root)
+            self.assertEqual(proc.returncode, 1)
+            self.assertIn("gptaku", proc.stdout)
+
+    def test_korean_plugin_name_is_detected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            minimal_clean_repo(root)
+            write(root / "docs" / "note.md", "# note\n\n품앗이 방식의 병렬 위임\n")
+            proc = run_gate("gate_clean_room.py", root)
+            self.assertEqual(proc.returncode, 1)
+
+    def test_detection_is_case_insensitive(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            minimal_clean_repo(root)
+            write(root / "docs" / "note.md", "See Insane-Search for the ladder.\n")
+            proc = run_gate("gate_clean_room.py", root)
+            self.assertEqual(proc.returncode, 1)
+
+    def test_ordinary_words_are_not_flagged(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            minimal_clean_repo(root)
+            write(root / "docs" / "note.md",
+                  "# note\n\nadded a note, ddl handling, gaseous mixtures, nopalito\n")
+            proc = run_gate("gate_clean_room.py", root)
+            self.assertEqual(proc.returncode, 0, proc.stdout)
+
+
+if __name__ == "__main__":
+    unittest.main()

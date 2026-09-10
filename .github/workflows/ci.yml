@@ -40,5 +40,11 @@ jobs:
       - name: gate_command_invocations
         run: python3 tools/gate_command_invocations.py
 
+      - name: gate_manual_accuracy
+        run: python3 tools/gate_manual_accuracy.py
+
+      - name: gate_clean_room
+        run: python3 tools/gate_clean_room.py
+
       - name: run_tests
         run: python3 tools/run_tests.py

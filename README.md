@@ -126,6 +126,16 @@ defaults.
 - See `SECURITY.md` for the full threat model and how to report a
   vulnerability.
 
+## Documentation
+
+- `docs/manual/` — the user manual (Korean): install, concepts, the eight
+  commands, the spec files, the gates, the CLI, a worked example,
+  troubleshooting, and the design decisions. Start at
+  `docs/manual/00-index.md`.
+- `docs/QUICKSTART.md` — the short path from install to a first run.
+- `docs/ARCHITECTURE.md` — the binding contract every module must satisfy.
+- `docs/decisions/` — the architectural decision records.
+
 ## Status
 
 **0.1.0 — early.** The core gate/ledger/contract/approval kernel and the

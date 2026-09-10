@@ -38,6 +38,8 @@ python3 tools/gate_forbidden_phrases.py
 python3 tools/gate_manifest.py
 python3 tools/gate_readme_sync.py
 python3 tools/gate_command_invocations.py
+python3 tools/gate_manual_accuracy.py
+python3 tools/gate_clean_room.py
 ```
 
 Every gate accepts `--root PATH` (defaults to the repo root, computed from
