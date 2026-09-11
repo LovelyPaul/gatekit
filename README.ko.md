@@ -60,6 +60,7 @@ gatekit은 아이디어에서 검증된 변경까지 가는 세 가지 경로를
 
 | 커맨드 | 산출물 |
 |---|---|
+| `/gatekit:discover` | `spec/00-discovery.md` — 아직 뭘 만들지 모르는 사용자를 위한 발굴 단계 |
 | `/gatekit:interview` | `spec/01-prd.md`, `spec/03-architecture.md` |
 | `/gatekit:mockup` | `spec/02-screens.md`, `spec/tokens.json`, 원장 갭 항목 |
 | `/gatekit:tasks` | `spec/04-tasks.md` |

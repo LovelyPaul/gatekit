@@ -33,6 +33,7 @@ gatekit/
 ├── plugin/                              # the installable plugin
 │   ├── .claude-plugin/plugin.json
 │   ├── commands/                        # execution instructions (one per pipeline)
+│   │   ├── discover.md    /gatekit:discover    → spec/00-discovery.md (optional first step)
 │   │   ├── interview.md   /gatekit:interview   → spec/01-prd.md, spec/03-architecture.md
 │   │   ├── mockup.md      /gatekit:mockup      → spec/02-screens.md, spec/tokens.json, gap entries in ledger
 │   │   ├── tasks.md       /gatekit:tasks       → spec/04-tasks.md
@@ -74,6 +75,7 @@ gatekit/
 ```
 <project>/
 ├── spec/                       # human-reviewed, committed
+│   ├── 00-discovery.md         # optional; ```gatekit-discovery JSON fence (§6a)
 │   ├── 01-prd.md               # includes "## Assumption Ledger" / "## 가정 원장"
 │   ├── 02-screens.md
 │   ├── 03-architecture.md
@@ -148,7 +150,7 @@ fallback. Schema (version 1):
   "session_id": "…",
   "created_at": "iso", "updated_at": "iso",
   "output_lang": "ko|en",
-  "active_pipeline": null | "interview" | "mockup" | "tasks" | "gate" | "build" | "verify",
+  "active_pipeline": null | "discover" | "interview" | "mockup" | "tasks" | "gate" | "build" | "verify",
   "questions": {"asked": 0, "max_calls": 2, "budget_exceeded": false},
   "scopes": [{"owner": "agent-label-or-prompt-hash", "write_scope": ["src/auth/**"], "declared_at": "iso"}],
   "stop": {"block_count": 0, "final_verdict": null, "last_reasons": []},
@@ -213,6 +215,33 @@ Aggregate verdict follows `verdict.aggregate` (§11).
 `jobs.py` reads these; `spec.py` validates: unique ids, non-empty write_scope
 (or `"read-only"`), every `depends_on` exists, no two tasks in the same round
 with intersecting write_scope, every task has ≥ 1 gate.
+
+## 6a. Discovery record in `spec/00-discovery.md` (ADR-0005)
+
+The optional first stage for a user who does not yet know what to build.
+`/gatekit:discover` writes it; `/gatekit:interview` reads it as facts. One
+fence:
+
+````
+```gatekit-discovery
+{"problem": "…", "deadline": "4 weeks|none", "user": "name · role",
+ "current_way": ["step", "step"], "frequency_per_month": 8, "minutes_per_run": 40,
+ "wait": "none|…", "why_chain": ["symptom", "why", "why", "why", "cause"],
+ "failed_attempts": [{"tried": "…", "result": "failed|works-but-costly", "why": "…"}] | "not-applicable",
+ "unpassed": ["<gate name>"]}
+```
+````
+
+`spec.validate`: the file's absence is **silent** (it is listed in
+`heading-map.json` `absent_ok`); when present, exactly one fence and a
+non-empty `problem` are `fail` conditions, and each of the six deepening
+gates (`user`, `current_way` ≥ 2 steps, numeric `frequency_per_month` and
+`minutes_per_run`, `why_chain` of strings with ≥ 3 distinct whys after the symptom — a link whose word set overlaps an earlier link by ≥ 0.6 (Jaccard) is a restatement and does not count —
+`failed_attempts` non-empty with a valid `result` or `"not-applicable"`) is
+`warn` when unfilled — with a distinct message when the gate is declared in
+`unpassed`. A gate is never filled by the validator; `unpassed` that is not a list, or names outside the gate list, is `fail`; a gate both filled and listed in `unpassed` is `warn`. Discovery questions are plain chat (not
+`AskUserQuestion`), budgeted per gate by the command at three; the question
+gate does not count them.
 
 ## 7. Hash-anchored approvals (`approval.py`)
 

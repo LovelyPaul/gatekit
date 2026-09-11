@@ -64,6 +64,7 @@ change:
 
 | Command | Produces |
 |---|---|
+| `/gatekit:discover` | `spec/00-discovery.md` — for the user who does not yet know what to build |
 | `/gatekit:interview` | `spec/01-prd.md`, `spec/03-architecture.md` |
 | `/gatekit:mockup` | `spec/02-screens.md`, `spec/tokens.json`, ledger gap entries |
 | `/gatekit:tasks` | `spec/04-tasks.md` |

@@ -4,6 +4,7 @@
 
 | 커맨드 | 인자 | 산출물 | AskUserQuestion 횟수 |
 |---|---|---|---|
+| `/gatekit:discover` | 선택. 거친 아이디어나 빈 인자 | `spec/00-discovery.md` | 0 (평문 질문, 게이트당 최대 3개) |
 | `/gatekit:interview` | 만들려는 것에 대한 설명 | `spec/01-prd.md`, `spec/03-architecture.md` | 최대 2 + 확인 1 |
 | `/gatekit:mockup` | Figma URL, HTML 경로, 스크린샷 경로 | `spec/02-screens.md`, `spec/tokens.json` | 최대 1 |
 | `/gatekit:tasks` | 선택적 제약 (예: "round 1만") | `spec/04-tasks.md` | 0 |
@@ -13,9 +14,23 @@
 | `/gatekit:doctor` | 선택적 `--json` | 진단 표 | 0 |
 | `/gatekit:setup` | 선택적 `codex` | `.gatekit/config.json` | codex일 때만 최대 2 |
 
+## /gatekit:discover
+
+**언제**: 뭘 만들지 모를 때, 또는 "챗봇 같은 거"처럼 만들 것만 있고 실사용자와 불편이 없을 때. 선택 단계이며, 이 파일이 없어도 나머지 파이프라인은 그대로 돈다.
+
+**읽는 것**: 정책 파일 2종(언어·질문), 언어별 `00-discovery.md` 템플릿, 이미 있으면 `spec/00-discovery.md`(첫 빈 게이트부터 이어간다).
+
+**쓰는 것**: `spec/00-discovery.md` 하나. 산문 절 5개와 `gatekit-discovery` JSON 펜스 하나. 게이트를 하나 채울 때마다 파일을 갱신하므로 도중에 끊겨도 기록이 남는다.
+
+**질문**: 평문 채팅으로 한 번에 하나, 모든 질문에 추천 답을 붙인다. 과거에 실제로 일어난 일만 묻고, 해법이나 추상어가 나오면 마지막 사건으로 되돌린다. 게이트 하나에 질문 3개가 상한이고, 그래도 못 채우면 `unpassed`에 적고 넘어간다. 중단 신호("알아서 해줘")가 오면 지금까지 것으로 파일을 쓰고 멈춘다.
+
+**심화 게이트 6개**: 실사용자 1명(이름·역할), 현재 방식(번호 순서 2단계 이상), 빈도(숫자), 1회 소요(숫자), 원인(바꿔 말하기를 뺀 서로 다른 "왜" 3칸 이상, 첫 답과 달라야 하고 사용자가 확인), 실패한 대안(`failed` / `works-but-costly` 구분, 없으면 `not-applicable`). `spec validate`가 빈 게이트를 `warn`으로 잡고, 펜스 누락이나 빈 문제 문장은 `fail`이다.
+
+**다음**: `/gatekit:interview`가 이 파일을 사실로 읽어 열린 질문을 건너뛴다. `unpassed`에 적힌 게이트는 가정 원장 행이 된다.
+
 ## /gatekit:interview
 
-**언제**: 아이디어만 있고 문서가 없을 때. `spec/01`이 이미 있으면 개정 모드로 동작한다.
+**언제**: 아이디어만 있고 문서가 없을 때. `spec/01`이 이미 있으면 개정 모드로 동작한다. 인자에 실사용자와 불편이 없으면 `/gatekit:discover`로 보낸다.
 
 **읽는 것**: 정책 파일 3종, `heading-map.json`, 언어별 템플릿, 기존 `spec/`, 레포의 언어·프레임워크·테스트 러너, `README*`·`package.json`·`pyproject.toml`·락파일·CI 설정.
 

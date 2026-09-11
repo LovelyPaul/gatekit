@@ -51,7 +51,8 @@
 
 | 단계 | 커맨드 | 입력 | 출력 | 관련 게이트 |
 |---|---|---|---|---|
-| 1 | `/gatekit:interview` | 사용자의 한 문장 설명, 기존 레포 | `01-prd.md`, `03-architecture.md` | question 게이트가 질문 2회로 예산 관리 |
+| 0 | `/gatekit:discover` | 아무것도 없어도 된다. 최근 2주의 불편 | `00-discovery.md` | `spec validate`가 심화 게이트 6개의 빈 칸을 `warn`으로 표시. 선택 단계 |
+| 1 | `/gatekit:interview` | 사용자의 한 문장 설명, 기존 레포, 있으면 `00-discovery.md` | `01-prd.md`, `03-architecture.md` | question 게이트가 질문 2회로 예산 관리 |
 | 2 | `/gatekit:mockup` | Figma URL, HTML, 스크린샷 | `02-screens.md`, `tokens.json`, 원장 gap 행 | question 게이트 |
 | 3 | `/gatekit:tasks` | `01`, `02`, `03`, 실제 레포 구조 | `04-tasks.md` | 없음. 계획만 한다 |
 | 4 | `/gatekit:gate` | `01`의 수용 기준, `04`의 작업 | `05-gate.md`, `contract.json`, 승인 | 승인이 쓰기 게이트를 연다 |

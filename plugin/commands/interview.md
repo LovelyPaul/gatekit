@@ -9,6 +9,10 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 
 Input: `$ARGUMENTS` — the user's description of what they want to build.
 
+If `$ARGUMENTS` is empty, or names a product without a real user and their
+pain ("a chatbot", "a productivity app"), stop and route the user to
+`/gatekit:discover`. This pipeline assumes the problem is already known.
+
 ## Step 0 — load policy and language
 
 1. Read `${CLAUDE_PLUGIN_ROOT}/policy/language.md`,
@@ -31,6 +35,22 @@ Identifiers are never translated.
 
 Look at what is already knowable. Do not ask the user for any of it.
 
+- `spec/00-discovery.md` — if it exists, its `gatekit-discovery` fence is the
+  primary source of facts. Map it as follows:
+  - `user` → the users table's first row; `current_way` → that row's "what
+    they do today"; the row's situation and need come from `problem` and the
+    last link of `why_chain`. Anything the fence does not say for that row
+    is an assumption, not a guess.
+  - `frequency_per_month`, `minutes_per_run`, `wait` → rows of the
+    current-state table, source "discovery interview", measured on the
+    file's written date. `wait` is its own row, never added to minutes.
+  - `why_chain`'s last link → the cause in the problem paragraph.
+  - `failed_attempts` with result `failed` → non-goals (do not rebuild what
+    failed); with result `works-but-costly` → the seed of the first feature.
+  - `deadline` → a non-goal bounding scope ("not in this round") when it is
+    not "none".
+  - Every gate in `unpassed`, and every unconfirmed line under the file's
+    last section → an assumption ledger row with an inline marker.
 - `spec/` — do 01 or 03 already exist? If so, you are revising, not creating.
 - The repository: languages, frameworks, test runner, existing conventions.
 - `README*`, `package.json`, `pyproject.toml`, lockfiles, CI config.
@@ -39,8 +59,13 @@ Record what you found. These are facts, not assumptions.
 
 ## Step 2 — one open probe
 
-Ask exactly one open question about past behaviour, in `output_lang`, as plain
-chat text (not `AskUserQuestion`). Follow `policy/questioning.md`.
+**Skip this step entirely when `spec/00-discovery.md` exists.** The discovery
+record already holds the answer to any open probe; asking again is the
+over-questioning `policy/questioning.md` forbids.
+
+Otherwise ask exactly one open question about past behaviour, in
+`output_lang`, as plain chat text (not `AskUserQuestion`). Follow
+`policy/questioning.md`.
 
 If the user's text already answers it, or the user gave a stop signal
 ("알아서 해줘", "you decide"), skip this step entirely.

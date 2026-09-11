@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.2.0 — 2026-09-11
+
+### Added
+
+- `/gatekit:discover`, an optional first pipeline for the user who does not
+  yet know what to build. It collects recent pains, picks one, and fills six
+  deepening gates (one named user, the current way as ordered steps,
+  frequency, minutes, a cause reached by asking why three times, and what
+  was already tried) into `spec/00-discovery.md` as a `gatekit-discovery`
+  JSON fence. `spec validate` checks the fence: a missing fence or empty
+  problem sentence is `fail`, every unfilled gate is `warn`, and gates the
+  user chose to skip are declared in `unpassed` rather than guessed. The
+  file's absence is silent (`heading-map.json` `absent_ok`). `interview`
+  reads the fence as facts, skips its open probe when the file exists, and
+  routes an argument with no real user and no pain to `discover`. Skill
+  `gatekit-discover`, ko/en templates, ledger pipeline value `discover`,
+  ADR-0005.
+
 ## 0.1.1 — 2026-09-11
 
 ### Fixed
