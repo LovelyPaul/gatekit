@@ -18,6 +18,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   <name|none> --session <id>` exposes the same write for debugging. An
   end-to-end test drives the prompt gate and then the stop gate with no
   ledger injection.
+- The Bash tool bypassed the write gate entirely: `cat > src/x.ts`, `sed -i`,
+  `tee` and `git apply` created files that the Write tool was denied. A sixth
+  hook, PreToolUse `Bash` → `gates/bash.py`, judges every path a shell
+  command would write with the same function as the Write gate, and denies
+  commands whose write targets cannot be determined while a rule is active
+  (ADR-0004).
 ## 0.1.0 — 2026-09-10
 
 Initial release.

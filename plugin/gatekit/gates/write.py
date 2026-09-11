@@ -212,22 +212,28 @@ def load_task_scope(root: pathlib.Path, job_id: str, task_id: str):
     return None
 
 
-def _session_lang(root: pathlib.Path, event: Dict[str, Any]) -> str:
-    """Read the session's output language, defaulting to English."""
-    try:
-        return ledger.Ledger.load(root, hookio.session_id(event)).output_lang
-    except Exception:  # noqa: BLE001 - language must never break the gate
-        return "en"
+def restrictions_active(root: pathlib.Path) -> bool:
+    """True when at least one of the two rules can currently deny a write.
+
+    Lets a caller that must parse its input (the Bash gate) skip the parse
+    entirely when nothing could be denied anyway.
+    """
+    if os.environ.get("GATEKIT_TASK_ID"):
+        return True
+    cfg = config.load(root)
+    if not cfg.get("enforce_spec_before_code", True):
+        return False
+    if not paths.spec_dir(root).is_dir():
+        return False
+    return approval.check(root, GATE_TARGET) != "ok"
 
 
-def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Decide whether this write may proceed."""
-    root = hookio.event_root(event)
-    raw_path = target_path(event.get("tool_input") or {})
-    if not raw_path:
-        return hookio.allow()
+def decide_path(root: pathlib.Path, raw_path: str, lang: str) -> Optional[Dict[str, Any]]:
+    """Apply rules (b) then (a) to one target path.
 
-    lang = _session_lang(root, event)
+    Returns a deny payload, or ``None`` to allow. Shared by the Write gate and
+    the Bash gate so a shell redirect is judged exactly like a Write call.
+    """
     relpath = relative_target(root, raw_path)
 
     # -- rule (b): task write scope, checked first because it is stricter ----
@@ -271,6 +277,23 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return hookio.deny(
         _message(lang, "spec_first", status=status, path=relpath or raw_path)
     )
+
+
+def session_lang(root: pathlib.Path, event: Dict[str, Any]) -> str:
+    """Read the session's output language, defaulting to English."""
+    try:
+        return ledger.Ledger.load(root, hookio.session_id(event)).output_lang
+    except Exception:  # noqa: BLE001 - language must never break the gate
+        return "en"
+
+
+def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Decide whether this write may proceed."""
+    root = hookio.event_root(event)
+    raw_path = target_path(event.get("tool_input") or {})
+    if not raw_path:
+        return hookio.allow()
+    return decide_path(root, raw_path, session_lang(root, event))
 
 
 def main() -> None:  # pragma: no cover - exercised via subprocess tests

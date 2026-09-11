@@ -42,7 +42,7 @@ gatekit/
 │   │   ├── doctor.md      /gatekit:doctor
 │   │   └── setup.md       /gatekit:setup       → optional Codex backend, config
 │   ├── skills/<name>/SKILL.md           # ≤ 40-line NL trigger shims that point at the command
-│   ├── hooks/hooks.json                 # 5 hook registrations (see §3); auto-loaded, never listed in plugin.json
+│   ├── hooks/hooks.json                 # 6 hook registrations (see §3); auto-loaded, never listed in plugin.json
 │   ├── gatekit/                         # kernel package (stdlib only)
 │   │   ├── cli.py         dispatcher: python3 -m gatekit <sub>
 │   │   ├── hookio.py      hook stdin/stdout contract, safe wrapper
@@ -57,7 +57,7 @@ gatekit/
 │   │   ├── doctor.py      7-axis diagnosis
 │   │   ├── config.py      .gatekit/config.json loader with defaults
 │   │   ├── paths.py       project root / state dir resolution
-│   │   └── gates/         hook entry points: prompt.py write.py spawn.py question.py stop.py
+│   │   └── gates/         hook entry points: prompt.py write.py bash.py spawn.py question.py stop.py
 │   ├── spec-kit/
 │   │   ├── templates/{ko,en}/01-prd.md … 05-gate.md, RECOVERY.md, PROGRESS.md
 │   │   └── heading-map.json             # canonical headings per file per language
@@ -116,6 +116,7 @@ up to 45 s (contract run).
 
 Registered hooks (plugin/hooks/hooks.json): UserPromptSubmit→`gates/prompt.py`,
 PreToolUse `Write|Edit|MultiEdit|NotebookEdit`→`gates/write.py`,
+PreToolUse `Bash`→`gates/bash.py` (ADR-0004),
 PreToolUse `Agent|Task`→`gates/spawn.py`, PostToolUse `AskUserQuestion`→`gates/question.py`,
 Stop→`gates/stop.py`.
 
@@ -123,6 +124,7 @@ Gate behaviour:
 
 - **prompt**: ensure ledger exists for `session_id`; detect `output_lang` from `prompt` (§8) and store it; **set `active_pipeline`** when the prompt invokes `/gatekit:<pipeline>`. Claude Code delivers a slash command as the tagged body `<command-message>…</command-message>` / `<command-name>/gatekit:<name></command-name>` / `<command-args>…</command-args>`; that tag, a bare `/gatekit:<name>` at the start of the prompt, and the `# /gatekit:<name>` title line of an expanded command body are recognised within the first 12 lines. A mid-sentence mention is not an invocation. `doctor` and `setup` clear it; an unknown name leaves it alone; a plain prompt keeps it. Entering a different pipeline resets `questions` to its defaults. This is the **only** production writer of `active_pipeline` — commands never set it by prose. Inject `additionalContext` (≤ 600 chars) with `output_lang`, question budget state, active pipeline, and unresolved gate count. Never blocks.
 - **write**: deny when (a) `config.enforce_spec_before_code` is true, `spec/` exists, `.gatekit/approvals.json` has no valid approval for `spec/05-gate.md`, and the target path is outside the allowlist `spec/**, .gatekit/**, docs/**, README*, *.md at root`; or (b) env `GATEKIT_TASK_ID` is set and the target is outside that task's `write_scope` (from the job's `task.json`). Reason text is in `output_lang`.
+- **bash**: apply the write rules (a) and (b) to every file a Bash command would write, read statically from the command text: redirections (`>`, `>>`, `&>`, `>|`, `N>`), `tee`, `sed -i`/`perl -i`, `cp`/`mv`/`ln`/`install`/`rsync` destinations, `touch`/`rm`/`mkdir`/`truncate`/`chmod`/`chown` operands, `dd of=`, `sort -o`, `curl -o`, `wget -O`, `tar -C`/`-f`, `unzip -d`, `zip`, with `cd` tracked across `;`/`&&`/`||`/`|`/newlines, `VAR=`/`sudo`/`env`/`nohup` prefixes stripped, here-document bodies ignored, `/dev/*` targets ignored and `sh|bash|zsh -c "…"` parsed recursively. Fast path: when no rule could deny anything (no `GATEKIT_TASK_ID`, spec gate approved or absent) the command is allowed without parsing. When a rule is active and a write's target **cannot be determined** — `$VAR` or backticks in a path, `cd` to an unknown directory, `eval`, `xargs`, `patch`, `trap`, `find -exec/-delete`, working-tree `git` subcommands (`apply`, `checkout`, `restore`, `reset`, `merge`, `stash`, `init`, `clone`, …), inline interpreter code (`python3 -c`, `node -e`, `perl -e`, stdin scripts), `awk`, command-line editors (`ed`, `ex`, `vim`, `nano`), `busybox`, downloads that choose their own file name (`curl -O`, bare `wget`), process substitution, unbalanced quotes — **deny** with reason `opaque`: "could not tell" is never rounded to "allowed". Programs invoked by name (`npm run build`, `python3 script.py`) are outside its reach by design. Reason text is in `output_lang`.
 - **spawn**: the spawn prompt must contain a fenced block ` ```gatekit-scope ` with JSON `{"write_scope": [globs] | "read-only", "stop_when": "…", "tools": [...] | "inherit"}`. Deny if missing/invalid, or if `write_scope` intersects any scope already recorded in the ledger for this session. On allow, record the scope in the ledger. No regex over prose: parse the fence as JSON.
 - **question**: increment `ledger.questions.asked`; if `asked > budget.max_calls` (default 2 for interview, unlimited otherwise) record `budget_exceeded=true` (informational; commands read it).
 - **stop**: if `.gatekit/contract.json` exists and the ledger's `active_pipeline` is `build` or `verify`: run the contract (§5). On any `fail` or `unverified` criterion and `block_count < 3` and not `stop_hook_active`: block with a reason listing failing criteria; increment `block_count`. Otherwise allow and record `final_verdict` in the ledger (never a blank).

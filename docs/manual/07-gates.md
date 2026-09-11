@@ -1,16 +1,17 @@
-# 훅 게이트 5개
+# 훅 게이트 6개
 
-`plugin/hooks/hooks.json`에 5개 훅이 등록된다. 이 파일은 Claude Code가 자동으로 읽으며 `plugin.json`에 나열하지 않는다. 중복 참조는 플러그인 로드를 실패시킨다.
+`plugin/hooks/hooks.json`에 6개 훅이 등록된다. 이 파일은 Claude Code가 자동으로 읽으며 `plugin.json`에 나열하지 않는다. 중복 참조는 플러그인 로드를 실패시킨다.
 
 | 게이트 | 이벤트 | 대상 도구 | 차단하는가 |
 |---|---|---|---|
 | prompt | `UserPromptSubmit` | 없음 | 아니오 |
 | write | `PreToolUse` | `Write`, `Edit`, `MultiEdit`, `NotebookEdit` | 예 |
+| bash | `PreToolUse` | `Bash` | 예 |
 | spawn | `PreToolUse` | `Agent`, `Task` | 예 |
 | question | `PostToolUse` | `AskUserQuestion` | 아니오 (채널이 없다) |
 | stop | `Stop` | 없음 | 예 (최대 3회) |
 
-![훅 게이트 5개](../assets/gates.svg)
+![훅 게이트 개요](../assets/gates.svg)
 
 ## prompt 게이트
 
@@ -60,6 +61,18 @@ README*
 범위를 확인할 수 없으면 거부한다. 범위를 확립할 수 없는 태스크 id를 주장하는 워커에게는 쓰기 권한을 주지 않는다.
 
 **차단됐을 때 할 일**: 워커 안에서라면 그 태스크의 범위를 벗어난 것이다. `04-tasks.md`의 태스크 분해가 잘못되었다는 신호다. 범위를 넓히지 말고 태스크를 다시 자른다.
+
+## bash 게이트
+
+**언제**: `Bash` 도구가 실행되기 직전.
+
+**하는 일**: 명령 문자열을 실행하지 않고 읽어서 그 명령이 쓸 파일을 뽑아낸 뒤, 각 경로를 write 게이트와 **같은 함수**로 판정한다. 리다이렉션(`>`, `>>`, `&>`), `tee`, `sed -i`, `perl -i`, `cp`/`mv`/`ln`/`install`/`rsync`의 목적지, `touch`/`rm`/`mkdir`/`truncate`/`chmod`/`chown`의 대상, `dd of=`, 그리고 `sort -o`·`curl -o`·`wget -O`·`tar -C`/`-f`·`unzip -d`·`zip`처럼 출력 경로가 인자에 그대로 보이는 도구를 인식한다. `cd`는 `;`, `&&`, `|`, 줄바꿈을 넘어 추적하고, `VAR=`·`sudo`·`env`·`nohup` 접두는 벗기며, 히어독 본문과 `/dev/*`는 무시하고, `sh -c "…"`는 재귀로 읽는다.
+
+**빠른 경로**: 어떤 규칙도 거부할 수 없는 상태(`GATEKIT_TASK_ID` 없음, 게이트 승인됨 또는 `spec/` 없음)면 파싱 없이 통과시킨다. 평소 세션은 이 게이트의 비용을 내지 않는다.
+
+**판별 불가는 거부**: 규칙이 살아 있는데 쓰기 대상을 알 수 없으면 거부한다. 경로 안의 `$VAR`나 백틱, 알 수 없는 디렉터리로 `cd`, `eval`, `xargs`, `patch`, `trap`, `find -exec`, 작업 트리를 바꾸는 `git` 하위 명령(`apply`, `checkout`, `restore`, `reset`, `merge`, `stash`, `init`, `clone` 등), 인라인 인터프리터 코드(`python3 -c`, `node -e`), `awk`, 명령줄 편집기(`ed`, `ex`, `vim`, `nano`), `busybox`, 파일명을 스스로 정하는 다운로드(`curl -O`, 옵션 없는 `wget`), 프로세스 치환, 짝이 안 맞는 따옴표가 여기 해당한다. 거부 메시지는 이유와 대안(Write/Edit 도구, 리터럴 경로)을 말한다. `unverified`를 `ok`로 반올림하지 않는 것과 같은 원칙이다.
+
+**한계**: 이름으로 호출되는 프로그램(`npm run build`, `python3 script.py`)이 무엇을 쓰는지는 보지 않는다. 셸 문법을 읽는 게이트이지 모든 바이너리의 동작을 아는 게이트가 아니다. 근거는 `docs/decisions/ADR-0004-bash-write-gate.md`.
 
 ## spawn 게이트
 

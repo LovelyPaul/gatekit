@@ -31,7 +31,7 @@ gatekit 커널은 파이썬 표준 라이브러리만 쓴다. `pip install`이 �
 
 | # | 축 | 무엇을 보는가 | `fail`일 때 처방 |
 |---|---|---|---|
-| 1 | plugin files | `plugin.json`, `hooks.json`, 게이트 스크립트 5개가 존재하고 비어 있지 않은가 | `/plugin install gatekit` — 스크립트가 없으면 그 게이트는 아예 발화하지 않는다 |
+| 1 | plugin files | `plugin.json`, `hooks.json`, 게이트 스크립트 6개가 존재하고 비어 있지 않은가 | `/plugin install gatekit` — 스크립트가 없으면 그 게이트는 아예 발화하지 않는다 |
 | 2 | hooks registered | `installed_plugins.json`에 등재되고 `settings.json`의 `enabledPlugins`에서 활성인가 | `/plugin enable gatekit@gatekit` |
 | 3 | project state | `.gatekit/config.json`과 `approvals.json`이 파싱되는가 | 해당 파일을 손으로 고치거나 삭제한다 |
 | 4 | spec set | `spec validate` 판정 | 실패한 파일을 소유한 파이프라인으로 간다 |

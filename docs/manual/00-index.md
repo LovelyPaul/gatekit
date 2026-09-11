@@ -12,7 +12,7 @@ gatekit은 Claude Code 플러그인이다. `CLAUDE.md`에 산문으로 적던 �
 | `04-pipeline.md` | 8단계 파이프라인 흐름도와 각 단계의 입력·출력·게이트 |
 | `05-commands.md` | 8개 커맨드 레퍼런스 |
 | `06-spec-files.md` | 스펙 7문서의 필수 섹션과 펜스 JSON 스키마 |
-| `07-gates.md` | 5개 훅 게이트가 각각 무엇을 막는가 |
+| `07-gates.md` | 6개 훅 게이트가 각각 무엇을 막는가 |
 | `08-cli.md` | CLI 레퍼런스, 8개 서브커맨드와 종료 코드 |
 | `09-worked-example.md` | Quicknote 실전 예제 — 한 문장에서 완성까지 |
 | `10-troubleshooting.md` | 증상 → 원인 → 처방 표 |
