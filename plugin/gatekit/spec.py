@@ -3,7 +3,10 @@
 Validates the seven files under `spec/` against the canonical heading map and
 the structural conventions the rest of gatekit depends on:
 
-* which files exist (01-prd.md and 05-gate.md are required, rest warn)
+* which files exist (01-prd.md and 05-gate.md are required, rest warn;
+  00-discovery.md is an optional stage whose absence is silent)
+* 00-discovery.md: one ```gatekit-discovery fence; each unfilled deepening
+  gate is a warn, never silent
 * headings: every canonical heading present, no heading from the other
   language's set (cross-language residue is a hard fail)
 * 01-prd.md: inline assumption blockquotes match the assumption ledger table
@@ -51,6 +54,11 @@ def spec_files() -> List[str]:
 
 def required_files() -> List[str]:
     return list(heading_map()["required_files"])
+
+
+def absent_ok_files() -> List[str]:
+    """Optional stages: a missing file is not a finding."""
+    return list(heading_map().get("absent_ok", []))
 
 
 # --------------------------------------------------------------------------
@@ -148,6 +156,20 @@ MESSAGES = {
         "crit_argv": "완료 기준 {id}의 argv는 비어 있지 않은 문자열 리스트여야 합니다.",
         "crit_not_done_section": "\"완료로 보지 않는 조건\" 절이 없습니다.",
         "trace_missing": "작업 {id}를 참조하는 완료 기준이 없습니다.",
+        "disc_no_fence": "```gatekit-discovery 블록이 정확히 하나 있어야 합니다 (현재 {count}개).",
+        "disc_no_problem": "problem 이 비어 있습니다. 해법이 섞이지 않은 문제 문장 한 줄이 필요합니다.",
+        "disc_gate_unfilled": "심화 게이트 {gate} 가 채워지지 않았습니다 ({why}). 일부러 건너뛰었다면 unpassed 에 적으세요.",
+        "disc_gate_unpassed": "심화 게이트 {gate} 는 unpassed 로 선언되었습니다. interview 는 이 항목을 사실이 아니라 가정으로 읽습니다.",
+        "disc_unknown_unpassed": "unpassed 에 알 수 없는 게이트 이름이 있습니다: {name}",
+        "disc_unpassed_type": "unpassed 는 게이트 이름의 리스트여야 합니다.",
+        "disc_unpassed_but_filled": "심화 게이트 {gate} 가 채워져 있는데 unpassed 에도 있습니다. 둘 중 하나를 고치세요.",
+        "disc_deadline": "deadline 이 비어 있습니다. 없으면 \"none\" 이라고 적으세요.",
+        "disc_user": "실사용자(user) 한 명의 이름·역할",
+        "disc_current_way": "current_way 는 순서가 있는 단계 2개 이상",
+        "disc_frequency_per_month": "frequency_per_month 는 숫자",
+        "disc_minutes_per_run": "minutes_per_run 은 숫자",
+        "disc_why_chain": "why_chain 은 문자열 리스트, 증상 + 서로 다른(바꿔 말하기 제외) '왜' 3칸 이상",
+        "disc_failed_attempts": "failed_attempts 는 result 가 failed|works-but-costly 인 항목 1개 이상, 또는 \"not-applicable\"",
         "ok": "검사를 통과했습니다.",
     },
     "en": {
@@ -173,6 +195,20 @@ MESSAGES = {
         "crit_argv": "Criterion {id} needs argv to be a non-empty list of strings.",
         "crit_not_done_section": "The \"not counted as done\" section is missing.",
         "trace_missing": "No completion criterion references task {id}.",
+        "disc_no_fence": "Exactly one ```gatekit-discovery block is required (found {count}).",
+        "disc_no_problem": "problem is empty. One problem sentence with no solution in it is required.",
+        "disc_gate_unfilled": "Deepening gate {gate} is not filled ({why}). If it was skipped on purpose, list it in unpassed.",
+        "disc_gate_unpassed": "Deepening gate {gate} is declared unpassed. interview reads this item as an assumption, not a fact.",
+        "disc_unknown_unpassed": "unpassed names an unknown gate: {name}",
+        "disc_unpassed_type": "unpassed must be a list of gate names.",
+        "disc_unpassed_but_filled": "Deepening gate {gate} is filled but also listed in unpassed. Fix one of the two.",
+        "disc_deadline": "deadline is empty. Write \"none\" when there is none.",
+        "disc_user": "user must name one real person with a role",
+        "disc_current_way": "current_way needs at least two ordered steps",
+        "disc_frequency_per_month": "frequency_per_month must be a number",
+        "disc_minutes_per_run": "minutes_per_run must be a number",
+        "disc_why_chain": "why_chain must be a list of strings: the symptom plus at least three distinct (not reworded) whys",
+        "disc_failed_attempts": "failed_attempts needs one entry with result failed|works-but-costly, or \"not-applicable\"",
         "ok": "Checks passed.",
     },
 }
@@ -503,6 +539,152 @@ def _check_traceability(tasks_text: str, gate_text: str, lang: str) -> List[dict
 
 
 # --------------------------------------------------------------------------
+# discovery
+# --------------------------------------------------------------------------
+
+#: The deepening gates, in the order the command fills them. Each unfilled
+#: gate is a ``warn`` so the record stays honest about what it lacks.
+DISCOVERY_GATES = (
+    "user",
+    "current_way",
+    "frequency_per_month",
+    "minutes_per_run",
+    "why_chain",
+    "failed_attempts",
+)
+
+_ATTEMPT_RESULTS = ("failed", "works-but-costly")
+
+#: Two why-links whose word sets overlap this much are the same statement
+#: reworded. A word-overlap test is a heuristic, not understanding: it catches
+#: "files hard to find" / "hard to find files", not a true synonym. It is the
+#: honest limit of a stdlib validator, and the command still requires the
+#: user to confirm the cause in their own words.
+_RESTATEMENT_OVERLAP = 0.6
+
+_STOPWORDS = frozenset(
+    "a an the is are was were be been it its of to in on at for and or but "
+    "that this these those there they them we you i my our your not no so "
+    "because since when then than very just".split()
+)
+
+
+def _word_set(text: str) -> set:
+    words = re.findall(r"[0-9A-Za-z가-힣]+", str(text).lower())
+    return {w for w in words if w not in _STOPWORDS}
+
+
+def _overlap(a: set, b: set) -> float:
+    """Jaccard overlap of two word sets; 0 when either is empty."""
+    if not a or not b:
+        return 0.0
+    return len(a & b) / float(len(a | b))
+
+
+def _is_not_applicable(value: Any) -> bool:
+    """``"not-applicable"`` as a bare string or as the only list item."""
+    if isinstance(value, str):
+        return value.strip().lower() == "not-applicable"
+    return (
+        isinstance(value, list)
+        and len(value) == 1
+        and isinstance(value[0], str)
+        and value[0].strip().lower() == "not-applicable"
+    )
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _gate_filled(gate: str, record: dict) -> bool:
+    value = record.get(gate)
+    if gate == "user":
+        return isinstance(value, str) and bool(value.strip())
+    if gate == "current_way":
+        return isinstance(value, list) and len([s for s in value if isinstance(s, str) and s.strip()]) >= 2
+    if gate in ("frequency_per_month", "minutes_per_run"):
+        return _is_number(value) and value > 0
+    if gate == "why_chain":
+        if not isinstance(value, list) or len(value) < 4:
+            return False
+        if not all(isinstance(item, str) and item.strip() for item in value):
+            return False
+        accepted: List[set] = [_word_set(value[0])]
+        distinct = 0
+        for item in value[1:]:
+            words = _word_set(item)
+            if not words:
+                continue
+            # A link that mostly restates an earlier one is not a new "why".
+            if any(_overlap(words, earlier) >= _RESTATEMENT_OVERLAP for earlier in accepted):
+                continue
+            accepted.append(words)
+            distinct += 1
+        return distinct >= 3
+    if gate == "failed_attempts":
+        if _is_not_applicable(value):
+            return True
+        if not isinstance(value, list) or not value:
+            return False
+        return all(
+            isinstance(a, dict)
+            and isinstance(a.get("tried"), str) and a["tried"].strip()
+            and a.get("result") in _ATTEMPT_RESULTS
+            for a in value
+        )
+    return False
+
+
+def _check_discovery(text: str, lang: str) -> List[dict]:
+    name = "00-discovery.md"
+    findings: List[dict] = []
+    detailed = _parse_fences_detailed(text, "gatekit-discovery")
+    for line_no, _, err in detailed:
+        if err is not None:
+            findings.append(
+                _finding(name, V.FAIL, _msg(lang, "fence_malformed", line=line_no, name="gatekit-discovery", err=err))
+            )
+    records = [parsed for _, parsed, err in detailed if err is None]
+    if len(records) != 1:
+        if not findings:  # a malformed fence was already reported above
+            findings.append(_finding(name, V.FAIL, _msg(lang, "disc_no_fence", count=len(records))))
+        return findings
+    record = records[0]
+
+    problem = record.get("problem")
+    if not (isinstance(problem, str) and problem.strip()):
+        findings.append(_finding(name, V.FAIL, _msg(lang, "disc_no_problem")))
+
+    deadline = record.get("deadline")
+    if not (isinstance(deadline, str) and deadline.strip()):
+        findings.append(_finding(name, V.WARN, _msg(lang, "disc_deadline")))
+
+    unpassed = record.get("unpassed")
+    if unpassed is None:
+        unpassed = []
+    if not isinstance(unpassed, list):
+        findings.append(_finding(name, V.FAIL, _msg(lang, "disc_unpassed_type")))
+        unpassed = []
+    for item in unpassed:
+        if item not in DISCOVERY_GATES:
+            findings.append(_finding(name, V.FAIL, _msg(lang, "disc_unknown_unpassed", name=item)))
+
+    for gate in DISCOVERY_GATES:
+        if _gate_filled(gate, record):
+            if gate in unpassed:
+                findings.append(_finding(name, V.WARN, _msg(lang, "disc_unpassed_but_filled", gate=gate)))
+            continue
+        if gate in unpassed:
+            findings.append(_finding(name, V.WARN, _msg(lang, "disc_gate_unpassed", gate=gate)))
+        else:
+            findings.append(
+                _finding(name, V.WARN, _msg(lang, "disc_gate_unfilled", gate=gate, why=_msg(lang, "disc_" + gate)))
+            )
+    return findings
+
+
+# --------------------------------------------------------------------------
 # entry point
 # --------------------------------------------------------------------------
 
@@ -532,6 +714,7 @@ def validate(root: pathlib.Path, lang: Optional[str] = None) -> dict:
 
     findings: List[dict] = []
     required = set(required_files())
+    silent = set(absent_ok_files())
     for name in spec_files():
         if name in read_errors:
             findings.append(
@@ -539,6 +722,8 @@ def validate(root: pathlib.Path, lang: Optional[str] = None) -> dict:
             )
             continue
         if contents[name] is None:
+            if name in silent:
+                continue
             key = "missing_required" if name in required else "missing_optional"
             level = V.FAIL if name in required else V.WARN
             findings.append(_finding(name, level, _msg(lang, key)))
@@ -548,6 +733,10 @@ def validate(root: pathlib.Path, lang: Optional[str] = None) -> dict:
         if text is None:
             continue
         findings.extend(_check_headings(name, text, lang))
+
+    discovery = contents.get("00-discovery.md")
+    if discovery is not None:
+        findings.extend(_check_discovery(discovery, lang))
 
     prd = contents.get("01-prd.md")
     if prd is not None:

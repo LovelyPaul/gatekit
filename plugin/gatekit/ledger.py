@@ -36,9 +36,9 @@ READ_ONLY = "read-only"
 
 #: The pipelines a session can have active (ARCHITECTURE.md section 4). The
 #: prompt gate sets one when the user invokes ``/gatekit:<pipeline>``; the stop
-#: and question gates read it. ``doctor`` and ``setup`` are commands, not
+#: and question gates read it. ``discover`` is the optional first step. ``doctor`` and ``setup`` are commands, not
 #: pipelines, and clear it.
-PIPELINES = ("interview", "mockup", "tasks", "gate", "build", "verify")
+PIPELINES = ("discover", "interview", "mockup", "tasks", "gate", "build", "verify")
 
 Scope = Union[str, List[str]]
 

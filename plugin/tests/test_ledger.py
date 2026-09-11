@@ -288,7 +288,8 @@ class TestSetPipeline(unittest.TestCase):
 
     def test_pipelines_constant_matches_architecture(self) -> None:
         self.assertEqual(
-            ledger.PIPELINES, ("interview", "mockup", "tasks", "gate", "build", "verify")
+            ledger.PIPELINES,
+            ("discover", "interview", "mockup", "tasks", "gate", "build", "verify"),
         )
 
     def test_set_pipeline_persists(self) -> None:

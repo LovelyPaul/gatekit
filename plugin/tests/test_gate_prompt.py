@@ -267,3 +267,12 @@ class TestPipelineDetection(PromptProject):
         prompt_gate.handle(self.event("/gatekit:gate"))
         events = [e for e in self.led().data["events"] if e["kind"] == "pipeline_set"]
         self.assertEqual(events[-1]["detail"]["pipeline"], "gate")
+
+
+class TestDiscoverPipeline(PromptProject):
+    def test_discover_command_sets_pipeline(self) -> None:
+        prompt_gate.handle(self.event(
+            "<command-message>gatekit:discover</command-message>\n"
+            "<command-name>/gatekit:discover</command-name>\n"
+            "<command-args></command-args>"))
+        self.assertEqual(self.led().data["active_pipeline"], "discover")

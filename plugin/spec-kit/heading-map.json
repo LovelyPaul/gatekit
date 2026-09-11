@@ -1,9 +1,28 @@
 {
   "version": 1,
-  "note": "Canonical H2 headings per spec file per language. spec.validate requires every heading listed here to be present in the corresponding file, and requires that no heading belonging to the other language's set appears in it. Order is not enforced; presence is.",
-  "files": ["01-prd.md", "02-screens.md", "03-architecture.md", "04-tasks.md", "05-gate.md", "RECOVERY.md", "PROGRESS.md"],
-  "required_files": ["01-prd.md", "05-gate.md"],
+  "note": "Canonical H2 headings per spec file per language. spec.validate requires every heading listed here to be present in the corresponding file, and requires that no heading belonging to the other language's set appears in it. Order is not enforced; presence is. Files listed in absent_ok are optional stages: their absence produces no finding at all.",
+  "files": [
+    "00-discovery.md",
+    "01-prd.md",
+    "02-screens.md",
+    "03-architecture.md",
+    "04-tasks.md",
+    "05-gate.md",
+    "RECOVERY.md",
+    "PROGRESS.md"
+  ],
+  "required_files": [
+    "01-prd.md",
+    "05-gate.md"
+  ],
   "ko": {
+    "00-discovery.md": [
+      "## 불편 목록",
+      "## 고른 문제",
+      "## 기한",
+      "## 심화 게이트",
+      "## 남은 것"
+    ],
     "01-prd.md": [
       "## 문제",
       "## 현재 상태 (측정값)",
@@ -53,6 +72,13 @@
     ]
   },
   "en": {
+    "00-discovery.md": [
+      "## Pain list",
+      "## Chosen problem",
+      "## Deadline",
+      "## Deepening gates",
+      "## Open items"
+    ],
     "01-prd.md": [
       "## Problem",
       "## Current state (measured)",
@@ -100,5 +126,8 @@
       "## Failed attempts",
       "## Last verification"
     ]
-  }
+  },
+  "absent_ok": [
+    "00-discovery.md"
+  ]
 }
