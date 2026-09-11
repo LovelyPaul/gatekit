@@ -55,6 +55,22 @@ _INVOCATION_RE = re.compile(
 _HEAD_LINES = 12
 
 
+_ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.DOTALL)
+
+
+def language_signal(text: str) -> str:
+    """The part of *text* that is the user's own words.
+
+    For a slash command Claude Code sends a tagged body; the tags and the
+    command name are Latin letters that would drag a Korean session to
+    English. Only the ``<command-args>`` content is the user's language.
+    """
+    if "<command-name>" in text:
+        match = _ARGS_RE.search(text)
+        return match.group(1) if match else ""
+    return text
+
+
 def detect_command(text: str) -> Optional[str]:
     """Return the ``/gatekit:<name>`` command this prompt invokes, if any."""
     head = "\n".join(text.splitlines()[:_HEAD_LINES])
@@ -124,9 +140,12 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
     led = ledger.Ledger.load(root, session)
 
-    # An empty prompt carries no language signal, so keep what we had.
-    if text.strip():
-        led.set_output_lang(lang.detect(text))
+    # An empty prompt carries no language signal, so keep what we had. A
+    # slash command's tag body is not the user's words either: only the
+    # <command-args> content counts, and empty args keep the stored language.
+    signal = language_signal(text)
+    if signal.strip():
+        led.set_output_lang(lang.detect(signal))
 
     apply_command(led, text)
 

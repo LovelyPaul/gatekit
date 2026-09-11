@@ -276,3 +276,29 @@ class TestDiscoverPipeline(PromptProject):
             "<command-name>/gatekit:discover</command-name>\n"
             "<command-args></command-args>"))
         self.assertEqual(self.led().data["active_pipeline"], "discover")
+
+
+class TestLanguageFromSlashCommand(PromptProject):
+    """A slash command's tag body is not the user's words: language comes from
+    <command-args> only, and an empty args keeps the stored language."""
+
+    def tagged(self, name: str, args: str) -> str:
+        return (
+            "<command-message>gatekit:%s</command-message>\n"
+            "<command-name>/gatekit:%s</command-name>\n"
+            "<command-args>%s</command-args>" % (name, name, args)
+        )
+
+    def test_empty_args_keeps_korean(self) -> None:
+        prompt_gate.handle(self.event("동네 러닝크루 출석 앱을 만들고 싶어요"))
+        prompt_gate.handle(self.event(self.tagged("discover", "")))
+        self.assertEqual(self.led().output_lang, "ko")
+
+    def test_short_korean_args_stay_korean(self) -> None:
+        prompt_gate.handle(self.event(self.tagged("interview", "출석 앱")))
+        self.assertEqual(self.led().output_lang, "ko")
+
+    def test_english_args_detect_english(self) -> None:
+        prompt_gate.handle(self.event("러닝크루"))
+        prompt_gate.handle(self.event(self.tagged("interview", "an attendance app for my running crew")))
+        self.assertEqual(self.led().output_lang, "en")

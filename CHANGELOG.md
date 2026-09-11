@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## 0.2.0 — 2026-09-11
 
+### Fixed
+
+- A slash command with no arguments flipped a Korean session to `en`: the
+  prompt gate counted the Latin letters of the `<command-name>` tag body as
+  the user's words. Language is now detected from `<command-args>` only, and
+  empty args keep the stored language.
+
 ### Added
 
 - `/gatekit:discover`, an optional first pipeline for the user who does not
