@@ -16,7 +16,7 @@ SUBCOMMANDS = {
     "approve":  ("gatekit.approval", "Hash-anchored approvals: approve / check / list."),
     "jobs":     ("gatekit.jobs",     "Worker jobs: start / status / wait / results / redelegate / clean."),
     "workers":  ("gatekit.workers",  "Worker backends: list / check / set-default (claude default, codex optional)."),
-    "ledger":   ("gatekit.ledger",   "Session ledger: show / init (debugging aid)."),
+    "ledger":   ("gatekit.ledger",   "Session ledger: show / init / set-pipeline."),
     "lang":     ("gatekit.lang",     "Detect output language for a text (ko/en)."),
 }
 

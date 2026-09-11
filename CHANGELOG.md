@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.1.1 — 2026-09-11
+
+### Fixed
+
+- The stop gate and the interview question budget never engaged in a real
+  session: nothing in production set the ledger's `active_pipeline`, and the
+  tests injected it directly. The prompt gate now records the pipeline when a
+  prompt invokes `/gatekit:<pipeline>` — in the tagged
+  `<command-name>/gatekit:<name></command-name>` body Claude Code actually
+  sends, or as a bare invocation (`doctor`/`setup` clear it); entering a
+  different pipeline resets the question budget. `gatekit ledger set-pipeline
+  <name|none> --session <id>` exposes the same write for debugging. An
+  end-to-end test drives the prompt gate and then the stop gate with no
+  ledger injection.
 ## 0.1.0 — 2026-09-10
 
 Initial release.

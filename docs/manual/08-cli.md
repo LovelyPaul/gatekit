@@ -28,7 +28,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" <subcommand> [args]
 | `approve` | 해시 앵커 승인 |
 | `jobs` | 워커 잡 실행과 관리 |
 | `workers` | 워커 백엔드 관리 |
-| `ledger` | 세션 원장 조회 (디버깅용) |
+| `ledger` | 세션 원장 조회·파이프라인 설정 |
 | `lang` | 출력 언어 감지 |
 
 인자 없이 부르면 사용법을 출력하고 종료 코드 1을 낸다. `-h`·`--help`·`help`는 0을 낸다. 없는 서브커맨드는 2다.
@@ -150,14 +150,16 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers enable <name>
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" ledger show --session <id> [--root PATH]
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" ledger init --session <id> [--root PATH]
+python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" ledger set-pipeline <interview|mockup|tasks|gate|build|verify|none> --session <id> [--root PATH]
 ```
 
-디버깅 보조 도구다. `--session`은 필수다. `show`는 원장 JSON 전체를, `init`은 생성된 파일 경로를 출력한다.
+`--session`은 필수다. `show`는 원장 JSON 전체를, `init`은 생성된 파일 경로를 출력한다. `set-pipeline`은 `active_pipeline`을 기록한다. 평소에는 prompt 게이트가 `/gatekit:<파이프라인>` 호출을 보고 자동으로 기록하므로 손으로 부를 일은 디버깅뿐이다. 다른 파이프라인으로 바뀌면 질문 예산이 초기화된다.
 
 | 종료 코드 | 뜻 |
 |---|---|
 | 0 | 성공 |
 | 1 | 해당 세션의 원장 없음 |
+| 2 | `set-pipeline`에 알 수 없는 이름 |
 | 2 | 인자 오류 |
 
 ## lang

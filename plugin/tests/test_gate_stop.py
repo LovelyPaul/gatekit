@@ -260,3 +260,43 @@ class TestSubprocess(StopProject):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+class TestEndToEndViaPromptGate(StopProject):
+    """No direct ledger injection: the prompt gate must be what arms the stop
+    gate, exactly as it happens in a real session."""
+
+    def prompt(self, text: str) -> None:
+        from gatekit.gates import prompt as prompt_gate
+
+        prompt_gate.handle(
+            {
+                "session_id": self.session,
+                "hook_event_name": "UserPromptSubmit",
+                "cwd": str(self.root),
+                "prompt": text,
+            }
+        )
+
+    def test_build_command_then_failing_contract_blocks(self) -> None:
+        self.failing()
+        self.prompt(
+            "<command-message>gatekit:build</command-message>\n"
+            "<command-name>/gatekit:build</command-name>\n"
+            "<command-args></command-args>"
+        )
+        result = stop_gate.handle(self.event())
+        self.assertIsNotNone(result)
+        self.assertEqual(result["decision"], "block")
+
+    def test_plain_chat_never_arms_stop_gate(self) -> None:
+        self.failing()
+        self.prompt("please build everything now")
+        self.assertIsNone(stop_gate.handle(self.event()))
+        self.assertEqual(self.led().data["stop"]["final_verdict"], "unverified")
+
+    def test_doctor_after_build_disarms(self) -> None:
+        self.failing()
+        self.prompt("/gatekit:build")
+        self.prompt("/gatekit:doctor")
+        self.assertIsNone(stop_gate.handle(self.event()))

@@ -275,3 +275,51 @@ class TestRun(TempProject):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+class TestSetPipeline(unittest.TestCase):
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(os.path.realpath(self._tmp.name))
+        (self.root / ".gatekit").mkdir()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_pipelines_constant_matches_architecture(self) -> None:
+        self.assertEqual(
+            ledger.PIPELINES, ("interview", "mockup", "tasks", "gate", "build", "verify")
+        )
+
+    def test_set_pipeline_persists(self) -> None:
+        led = ledger.Ledger.load(self.root, "s1")
+        self.assertTrue(led.set_pipeline("build"))
+        led.save()
+        self.assertEqual(ledger.Ledger.load(self.root, "s1").data["active_pipeline"], "build")
+
+    def test_set_pipeline_none_clears(self) -> None:
+        led = ledger.Ledger.load(self.root, "s1")
+        led.set_pipeline("build")
+        self.assertTrue(led.set_pipeline(None))
+        self.assertIsNone(led.data["active_pipeline"])
+
+    def test_set_pipeline_rejects_unknown(self) -> None:
+        led = ledger.Ledger.load(self.root, "s1")
+        led.set_pipeline("build")
+        self.assertFalse(led.set_pipeline("deploy"))
+        self.assertEqual(led.data["active_pipeline"], "build")
+
+    def test_cli_set_pipeline(self) -> None:
+        code = ledger.run(["set-pipeline", "verify", "--root", str(self.root), "--session", "s2"])
+        self.assertEqual(code, 0)
+        self.assertEqual(ledger.Ledger.load(self.root, "s2").data["active_pipeline"], "verify")
+
+    def test_cli_set_pipeline_none(self) -> None:
+        ledger.run(["set-pipeline", "verify", "--root", str(self.root), "--session", "s2"])
+        code = ledger.run(["set-pipeline", "none", "--root", str(self.root), "--session", "s2"])
+        self.assertEqual(code, 0)
+        self.assertIsNone(ledger.Ledger.load(self.root, "s2").data["active_pipeline"])
+
+    def test_cli_set_pipeline_unknown_is_nonzero(self) -> None:
+        code = ledger.run(["set-pipeline", "deploy", "--root", str(self.root), "--session", "s2"])
+        self.assertNotEqual(code, 0)

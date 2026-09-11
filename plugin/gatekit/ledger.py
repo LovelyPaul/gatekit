@@ -34,6 +34,12 @@ VERSION = 1
 
 READ_ONLY = "read-only"
 
+#: The pipelines a session can have active (ARCHITECTURE.md section 4). The
+#: prompt gate sets one when the user invokes ``/gatekit:<pipeline>``; the stop
+#: and question gates read it. ``doctor`` and ``setup`` are commands, not
+#: pipelines, and clear it.
+PIPELINES = ("interview", "mockup", "tasks", "gate", "build", "verify")
+
 Scope = Union[str, List[str]]
 
 #: Session ids come from Claude Code, but the ledger filename is built from
@@ -283,11 +289,38 @@ class Ledger:
     def set_output_lang(self, value: str) -> None:
         self.data["output_lang"] = value if value in ("ko", "en") else "en"
 
+    def set_pipeline(self, name: Optional[str]) -> bool:
+        """Set ``active_pipeline`` to *name* (``None`` clears it).
+
+        Returns ``False`` and leaves the ledger untouched for a name outside
+        :data:`PIPELINES`. Entering a *different* pipeline resets the question
+        budget: an interview's two questions must not be charged against the
+        tasks pipeline that follows it in the same session.
+        """
+        if name is not None and name not in PIPELINES:
+            return False
+        previous = self.data.get("active_pipeline")
+        self.data["active_pipeline"] = name
+        if name != previous:
+            self.data["questions"] = {
+                "asked": 0,
+                "max_calls": 2,
+                "budget_exceeded": False,
+            }
+            self.append_event("pipeline_set", {"pipeline": name, "previous": previous})
+        return True
+
 
 def run(argv: List[str]) -> int:
-    """``python3 -m gatekit ledger <show|init> --session <id>``."""
+    """``python3 -m gatekit ledger <show|init|set-pipeline> --session <id>``."""
     parser = argparse.ArgumentParser(prog="gatekit ledger", add_help=True)
-    parser.add_argument("action", choices=["show", "init"])
+    parser.add_argument("action", choices=["show", "init", "set-pipeline"])
+    parser.add_argument(
+        "pipeline",
+        nargs="?",
+        default=None,
+        help="for set-pipeline: one of %s, or 'none'" % "/".join(PIPELINES),
+    )
     parser.add_argument("--root", default=None, help="project root (default: detected)")
     parser.add_argument("--session", required=True, help="session id")
     try:
@@ -301,6 +334,23 @@ def run(argv: List[str]) -> int:
         led = Ledger.load(root, args.session)
         led.save()
         print(str(Ledger.path_for(root, args.session)))
+        return 0
+
+    if args.action == "set-pipeline":
+        if not args.pipeline:
+            print("gatekit: set-pipeline needs a pipeline name or 'none'", file=sys.stderr)
+            return 2
+        wanted = None if args.pipeline.lower() == "none" else args.pipeline
+        led = Ledger.load(root, args.session)
+        if not led.set_pipeline(wanted):
+            print(
+                "gatekit: unknown pipeline '%s' (expected one of %s, or none)"
+                % (args.pipeline, ", ".join(PIPELINES)),
+                file=sys.stderr,
+            )
+            return 2
+        led.save()
+        print(wanted or "none")
         return 0
 
     if not Ledger.exists(root, args.session):
