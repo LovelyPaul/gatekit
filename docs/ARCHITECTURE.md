@@ -111,8 +111,15 @@ Responses:
 `hookio.run(handler)` reads stdin, calls `handler(event: dict) -> dict | None`,
 prints the returned JSON (if any), and **always exits 0**; exceptions are
 appended to `.gatekit/runs/hook-errors.log` as one line `iso_ts event_name error`.
-Each gate must complete in < 5 s on a normal project; the Stop gate may take
-up to 45 s (contract run).
+Each gate must complete in < 5 s on a normal project. The Stop gate runs the
+contract (§5) and is the exception: its hook `timeout` in `hooks.json` is
+600 s, the largest value the Claude Code hook documentation shows, and the
+gate caps the contract run at `STOP_BUDGET_CAP_S` = 570 s (`gates/stop.py`)
+so start-up and teardown fit inside the timeout. A `gatekit-budget` above the
+cap runs in full under `contract run` but is cut at the Stop gate, where the
+cut is reported as `unverified` — honest, where a hook killed by Claude Code
+would record no verdict and no log line. Tests pin `hooks.json` to
+`STOP_HOOK_TIMEOUT_S` and the cap to at least 30 s below it.
 
 Registered hooks (plugin/hooks/hooks.json): UserPromptSubmit→`gates/prompt.py`,
 PreToolUse `Write|Edit|MultiEdit|NotebookEdit`→`gates/write.py`,
@@ -347,7 +354,7 @@ def run(argv: list[str]) -> int
 # contract.py
 def derive(root: pathlib.Path) -> dict                 # writes .gatekit/contract.json, returns it
 def status(root: pathlib.Path) -> str                  # ok (fresh) | fail (stale) | unverified (absent)
-def execute(root: pathlib.Path, total_budget_s: float = 45.0) -> dict   # {"verdict", "criteria":[...], "reasons":[...]}
+def execute(root: pathlib.Path, total_budget_s: float | None = None, cap_s: float | None = None) -> dict   # {"verdict", "criteria":[...], "reasons":[...], "total_budget_s"}; cap_s lowers the applied budget
 def run(argv: list[str]) -> int
 
 # spec.py

@@ -12,7 +12,7 @@
       { "matcher": "AskUserQuestion", "hooks": [ { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/gatekit/gates/question.py\"", "timeout": 10 } ] }
     ],
     "Stop": [
-      { "hooks": [ { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/gatekit/gates/stop.py\"", "timeout": 60 } ] }
+      { "hooks": [ { "type": "command", "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/gatekit/gates/stop.py\"", "timeout": 600 } ] }
     ]
   }
 }

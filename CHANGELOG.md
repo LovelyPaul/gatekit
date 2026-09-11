@@ -24,6 +24,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   command would write with the same function as the Write gate, and denies
   commands whose write targets cannot be determined while a rule is active
   (ADR-0004).
+- The Stop hook's `timeout` in `hooks.json` was 60 s while a `gatekit-budget`
+  fence may declare up to 600 s: a project that honestly declared a slow
+  suite had its stop gate killed mid-run with no verdict and no log line.
+  The timeout is now 600 s (the largest value the hook documentation shows)
+  and the stop gate caps the contract run at 570 s via a new
+  `contract.execute(cap_s=…)` argument, so a cut run reports `unverified`
+  instead of vanishing. Tests pin both numbers; the dead `STOP_BUDGET_S`
+  constant is gone.
+
 ## 0.1.0 — 2026-09-10
 
 Initial release.

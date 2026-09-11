@@ -320,8 +320,17 @@ def _run_one(
     return result
 
 
-def execute(root: pathlib.Path, total_budget_s: Optional[float] = None) -> Dict[str, Any]:
+def execute(
+    root: pathlib.Path,
+    total_budget_s: Optional[float] = None,
+    cap_s: Optional[float] = None,
+) -> Dict[str, Any]:
     """Run every criterion within *total_budget_s* and aggregate the verdict.
+
+    *cap_s* lowers whatever budget applies (declared or explicit) to at most
+    that many seconds. The stop gate uses it so a run never outlives the hook
+    timeout Claude Code gives it; a run cut short by the cap is ``unverified``,
+    which is honest, where a killed hook would record nothing at all.
 
     Returns ``{"verdict", "criteria", "reasons"}``. ``reasons`` holds short
     human-readable strings naming what failed or went unverified; the stop gate
@@ -355,6 +364,8 @@ def execute(root: pathlib.Path, total_budget_s: Optional[float] = None) -> Dict[
         budget = float(declared) if isinstance(declared, (int, float)) and not isinstance(declared, bool) else TOTAL_BUDGET_S
     else:
         budget = float(total_budget_s)
+    if cap_s is not None:
+        budget = min(budget, float(cap_s))
     deadline = time.monotonic() + budget
     results: List[Dict[str, Any]] = []
     for crit in criteria:

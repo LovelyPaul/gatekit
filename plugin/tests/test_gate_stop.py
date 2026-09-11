@@ -262,6 +262,69 @@ if __name__ == "__main__":  # pragma: no cover
     unittest.main()
 
 
+class TestHookTimeoutCoversBudget(unittest.TestCase):
+    """The contract run inside the Stop hook must finish before Claude Code's
+    hook timeout, or the gate is killed mid-run: no verdict, no log line."""
+
+    def hook_timeout(self) -> float:
+        hooks_path = pathlib.Path(__file__).resolve().parents[1] / "hooks" / "hooks.json"
+        hooks = json.loads(hooks_path.read_text(encoding="utf-8"))
+        return float(hooks["hooks"]["Stop"][0]["hooks"][0]["timeout"])
+
+    def test_hooks_json_matches_declared_timeout(self) -> None:
+        self.assertEqual(self.hook_timeout(), stop_gate.STOP_HOOK_TIMEOUT_S)
+
+    def test_hook_timeout_is_the_documented_maximum(self) -> None:
+        self.assertEqual(stop_gate.STOP_HOOK_TIMEOUT_S, 600.0)
+
+    def test_cap_leaves_margin_below_hook_timeout(self) -> None:
+        self.assertLessEqual(stop_gate.STOP_BUDGET_CAP_S + 30, stop_gate.STOP_HOOK_TIMEOUT_S)
+
+    def test_cap_is_above_default_budget(self) -> None:
+        self.assertGreater(stop_gate.STOP_BUDGET_CAP_S, contract.TOTAL_BUDGET_S)
+
+    def test_no_dead_stop_budget_constant(self) -> None:
+        self.assertFalse(hasattr(stop_gate, "STOP_BUDGET_S"))
+
+
+class TestStopGateCapsDeclaredBudget(StopProject):
+    def test_declared_budget_above_cap_is_capped(self) -> None:
+        body = (
+            "# Gate\n\n```gatekit-budget\n{\"total_budget_s\": 600}\n```\n"
+            "```gatekit-criterion\n"
+            + json.dumps({"id": "ok-crit", "argv": [PY, "-c", "pass"], "timeout_s": 20})
+            + "\n```\n"
+        )
+        self.gate_md.write_text(body, encoding="utf-8")
+        contract.derive(self.root)
+        self.set_pipeline("build")
+        seen = {}
+        original = contract.execute
+
+        def recorder(root, total_budget_s=None, cap_s=None):
+            result = original(root, total_budget_s=total_budget_s, cap_s=cap_s)
+            seen["budget"] = result["total_budget_s"]
+            return result
+
+        contract.execute = recorder
+        try:
+            stop_gate.handle(self.event())
+        finally:
+            contract.execute = original
+        self.assertEqual(seen["budget"], stop_gate.STOP_BUDGET_CAP_S)
+
+    def test_cli_run_is_not_capped(self) -> None:
+        body = (
+            "# Gate\n\n```gatekit-budget\n{\"total_budget_s\": 600}\n```\n"
+            "```gatekit-criterion\n"
+            + json.dumps({"id": "ok-crit", "argv": [PY, "-c", "pass"], "timeout_s": 20})
+            + "\n```\n"
+        )
+        self.gate_md.write_text(body, encoding="utf-8")
+        contract.derive(self.root)
+        self.assertEqual(contract.execute(self.root)["total_budget_s"], 600.0)
+
+
 class TestEndToEndViaPromptGate(StopProject):
     """No direct ledger injection: the prompt gate must be what arms the stop
     gate, exactly as it happens in a real session."""

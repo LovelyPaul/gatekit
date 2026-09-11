@@ -38,10 +38,17 @@ ENFORCED_PIPELINES = ("build", "verify")
 #: How many times this gate may block one session before standing down.
 MAX_BLOCKS = 3
 
-#: Wall-clock ceiling for the contract run inside the Stop hook.
-#: Kept for reference; the effective budget now comes from the contract, which
-#: defaults to contract.TOTAL_BUDGET_S and is capped at contract.MAX_BUDGET_S.
-STOP_BUDGET_S = 45.0
+#: The Stop hook's ``timeout`` in ``hooks/hooks.json``. 600 s is the largest
+#: value the Claude Code hook documentation shows; no higher value is
+#: documented as supported, so gatekit does not rely on one.
+STOP_HOOK_TIMEOUT_S = 600.0
+
+#: The contract run inside this gate is capped below the hook timeout so the
+#: interpreter start-up, the ledger write and the subprocess teardown fit. A
+#: declared ``gatekit-budget`` above this runs in full under ``contract run``
+#: but is cut here — and a cut run is ``unverified``, which is honest, where a
+#: hook killed by Claude Code would record no verdict and no log line at all.
+STOP_BUDGET_CAP_S = 570.0
 
 _MESSAGES = {
     "en": {
@@ -106,7 +113,7 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
     # Already inside a stop-hook continuation: never block again.
     if bool(event.get("stop_hook_active")):
-        result = contract.execute(root)
+        result = contract.execute(root, cap_s=STOP_BUDGET_CAP_S)
         _finish(led, result["verdict"], result["reasons"])
         return hookio.allow()
 
@@ -118,7 +125,7 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     except (TypeError, ValueError):
         block_count = 0
 
-    result = contract.execute(root)
+    result = contract.execute(root, cap_s=STOP_BUDGET_CAP_S)
     outcome = result["verdict"]
 
     if outcome == verdict.OK:
