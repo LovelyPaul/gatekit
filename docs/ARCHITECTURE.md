@@ -377,10 +377,12 @@ Writes are atomic, reinstalling is idempotent, `--dry-run` lists without
 writing. `hosts.status` is `unverified` when absent, `fail` when a
 registered gate script does not exist, `ok` otherwise — and says that whether
 Codex loads project hooks depends on the user trusting `.codex/`, which is
-not readable from here. Known gaps under Codex, stated in the parity table
-in the README: the spawn gate's tool matcher and the question gate's
-`AskUserQuestion` matcher are Claude Code tool names and are `unverified`
-until observed in a Codex session.
+not readable from here. Observed in a Codex 0.154 session (parity table in
+the README): `apply_patch` and shell commands arrive as their own events and
+are gated; `collaborationspawn_agent` hides the prompt, so the spawn gate
+allows and records `spawn_unscoped` (the subagent's own writes are still
+gated); there is no `AskUserQuestion`, so the question gate has nothing to
+count.
 
 ## 13. Testing convention
 

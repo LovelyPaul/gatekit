@@ -54,12 +54,16 @@ gatekit's committed, CI-checked layout.
   `.codex/` layer. gatekit cannot read that decision, so `hosts.status`
   never claims the hooks fire, and the install output tells the user to
   trust the project and start a new session.
-- Two matchers are Claude Code tool names that Codex may not use: the spawn
-  gate's `Agent|Task` and the question gate's `AskUserQuestion`. They are
-  registered so that a matching tool would be gated, and listed as
-  `unverified` until a Codex session shows which tool names it emits. The
-  commands' `AskUserQuestion` steps are rewritten in the skill shim as
-  numbered options in plain chat.
+- Observed in a real Codex 0.154 session after this ADR was first written:
+  shell commands arrive as `Bash` events even when Codex runs them through
+  its code-mode `exec` tool; `apply_patch` arrives as its own event carrying
+  the patch text and is denied before approval; subagents spawn through
+  `collaborationspawn_agent`, whose payload holds only a task name and an
+  encrypted message, so the spawn gate allows it and records
+  `spawn_unscoped` while the subagent's own writes (which arrive with
+  `agent_id`) still meet the write and bash gates. There is no
+  `AskUserQuestion`; the skill shim rewrites those steps as numbered options
+  in plain chat and the question gate has nothing to count.
 - `AGENTS.md` under Codex is the counterpart of `CLAUDE.md`; the managed
   block carries only operating rules, and the user's own text around it
   survives every reinstall.

@@ -64,7 +64,7 @@ beyond `python3` is required.
 | | Claude Code | Codex CLI |
 |---|---|---|
 | Kernel CLI, templates, `spec validate`, contracts | ok | ok |
-| write gate (spec before code, task scope) | ok | ok — `apply_patch` and shell redirects |
+| write gate (spec before code, task scope) | ok | ok — observed: `apply_patch` arrives as its own event with the patch text and is denied before approval |
 | bash gate | ok | ok — observed: code-mode `exec` is unwrapped into one `Bash` event per shell command |
 | stop gate (contract at session end) | ok | ok — Codex Stop dialect |
 | prompt gate (`active_pipeline`, language) | ok | ok — `$gatekit-<name>` invocation |

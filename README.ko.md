@@ -60,7 +60,7 @@ python3 "gatekit/plugin/bin/gatekit.py" install --host codex
 | | Claude Code | Codex CLI |
 |---|---|---|
 | 커널 CLI, 템플릿, `spec validate`, 계약 | ok | ok |
-| write 게이트 (스펙 우선, 태스크 범위) | ok | ok — `apply_patch`와 셸 리다이렉션 포함 |
+| write 게이트 (스펙 우선, 태스크 범위) | ok | ok — 관측: `apply_patch`가 패치 본문과 함께 별도 이벤트로 도착해 승인 전 거부됨 |
 | bash 게이트 | ok | ok — 관측: code-mode `exec`가 셸 명령 하나당 `Bash` 이벤트로 풀려서 전달됨 |
 | stop 게이트 (세션 종료 시 계약 실행) | ok | ok — Codex Stop 형식 |
 | prompt 게이트 (`active_pipeline`, 언어) | ok | ok — `$gatekit-<name>` 호출 인식 |
