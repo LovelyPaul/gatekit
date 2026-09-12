@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.3.0 — 2026-09-13
+
+### Added
+
+- Codex CLI as a second host (ADR-0006). The gates read `--host <name>` from
+  their argv and render the Stop block in the host's dialect; the write gate
+  judges every file an `apply_patch` names; the prompt gate recognises
+  `$gatekit-<name>` skill invocations. `gatekit install --host codex`
+  generates `.codex/hooks.json`, one skill per command under
+  `.agents/skills/gatekit-*` and a managed block in `AGENTS.md`, all from
+  `plugin/`, idempotently. `doctor` gains axis 8 over that layer. The README
+  carries a host parity table in the verdict vocabulary; the spawn and
+  question gates are `unverified` under Codex until observed.
+- The evaluator can be a different CLI than the builder (ADR-0007). Backends
+  carry `read_only_argv`; `verify.evaluator` names `agent` or a backend;
+  `workers set-evaluator` sets it; `jobs evaluate` runs the backend once,
+  read-only, with `GATEKIT_TASK_ID=evaluate` so the write gate refuses writes
+  inside its session; `/gatekit:verify` branches on the setting.
+
 ## 0.2.0 — 2026-09-11
 
 ### Fixed

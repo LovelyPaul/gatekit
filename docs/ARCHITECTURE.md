@@ -46,7 +46,8 @@ gatekit/
 │   ├── hooks/hooks.json                 # 6 hook registrations (see §3); auto-loaded, never listed in plugin.json
 │   ├── gatekit/                         # kernel package (stdlib only)
 │   │   ├── cli.py         dispatcher: python3 -m gatekit <sub>
-│   │   ├── hookio.py      hook stdin/stdout contract, safe wrapper
+│   │   ├── hookio.py      hook stdin/stdout contract, safe wrapper, host dialects (§3)
+│   │   ├── hosts.py       generated host layers: `gatekit install --host codex` (§15)
 │   │   ├── ledger.py      per-session run ledger
 │   │   ├── lang.py        output_lang detection
 │   │   ├── verdict.py     4-state vocabulary + aggregation
@@ -97,7 +98,17 @@ gatekit/
 
 ## 3. Hook I/O contract (`hookio.py`)
 
-Claude Code passes a JSON object on stdin. Fields used:
+Claude Code passes a JSON object on stdin. Codex CLI passes the same object
+(same field names) to hooks registered in `.codex/hooks.json`; the gates
+serve both hosts from one script, learning the host from `--host <name>` on
+their own argv (`hookio.host_from_argv`, default `claude`). Only the Stop
+block differs between the two dialects and `hookio.adapt_output` renders it
+(`{"decision":"block","reason"}` for Claude Code, `{"continue":false,"stopReason"}`
+for Codex); deny and additionalContext payloads are identical. Codex edits
+files through `apply_patch`, whose `tool_input.command` is the patch text;
+the write gate takes every `*** Add/Update/Delete File:` and `*** Move to:`
+header as a target and refuses a patch that names none while a rule is
+active. Fields used:
 `session_id`, `hook_event_name`, `cwd`, `tool_name`, `tool_input`, `tool_response`,
 `prompt` (UserPromptSubmit), `stop_hook_active` (Stop).
 
@@ -132,7 +143,7 @@ Stop→`gates/stop.py`.
 Gate behaviour:
 
 - **prompt**: ensure ledger exists for `session_id`; detect `output_lang` from `prompt` (§8) and store it — for a slash command only the `<command-args>` content is the user's words, and empty args keep the stored language; **set `active_pipeline`** when the prompt invokes `/gatekit:<pipeline>`. Claude Code delivers a slash command as the tagged body `<command-message>…</command-message>` / `<command-name>/gatekit:<name></command-name>` / `<command-args>…</command-args>`; that tag, a bare `/gatekit:<name>` at the start of the prompt, and the `# /gatekit:<name>` title line of an expanded command body are recognised within the first 12 lines. A mid-sentence mention is not an invocation. `doctor` and `setup` clear it; an unknown name leaves it alone; a plain prompt keeps it. Entering a different pipeline resets `questions` to its defaults. This is the **only** production writer of `active_pipeline` — commands never set it by prose. Inject `additionalContext` (≤ 600 chars) with `output_lang`, question budget state, active pipeline, and unresolved gate count. Never blocks.
-- **write**: deny when (a) `config.enforce_spec_before_code` is true, `spec/` exists, `.gatekit/approvals.json` has no valid approval for `spec/05-gate.md`, and the target path is outside the allowlist `spec/**, .gatekit/**, docs/**, README*, *.md at root`; or (b) env `GATEKIT_TASK_ID` is set and the target is outside that task's `write_scope` (from the job's `task.json`). Reason text is in `output_lang`.
+- **write**: for `apply_patch`, apply the rules below to every file the patch header names (a patch naming no file is denied while a rule is active). Otherwise deny when (a) `config.enforce_spec_before_code` is true, `spec/` exists, `.gatekit/approvals.json` has no valid approval for `spec/05-gate.md`, and the target path is outside the allowlist `spec/**, .gatekit/**, docs/**, README*, *.md at root`; or (b) env `GATEKIT_TASK_ID` is set and the target is outside that task's `write_scope` (from the job's `task.json`). Reason text is in `output_lang`.
 - **bash**: apply the write rules (a) and (b) to every file a Bash command would write, read statically from the command text: redirections (`>`, `>>`, `&>`, `>|`, `N>`), `tee`, `sed -i`/`perl -i`, `cp`/`mv`/`ln`/`install`/`rsync` destinations, `touch`/`rm`/`mkdir`/`truncate`/`chmod`/`chown` operands, `dd of=`, `sort -o`, `curl -o`, `wget -O`, `tar -C`/`-f`, `unzip -d`, `zip`, with `cd` tracked across `;`/`&&`/`||`/`|`/newlines, `VAR=`/`sudo`/`env`/`nohup` prefixes stripped, here-document bodies ignored, `/dev/*` targets ignored and `sh|bash|zsh -c "…"` parsed recursively. Fast path: when no rule could deny anything (no `GATEKIT_TASK_ID`, spec gate approved or absent) the command is allowed without parsing. When a rule is active and a write's target **cannot be determined** — `$VAR` or backticks in a path, `cd` to an unknown directory, `eval`, `xargs`, `patch`, `trap`, `find -exec/-delete`, working-tree `git` subcommands (`apply`, `checkout`, `restore`, `reset`, `merge`, `stash`, `init`, `clone`, …), inline interpreter code (`python3 -c`, `node -e`, `perl -e`, stdin scripts), `awk`, command-line editors (`ed`, `ex`, `vim`, `nano`), `busybox`, downloads that choose their own file name (`curl -O`, bare `wget`), process substitution, unbalanced quotes — **deny** with reason `opaque`: "could not tell" is never rounded to "allowed". Programs invoked by name (`npm run build`, `python3 script.py`) are outside its reach by design. Reason text is in `output_lang`.
 - **spawn**: the spawn prompt must contain a fenced block ` ```gatekit-scope ` with JSON `{"write_scope": [globs] | "read-only", "stop_when": "…", "tools": [...] | "inherit"}`. Deny if missing/invalid, or if `write_scope` intersects any scope already recorded in the ledger for this session. On allow, record the scope in the ledger. No regex over prose: parse the fence as JSON.
 - **question**: increment `ledger.questions.asked`; if `asked > budget.max_calls` (default 2 for interview, unlimited otherwise) record `budget_exceeded=true` (informational; commands read it).
@@ -278,15 +289,21 @@ must say so once.
 {"version": 1,
  "enforce_spec_before_code": true,
  "worker": {"default": "claude", "backends": {
-   "claude": {"argv": ["claude", "-p", "--output-format", "json", "--permission-mode", "acceptEdits"], "enabled": true},
-   "codex":  {"argv": ["codex", "exec", "--sandbox", "workspace-write"], "enabled": false}
+   "claude": {"argv": ["claude", "-p", "--output-format", "json", "--permission-mode", "acceptEdits"],
+              "read_only_argv": ["claude", "-p", "--output-format", "json", "--permission-mode", "plan"], "enabled": true},
+   "codex":  {"argv": ["codex", "exec", "--sandbox", "workspace-write"],
+              "read_only_argv": ["codex", "exec", "--sandbox", "read-only"], "enabled": false}
  }},
  "build": {"max_retries": 2, "parallel": 3, "task_timeout_s": 900},
- "questions": {"interview_max_calls": 2, "items_per_call": 4}}
+ "questions": {"interview_max_calls": 2, "items_per_call": 4},
+ "verify": {"evaluator": "agent"}}
 ```
 
 Sandboxing is never disabled by default; a backend with a bypass flag must set
-`"unsafe": true` and the job receipt records it.
+`"unsafe": true` and the job receipt records it. `read_only_argv` is the
+backend as an evaluator and must not be able to write; a backend without one
+cannot grade, and its writable `argv` is never substituted. `verify.evaluator`
+is `agent` (the host's own read-only subagent) or a backend name (ADR-0007).
 
 ## 10. Jobs and workers (`jobs.py`, `workers.py`)
 
@@ -301,8 +318,19 @@ the worker exits; a worker that exits 0 but fails a gate is `failed`, never
 with the failed gate output appended to the prompt, up to `max_retries`.
 `results --compact` prints one line per task: `id state gates_passed/total`.
 
+`jobs evaluate [--backend name] [--prompt FILE] [--lang ko|en]` runs one
+read-only worker as the independent evaluator (ADR-0007): job dir
+`.gatekit/jobs/<job_id>/evaluate/{task.json,prompt.md,output.txt,stderr.txt,status.json}`,
+`job.json.kind = "evaluate"`, backend resolved with `read_only=True`, env
+`GATEKIT_TASK_ID=evaluate` with `task.json.write_scope = "read-only"` so the
+write gate refuses writes inside the evaluator's own session on top of the
+CLI sandbox. `state` ∈ `passed|failed|timeout`; anything but `passed` is
+`unverified` for every criterion. Its stdout ends with the evaluator's reply
+tail, which is the verdict table.
+
 `workers.py`: `list`, `check <name>` (`shutil.which` on argv[0] → ok/fail,
-`--version` probe → ok/unverified), `set-default <name>`, `enable <name>`.
+`--version` probe → ok/unverified), `set-default <name>`, `enable <name>`,
+`set-evaluator <agent|name>`.
 `claude` is enabled by default; `codex` is disabled until `/gatekit:setup codex`
 runs `check` and the user confirms.
 
@@ -323,6 +351,33 @@ runs `check` and the user confirms.
 7 python version ≥ 3.9;
 8 host layer: a generated `.codex/hooks.json` (§15), when present, must point at gate scripts that exist (`fail` otherwise); absent is `ok`, since a Claude Code project needs none. Each axis returns `{axis, verdict, detail, fix}` where
 `fix` is a copy-pasteable command or empty. Exit 1 iff any `fail`.
+
+## 15. Host layers (`hosts.py`, ADR-0006)
+
+Claude Code loads gatekit as a plugin. Codex CLI reads three things from a
+project instead — `.codex/hooks.json`, `.agents/skills/<name>/SKILL.md`,
+`AGENTS.md` — and `gatekit install --host codex` generates all three **from
+`plugin/`**, which stays the single source:
+
+- `.codex/hooks.json`: the six gates with `--host codex`; `apply_patch`
+  joins the write matcher; the Stop timeout is copied from
+  `plugin/hooks/hooks.json`.
+- one skill per `commands/<name>.md`: `SKILL.md` is a ≤ 40-line shim (the
+  plugin skill's trigger text plus the Codex differences: no
+  `AskUserQuestion`, `$gatekit-<name>` invocation, project trust) and
+  `command.md` is the command body with `${CLAUDE_PLUGIN_ROOT}` replaced by
+  the checkout path and `/gatekit:<name>` rewritten to `$gatekit-<name>`.
+- `AGENTS.md`: a managed block between `<!-- gatekit:begin -->` and
+  `<!-- gatekit:end -->`; text outside it is never touched.
+
+Writes are atomic, reinstalling is idempotent, `--dry-run` lists without
+writing. `hosts.status` is `unverified` when absent, `fail` when a
+registered gate script does not exist, `ok` otherwise — and says that whether
+Codex loads project hooks depends on the user trusting `.codex/`, which is
+not readable from here. Known gaps under Codex, stated in the parity table
+in the README: the spawn gate's tool matcher and the question gate's
+`AskUserQuestion` matcher are Claude Code tool names and are `unverified`
+until observed in a Codex session.
 
 ## 13. Testing convention
 
@@ -393,11 +448,13 @@ def parse_fences(text: str, name: str) -> list[dict]                   # all ```
 def run(argv: list[str]) -> int
 
 # jobs.py
-def run(argv: list[str]) -> int                        # start / status / wait / results / redelegate / clean
+def run(argv: list[str]) -> int                        # start / status / wait / results / redelegate / evaluate / clean
+def evaluate(root: pathlib.Path, backend_name: str | None = None, prompt_path=None, timeout_s=None, lang: str = "en") -> dict
 def load_tasks(root: pathlib.Path) -> list[dict]       # from spec/04-tasks.md via spec.parse_fences
 
 # workers.py
-def resolve(root: pathlib.Path, name: str | None = None) -> dict   # backend dict incl. name, argv, enabled, unsafe
+def resolve(root: pathlib.Path, name: str | None = None, read_only: bool = False) -> dict   # backend dict incl. name, argv, enabled, unsafe, read_only
+def evaluator_name(root: pathlib.Path) -> str        # "agent" | backend name
 def check(root: pathlib.Path, name: str) -> dict       # {"name","verdict","detail"}
 def run(argv: list[str]) -> int
 

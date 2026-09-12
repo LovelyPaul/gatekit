@@ -40,6 +40,42 @@ gatekit은 [Claude Code](https://claude.com/claude-code)에서 AI 보조 개발�
 설치 후 Claude Code를 재시작해야 `plugin/hooks/hooks.json`의 훅이
 반영됩니다.
 
+### Codex CLI
+
+Codex에는 플러그인 형식이 없으므로, 이 저장소를 클론한 뒤 gatekit이
+프로젝트 안에 호스트 층을 생성합니다.
+
+```
+git clone https://github.com/LovelyPaul/gatekit
+python3 "gatekit/plugin/bin/gatekit.py" install --host codex
+```
+
+`.codex/hooks.json`, 커맨드별 스킬 `.agents/skills/gatekit-*`, `AGENTS.md`의
+관리 블록이 생깁니다. Codex가 물으면 프로젝트의 `.codex/` 층을 신뢰하고 새
+세션을 연 뒤 `$gatekit-interview`, `$gatekit-build`처럼 호출합니다. `python3`
+외에 필요한 것은 없습니다.
+
+### 호스트 동등성
+
+| | Claude Code | Codex CLI |
+|---|---|---|
+| 커널 CLI, 템플릿, `spec validate`, 계약 | ok | ok |
+| write 게이트 (스펙 우선, 태스크 범위) | ok | ok — `apply_patch`와 셸 리다이렉션 포함 |
+| bash 게이트 | ok | ok |
+| stop 게이트 (세션 종료 시 계약 실행) | ok | ok — Codex Stop 형식 |
+| prompt 게이트 (`active_pipeline`, 언어) | ok | ok — `$gatekit-<name>` 호출 인식 |
+| spawn 게이트 (서브에이전트 범위 펜스) | ok | unverified — Codex 서브에이전트 도구 이름 미관측 |
+| question 게이트 (질문 예산) | ok | unverified — Codex에 `AskUserQuestion` 없음, 질문은 평문 |
+| 커맨드의 `AskUserQuestion` | 기본 선택 UI | 평문 번호 선택지 |
+| 빌드 워커를 다른 CLI로 | ok (`codex`) | ok (`claude`) |
+| 평가자를 다른 CLI로 | ok (`workers set-evaluator codex`) | ok (`workers set-evaluator claude`) |
+
+`unverified`는 말 그대로 실제 세션에서 아직 관측하지 못했다는 뜻입니다.
+관측 보고를 환영합니다. Antigravity는 이번 릴리스에서 지원하지 않습니다.
+
+워커나 평가자로 다른 CLI를 쓰려면 그 CLI가 설치되어 있고 자기 구독으로
+로그인돼 있어야 합니다. gatekit은 CLI를 실행할 뿐 API 키를 갖지 않습니다.
+
 ## 세 가지 흐름
 
 gatekit은 아이디어에서 검증된 변경까지 가는 세 가지 경로를 중심으로

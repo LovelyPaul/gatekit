@@ -16,7 +16,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" <subcommand> [args]
 
 이 규칙은 CI 게이트 `tools/gate_command_invocations.py`가 강제한다. 커맨드나 정책 파일에 실행되지 않는 호출 형식이 들어가면 빌드가 실패한다.
 
-## 서브커맨드 8개
+## 서브커맨드 9개
 
 `cli.py`의 `SUBCOMMANDS` 레지스트리가 전부다. 모듈은 지연 import되므로 하나가 깨져도 나머지는 동작한다.
 
@@ -29,6 +29,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" <subcommand> [args]
 | `jobs` | 워커 잡 실행과 관리 |
 | `workers` | 워커 백엔드 관리 |
 | `ledger` | 세션 원장 조회·파이프라인 설정 |
+| `install` | Codex 호스트 층 생성 (`--host codex`) |
 | `lang` | 출력 언어 감지 |
 
 인자 없이 부르면 사용법을 출력하고 종료 코드 1을 낸다. `-h`·`--help`·`help`는 0을 낸다. 없는 서브커맨드는 2다.
@@ -106,10 +107,11 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs status [--job ID] [--json]
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs wait [--job ID] [--timeout S]
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs results [--job ID] [--compact|--json]
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs redelegate <task_id> [--job ID]
+python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs evaluate [--backend name] [--prompt FILE] [--lang ko|en] [--json]
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs clean [--all]
 ```
 
-`results --compact`는 태스크당 한 줄로 `id state gates_passed/total`을 출력한다. `clean`은 기본적으로 가장 최근 잡을 남기고, `--all`은 전부 지운다.
+`results --compact`는 태스크당 한 줄로 `id state gates_passed/total`을 출력한다. `clean`은 기본적으로 가장 최근 잡을 남기고, `--all`은 전부 지운다. `evaluate`는 `verify.evaluator`(또는 `--backend`)가 가리키는 백엔드를 `read_only_argv`로 한 번 실행해 평가자로 쓴다. `.gatekit/jobs/<잡>/evaluate/`에 기록하고 응답 꼬리(판정표)를 출력한다. 상태가 `passed`가 아니면 모든 기준이 `unverified`다.
 
 태스크 상태는 `queued` / `running` / `gating` / `passed` / `failed` / `timeout` / `redelegated`다.
 
@@ -127,6 +129,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers list [--json] [--root PAT
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers check <name> [--json]
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers set-default <name>
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers enable <name>
+python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers set-evaluator <agent|name>
 ```
 
 `check`의 판정 기준이다.
@@ -161,6 +164,19 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" ledger set-pipeline <interview|mo
 | 1 | 해당 세션의 원장 없음 |
 | 2 | `set-pipeline`에 알 수 없는 이름 |
 | 2 | 인자 오류 |
+
+## install
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" install --host codex [--root PATH] [--dry-run]
+```
+
+프로젝트에 Codex 호스트 층을 생성한다. `.codex/hooks.json`, `.agents/skills/gatekit-<커맨드>/{SKILL.md,command.md}`, `AGENTS.md`의 관리 블록. 원본은 `plugin/`이며 생성물은 다시 만들 수 있다. 두 번 실행해도 같은 결과다. `--dry-run`은 쓸 파일 목록만 보여준다.
+
+| 종료 코드 | 뜻 |
+|---|---|
+| 0 | 성공 |
+| 2 | 알 수 없는 호스트 (`claude`는 플러그인으로 설치하므로 여기서 받지 않는다) |
 
 ## lang
 

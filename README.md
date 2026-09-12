@@ -43,6 +43,44 @@ that matter into things a hook enforces:
 Restart Claude Code after installing so the hooks in `plugin/hooks/hooks.json`
 are picked up.
 
+### Codex CLI
+
+Codex has no plugin format, so gatekit generates its layer into your project
+from a clone of this repository:
+
+```
+git clone https://github.com/LovelyPaul/gatekit
+python3 "gatekit/plugin/bin/gatekit.py" install --host codex
+```
+
+This writes `.codex/hooks.json`, one skill per command under
+`.agents/skills/gatekit-*`, and a managed block in `AGENTS.md`. Trust the
+project's `.codex/` layer when Codex asks, start a new session, and invoke
+the pipeline as `$gatekit-interview`, `$gatekit-build` and so on. Nothing
+beyond `python3` is required.
+
+### Host parity
+
+| | Claude Code | Codex CLI |
+|---|---|---|
+| Kernel CLI, templates, `spec validate`, contracts | ok | ok |
+| write gate (spec before code, task scope) | ok | ok — `apply_patch` and shell redirects |
+| bash gate | ok | ok |
+| stop gate (contract at session end) | ok | ok — Codex Stop dialect |
+| prompt gate (`active_pipeline`, language) | ok | ok — `$gatekit-<name>` invocation |
+| spawn gate (subagent scope fence) | ok | unverified — Codex's subagent tool name not yet observed |
+| question gate (question budget) | ok | unverified — Codex has no `AskUserQuestion`; questions are plain chat |
+| `AskUserQuestion` in commands | native picker | numbered options in plain chat |
+| Build worker can be the other CLI | ok (`codex`) | ok (`claude`) |
+| Evaluator can be the other CLI | ok (`workers set-evaluator codex`) | ok (`workers set-evaluator claude`) |
+
+`unverified` means exactly that: not observed in a real session yet. A
+report from one is welcome. Antigravity is not supported in this release.
+
+Using the other CLI as worker or evaluator needs that CLI installed and
+logged in with its own subscription; gatekit shells out to it and never
+holds an API key.
+
 ## The three flows
 
 gatekit is built around three ways to get from an idea to a done, verified

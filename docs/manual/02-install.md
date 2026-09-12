@@ -19,6 +19,17 @@ gatekit 커널은 파이썬 표준 라이브러리만 쓴다. `pip install`이 �
 
 설치 후 **Claude Code를 재시작**해야 `plugin/hooks/hooks.json`의 훅이 로드된다. 재시작하지 않으면 파일은 디스크에 있지만 게이트가 하나도 발화하지 않는다.
 
+### Codex CLI 사용자
+
+Codex에는 플러그인 형식이 없다. 저장소를 클론하고 프로젝트 루트에서 호스트 층을 생성한다.
+
+```bash
+git clone https://github.com/LovelyPaul/gatekit
+python3 "gatekit/plugin/bin/gatekit.py" install --host codex
+```
+
+`.codex/hooks.json`(게이트 6개), `.agents/skills/gatekit-*`(커맨드별 스킬), `AGENTS.md`의 관리 블록이 생긴다. 생성 파일은 손으로 고치지 않고 `plugin/`을 고친 뒤 다시 `install`한다. Codex가 프로젝트의 `.codex/` 층을 신뢰하겠느냐고 물으면 승인하고 **새 세션을 연다**. 신뢰하지 않으면 훅은 파일로만 존재한다. doctor 8번 축이 이 층을 본다. 호스트별로 되는 것과 `unverified`인 것은 README의 동등성 표에 있다.
+
 재시작한 다음 반드시 진단을 돌린다.
 
 ```bash

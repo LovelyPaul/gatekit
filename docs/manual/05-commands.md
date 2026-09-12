@@ -102,7 +102,7 @@
 
 **언제**: 모든 태스크가 `passed`인 뒤. 빌드 통과와 계약 통과는 다르다.
 
-**핵심 원칙**: producer ≠ evaluator. 코드를 만든 세션은 채점하지 않는다. 읽고 실행할 수는 있지만 쓸 수 없는 별도 평가자 에이전트를 띄운다.
+**핵심 원칙**: producer ≠ evaluator. 코드를 만든 세션은 채점하지 않는다. 읽고 실행할 수는 있지만 쓸 수 없는 별도 평가자를 띄운다. 평가자는 `.gatekit/config.json`의 `verify.evaluator`로 정한다. `agent`(기본)면 호스트의 읽기 전용 서브에이전트이고, 백엔드 이름(`claude`, `codex`)이면 그 CLI가 `read_only_argv`로 실행된다. 즉 Claude Code로 만든 코드를 Codex가, Codex로 만든 코드를 Claude가 채점할 수 있다. `workers set-evaluator <이름>`으로 바꾼다.
 
 **읽는 것**: `.gatekit/contract.json`, `spec/05-gate.md`의 E2E 단계.
 
@@ -110,7 +110,7 @@
 
 **질문**: 없다.
 
-**절차**: 먼저 `contract derive`로 재파생한다. 그다음 평가자를 띄우는데, 그 프롬프트에는 `gatekit-scope` 펜스가 반드시 들어가야 한다. 평가자가 돌아오면 메인 세션이 `contract run --json`을 한 번 더 돌린다. 두 실행이 어긋나면 그 자체가 발견 사항이며, 더 나은 쪽을 고르지 않고 불일치를 보고한다.
+**절차**: 먼저 `contract derive`로 재파생한다. 그다음 평가자를 띄운다. 서브에이전트면 그 프롬프트에 `gatekit-scope` 펜스가 반드시 들어가야 하고, 백엔드면 `jobs evaluate --prompt <파일>`이 읽기 전용 워커로 실행해 판정표를 출력한다. 평가자가 돌아오면 메인 세션이 `contract run --json`을 한 번 더 돌린다. 두 실행이 어긋나면 그 자체가 발견 사항이며, 더 나은 쪽을 고르지 않고 불일치를 보고한다.
 
 **실패하면**: 집계가 `ok`가 아니면 무엇이 바뀌어야 하는지 나열하고 멈춘다. 여기서 코드를 고치지 않고 `/gatekit:build`로 되돌린다.
 
