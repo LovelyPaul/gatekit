@@ -92,17 +92,20 @@ def write_json_atomic(target: pathlib.Path, payload: Any) -> None:
     the previous file intact rather than a truncated one; the temp file is
     created in the destination directory so the replace stays on one filesystem.
     """
+    text = json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=False)
+    write_text_atomic(target, text + "\n")
+
+
+def write_text_atomic(target: pathlib.Path, text: str) -> None:
+    """Write *text* to *target* via a temp file plus ``os.replace``."""
     target = pathlib.Path(target)
     paths.ensure_dir(target.parent)
-    text = json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=False)
-
     handle, tmp_name = tempfile.mkstemp(
         dir=str(target.parent), prefix=f".{target.name}.", suffix=".tmp"
     )
     try:
         with os.fdopen(handle, "w", encoding="utf-8") as stream:
             stream.write(text)
-            stream.write("\n")
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(tmp_name, str(target))

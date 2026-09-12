@@ -25,7 +25,7 @@ gatekit 커널은 파이썬 표준 라이브러리만 쓴다. `pip install`이 �
 /gatekit:doctor
 ```
 
-## 7축 doctor 판정표
+## 8축 doctor 판정표
 
 `doctor`는 7개 축을 각각 `ok`/`warn`/`fail`/`unverified`로 판정하고, 축마다 복붙 가능한 `fix` 문자열을 낸다. 종료 코드는 `fail`이 하나라도 있을 때만 1이다. 종료 코드 0은 "아무것도 실패하지 않았다"는 뜻이지 "다 괜찮다"는 뜻이 아니다.
 
@@ -38,6 +38,7 @@ gatekit 커널은 파이썬 표준 라이브러리만 쓴다. `pip install`이 �
 | 5 | contract freshness | `.gatekit/contract.json`의 `source_sha256`가 `05-gate.md`와 일치하는가 | `contract derive` 재실행 |
 | 6 | workers | 기본 백엔드 바이너리가 PATH에 있는가 | 해당 CLI를 설치하거나 `workers set-default <name>` |
 | 7 | python | 인터프리터가 3.9 이상인가 | 파이썬 3.9 이상 설치 |
+| 8 | host layer | Codex용 `.codex/hooks.json`이 있으면 그 안의 게이트 스크립트가 실제로 존재하는가. 없으면 `ok` (Claude Code 프로젝트는 필요 없다) | `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" install --host codex` |
 
 ### `unverified`가 나오는 정상적인 경우
 

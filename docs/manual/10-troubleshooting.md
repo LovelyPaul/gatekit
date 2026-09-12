@@ -79,7 +79,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs clean --all  # 전부 삭제
 
 ## 진단이 막힐 때 순서
 
-1. `/gatekit:doctor` — 7축 중 무엇이 `fail`인가
+1. `/gatekit:doctor` — 8축 중 무엇이 `fail`인가
 2. `.gatekit/runs/hook-errors.log` — 훅이 조용히 죽고 있는가
 3. `spec validate --json` — 어떤 파일의 어떤 지적인가
 4. `contract status` — `ok` / `fail`(stale) / `unverified`(없음)

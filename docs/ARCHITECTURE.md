@@ -55,7 +55,7 @@ gatekit/
 │   │   ├── spec.py        spec set validation
 │   │   ├── jobs.py        job runner (job dir, atomic writes, spawn, gates, redelegate)
 │   │   ├── workers.py     worker backends (claude default, codex optional, custom)
-│   │   ├── doctor.py      7-axis diagnosis
+│   │   ├── doctor.py      8-axis diagnosis
 │   │   ├── config.py      .gatekit/config.json loader with defaults
 │   │   ├── paths.py       project root / state dir resolution
 │   │   └── gates/         hook entry points: prompt.py write.py bash.py spawn.py question.py stop.py
@@ -312,7 +312,7 @@ runs `check` and the user confirms.
 `unverified` → `unverified`; else any `warn` → `warn`; else `ok`. Rendering:
 `render(v, lang)` gives the localized label; JSON always uses the English token.
 
-## 12. Doctor (`doctor.py`) — 7 axes
+## 12. Doctor (`doctor.py`) — 8 axes
 
 1 plugin files present (plugin.json, hooks.json, all gate scripts exist and are non-empty);
 2 hooks registered in the running install (compare `~/.claude/plugins/…` cache when present, else `unverified`);
@@ -320,7 +320,8 @@ runs `check` and the user confirms.
 4 spec set (`spec.validate` verdict, or `unverified` when no `spec/`);
 5 contract freshness (`source_sha256` matches);
 6 workers (default backend `check`);
-7 python version ≥ 3.9. Each axis returns `{axis, verdict, detail, fix}` where
+7 python version ≥ 3.9;
+8 host layer: a generated `.codex/hooks.json` (§15), when present, must point at gate scripts that exist (`fail` otherwise); absent is `ok`, since a Claude Code project needs none. Each axis returns `{axis, verdict, detail, fix}` where
 `fix` is a copy-pasteable command or empty. Exit 1 iff any `fail`.
 
 ## 13. Testing convention

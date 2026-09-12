@@ -1,4 +1,4 @@
-"""Tests for gatekit.doctor — 7 axes, fault-injected one at a time.
+"""Tests for gatekit.doctor — 8 axes, fault-injected one at a time.
 
 HOME is redirected to a temp directory in every test so axis 2 never reads the
 developer's real Claude install, and `unverified` is asserted as itself rather
@@ -77,9 +77,9 @@ class DoctorTestCase(unittest.TestCase):
 
 
 class TestReportShape(DoctorTestCase):
-    def test_seven_axes_each_with_the_required_keys(self) -> None:
+    def test_eight_axes_each_with_the_required_keys(self) -> None:
         report = doctor.diagnose(self.root)
-        self.assertEqual(len(report["axes"]), 7)
+        self.assertEqual(len(report["axes"]), 8)
         for axis in report["axes"]:
             for key in ("axis", "verdict", "detail", "fix"):
                 self.assertIn(key, axis)
@@ -350,7 +350,7 @@ class TestCli(DoctorTestCase):
         with contextlib.redirect_stdout(buf):
             doctor.run(["--json", "--root", str(self.root)])
         report = json.loads(buf.getvalue())
-        self.assertEqual(len(report["axes"]), 7)
+        self.assertEqual(len(report["axes"]), 8)
 
     def test_exit_1_when_any_axis_fails(self) -> None:
         import contextlib

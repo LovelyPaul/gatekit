@@ -22,7 +22,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" <subcommand> [args]
 
 | 서브커맨드 | 역할 |
 |---|---|
-| `doctor` | 설치·훅·상태·워커 7축 진단 |
+| `doctor` | 설치·훅·상태·워커·호스트 8축 진단 |
 | `spec` | 스펙 세트 검증 |
 | `contract` | 완료 계약 파생·상태·실행 |
 | `approve` | 해시 앵커 승인 |

@@ -5,7 +5,7 @@
 ## 전체 다이어그램
 
 ```text
-                    [ /gatekit:doctor ]  ← 아무 때나. 설치·상태 7축 진단
+                    [ /gatekit:doctor ]  ← 아무 때나. 설치·상태 8축 진단
                     [ /gatekit:setup  ]  ← 프로젝트 최초 1회. config·워커 점검
                               │
    한 문장 아이디어           ▼

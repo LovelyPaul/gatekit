@@ -71,7 +71,7 @@ change:
 | `/gatekit:gate` | `spec/05-gate.md`, `.gatekit/contract.json`, approvals |
 | `/gatekit:build` | worker jobs run against `spec/04-tasks.md` |
 | `/gatekit:verify` | independent end-to-end check against the completion contract |
-| `/gatekit:doctor` | a 7-axis health report on the install itself |
+| `/gatekit:doctor` | an 8-axis health report on the install itself |
 | `/gatekit:setup` | optional Codex backend, other configuration |
 
 ## The `spec/` layout

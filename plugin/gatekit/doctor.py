@@ -260,6 +260,24 @@ def axis_python(root) -> dict:
     return _axis("python", verdict.OK, "python %s" % current)
 
 
+# ------------------------------------------------------------------- axis 8
+
+
+def axis_host_layer(root) -> dict:
+    """A generated Codex host layer, when present, must point at real gates.
+
+    Absent is ``ok``: a Claude Code project needs none. Present but broken is
+    ``fail``. Whether Codex trusts the project and loads the hooks cannot be
+    read from here, and the detail says so.
+    """
+    from gatekit import hosts
+
+    result = hosts.status(root, "codex")
+    if result["verdict"] == verdict.UNVERIFIED:
+        return _axis("host layer", verdict.OK, "no Codex host layer (Claude Code plugin serves this project)", "")
+    return _axis("host layer", result["verdict"], "codex: " + result["detail"], result.get("fix", ""))
+
+
 AXES = (
     axis_plugin_files,
     axis_hooks_registered,
@@ -268,6 +286,7 @@ AXES = (
     axis_contract_freshness,
     axis_workers,
     axis_python,
+    axis_host_layer,
 )
 
 

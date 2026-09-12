@@ -18,6 +18,7 @@ SUBCOMMANDS = {
     "workers":  ("gatekit.workers",  "Worker backends: list / check / set-default (claude default, codex optional)."),
     "ledger":   ("gatekit.ledger",   "Session ledger: show / init / set-pipeline."),
     "lang":     ("gatekit.lang",     "Detect output language for a text (ko/en)."),
+    "install":  ("gatekit.hosts",    "Generate a host layer (--host codex): hooks, skills, AGENTS.md block."),
 }
 
 

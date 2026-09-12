@@ -7,7 +7,7 @@ gatekit은 Claude Code 플러그인이다. `CLAUDE.md`에 산문으로 적던 �
 | 문서 | 한 줄 소개 |
 |---|---|
 | `01-what-and-why.md` | gatekit이 무엇이고 어떤 문제를 푸는가, 핵심 철학 4개 |
-| `02-install.md` | 설치·요구사항·7축 doctor 판정표·제거와 업데이트 |
+| `02-install.md` | 설치·요구사항·8축 doctor 판정표·제거와 업데이트 |
 | `03-concepts.md` | 판정 어휘, 스펙 세트, 가정 원장, 완료 계약, 해시 앵커 승인 등 핵심 개념 |
 | `04-pipeline.md` | 8단계 파이프라인 흐름도와 각 단계의 입력·출력·게이트 |
 | `05-commands.md` | 8개 커맨드 레퍼런스 |
