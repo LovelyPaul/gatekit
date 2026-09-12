@@ -52,10 +52,20 @@ def default_name(root) -> str:
     return name if isinstance(name, str) and name else "claude"
 
 
-def resolve(root, name: Optional[str] = None) -> dict:
+def evaluator_name(root) -> str:
+    """``verify.evaluator``: ``"agent"`` or a backend name."""
+    cfg = config.load(root)
+    value = (cfg.get("verify") or {}).get("evaluator")
+    return value if isinstance(value, str) and value else "agent"
+
+
+def resolve(root, name: Optional[str] = None, read_only: bool = False) -> dict:
     """Return the backend dict for `name` (or the configured default).
 
-    The result always carries `name`, `argv`, `enabled` and `unsafe`.
+    The result always carries `name`, `argv`, `enabled`, `unsafe` and
+    `read_only`. With *read_only* the returned `argv` is the backend's
+    `read_only_argv`; a backend without one cannot be an evaluator, and the
+    writable argv is never substituted for it.
     Raises ValueError for an unknown backend, an empty/invalid argv, a disabled
     backend, or an unsafe argv that has not set `"unsafe": true`.
     """
@@ -70,11 +80,17 @@ def resolve(root, name: Optional[str] = None) -> dict:
     if not isinstance(entry, dict):
         raise ValueError("backend %r is not an object in config" % resolved_name)
 
-    argv = entry.get("argv")
+    key = "read_only_argv" if read_only else "argv"
+    argv = entry.get(key)
+    if read_only and argv is None:
+        raise ValueError(
+            "backend %r has no read_only_argv, so it cannot act as the evaluator; "
+            "add one to .gatekit/config.json" % resolved_name
+        )
     if not isinstance(argv, list) or not argv or not all(
         isinstance(a, str) and a for a in argv
     ):
-        raise ValueError("backend %r has an empty or non-string argv" % resolved_name)
+        raise ValueError("backend %r has an empty or non-string %s" % (resolved_name, key))
 
     unsafe = bool(entry.get("unsafe", False))
     if _is_unsafe_argv(argv) and not unsafe:
@@ -95,6 +111,7 @@ def resolve(root, name: Optional[str] = None) -> dict:
     out["argv"] = list(argv)
     out["enabled"] = enabled
     out["unsafe"] = unsafe
+    out["read_only"] = read_only
     return out
 
 
@@ -184,6 +201,7 @@ def _usage() -> str:
         "  check <name>           probe the backend executable\n"
         "  set-default <name>     make <name> the default worker backend\n"
         "  enable <name>          enable a backend (e.g. codex)\n"
+        "  set-evaluator <name>   who grades in verify: agent (default) or a backend name\n"
     )
 
 
@@ -272,6 +290,20 @@ def run(argv: list) -> int:
             cfg.setdefault("worker", {})["default"] = name
             config.save(root, cfg)
             print("ok default worker backend is now %s" % name)
+        return 0
+
+    if cmd == "set-evaluator":
+        if not rest:
+            print("workers set-evaluator: missing <name>", file=sys.stderr)
+            return 2
+        name = rest[0]
+        if name != "agent" and name not in backends(root):
+            print("workers set-evaluator: unknown evaluator %r (agent or a backend name)" % name, file=sys.stderr)
+            return 2
+        cfg = config.load(root)
+        cfg.setdefault("verify", {})["evaluator"] = name
+        config.save(root, cfg)
+        print("ok evaluator is now %s" % name)
         return 0
 
     print("workers: unknown command %r\n" % cmd, file=sys.stderr)

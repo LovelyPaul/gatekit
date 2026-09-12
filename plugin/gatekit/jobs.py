@@ -13,6 +13,7 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import pathlib
 import secrets
 import shutil
 import subprocess
@@ -345,6 +346,91 @@ def execute_task(root, jdir, job_id: str, task: dict, backend: dict, timeout_s: 
     )
 
 
+# ------------------------------------------------------------------ evaluate
+
+EVALUATOR_BRIEF = """# Evaluator brief
+
+You are the evaluator. You did not write this code and you must not change it.
+Your session is read-only: the CLI sandbox and the write gate both refuse
+writes, and any attempt to write is itself a finding against you.
+
+1. Run `{launcher} contract run --json` from the project root.
+2. Read `spec/05-gate.md` and carry out every E2E step it describes by hand,
+   in order. Record what you actually observed, not what should happen.
+3. For each criterion and each E2E step give one verdict from
+   `ok / warn / fail / unverified`. A step you could not run is `unverified`;
+   never round it to either side.
+4. Do not fix anything you find. Report it.
+5. Reply with the verdict table only — one row per criterion and per E2E step,
+   then the aggregate — in {lang}. Do not paste command transcripts.
+"""
+
+
+def evaluator_brief(root, lang: str = "en") -> str:
+    return EVALUATOR_BRIEF.format(launcher=paths.cli_invocation(), lang=lang)
+
+
+def evaluate(root, backend_name=None, prompt_path=None, timeout_s=None, lang: str = "en") -> dict:
+    """Run one read-only worker as the independent evaluator.
+
+    The backend is *backend_name* or ``verify.evaluator`` from config; ``agent``
+    means the host's own subagent and is not runnable from here. The worker
+    gets ``GATEKIT_TASK_ID=evaluate`` with a read-only ``task.json`` so the
+    write gate refuses writes inside its session, on top of the backend's
+    ``read_only_argv`` sandbox.
+    """
+    name = backend_name or workers.evaluator_name(root)
+    if name == "agent":
+        raise ValueError(
+            "verify.evaluator is 'agent' (the host's own subagent); run "
+            "`workers set-evaluator <backend>` or pass --backend to use a CLI evaluator"
+        )
+    backend = workers.resolve(root, name, read_only=True)
+    cfg = config.load(root)
+    if timeout_s is None:
+        timeout_s = float((cfg.get("build") or {}).get("task_timeout_s", 900))
+
+    job_id = new_job_id()
+    jdir = job_dir(root, job_id)
+    edir = jdir / "evaluate"
+    edir.mkdir(parents=True, exist_ok=True)
+    task = {"id": "evaluate", "title": "independent evaluation", "write_scope": "read-only"}
+    write_json(edir / "task.json", task)
+    if prompt_path is not None:
+        prompt = pathlib.Path(prompt_path).read_text(encoding="utf-8")
+    else:
+        prompt = evaluator_brief(root, lang)
+    (edir / "prompt.md").write_text(prompt, encoding="utf-8")
+    write_json(jdir / "job.json", {
+        "job_id": job_id,
+        "kind": "evaluate",
+        "started_at": _now(),
+        "backend": {"name": backend["name"], "argv": backend["argv"],
+                    "unsafe": backend["unsafe"], "read_only": True},
+        "timeout_s": timeout_s,
+    })
+    write_json(edir / "status.json", {"task_id": "evaluate", "state": "running", "started_at": _now()})
+
+    result = _spawn_worker(root, backend, task, job_id, edir, timeout_s)
+    if result["timed_out"]:
+        state, detail = "timeout", "evaluator exceeded %ss and was killed" % timeout_s
+    elif result["exit"] == 0:
+        state, detail = "passed", "evaluator exited 0"
+    else:
+        state, detail = "failed", "evaluator exited %s" % result["exit"]
+    status_doc = {
+        "task_id": "evaluate", "state": state, "exit": result["exit"],
+        "elapsed_s": result.get("elapsed_s"), "finished_at": _now(), "detail": detail,
+    }
+    write_json(edir / "status.json", status_doc)
+    try:
+        output = (edir / "output.txt").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        output = ""
+    return {"job_id": job_id, "backend": backend["name"], "state": state,
+            "exit": result["exit"], "detail": detail, "output_tail": _tail(output)}
+
+
 # ----------------------------------------------------------------- scheduling
 
 
@@ -631,6 +717,7 @@ def _usage() -> str:
         "  wait [--job ID] [--timeout S]\n"
         "  results [--job ID] [--compact|--json]\n"
         "  redelegate <task_id> [--job ID]\n"
+        "  evaluate [--backend name] [--prompt FILE] [--lang ko|en] [--json]\n"
         "  clean [--all]\n"
     )
 
@@ -710,6 +797,22 @@ def run(argv: list) -> int:
             st = redelegate(root, positional[0], job_id)
             print("%s %s — %s" % (st.get("task_id"), st.get("state"), st.get("detail", "")))
             return 0 if st.get("state") == "passed" else 1
+
+        if cmd == "evaluate":
+            result = evaluate(
+                root,
+                backend_name=_opt(rest, "--backend"),
+                prompt_path=_opt(rest, "--prompt"),
+                lang=_opt(rest, "--lang") or "en",
+            )
+            if "--json" in rest:
+                print(json.dumps(result, indent=2, ensure_ascii=False))
+            else:
+                print("evaluate job %s  backend=%s  state=%s — %s" % (
+                    result["job_id"], result["backend"], result["state"], result["detail"]))
+                print("--- evaluator reply (tail) ---")
+                print(result["output_tail"].rstrip("\n"))
+            return 0 if result["state"] == "passed" else 1
 
         if cmd == "clean":
             removed = clean(root, all_jobs="--all" in rest)

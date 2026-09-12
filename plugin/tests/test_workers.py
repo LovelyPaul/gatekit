@@ -163,3 +163,57 @@ class TestCli(WorkerTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReadOnlyArgv(unittest.TestCase):
+    def setUp(self) -> None:
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(os.path.realpath(self._tmp.name))
+        (self.root / ".gatekit").mkdir()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_defaults_carry_read_only_argv(self) -> None:
+        from gatekit import config
+        claude = config.DEFAULTS["worker"]["backends"]["claude"]["read_only_argv"]
+        codex = config.DEFAULTS["worker"]["backends"]["codex"]["read_only_argv"]
+        self.assertIn("plan", claude)
+        self.assertEqual(codex[-2:], ["--sandbox", "read-only"])
+        self.assertNotIn("acceptEdits", claude)
+        self.assertNotIn("workspace-write", codex)
+
+    def test_default_evaluator_is_agent(self) -> None:
+        from gatekit import config
+        self.assertEqual(config.DEFAULTS["verify"]["evaluator"], "agent")
+
+    def test_resolve_read_only_uses_read_only_argv(self) -> None:
+        backend = workers.resolve(self.root, "claude", read_only=True)
+        self.assertIn("plan", backend["argv"])
+        self.assertTrue(backend["read_only"])
+
+    def test_resolve_read_only_without_read_only_argv_raises(self) -> None:
+        cfg = {"worker": {"backends": {"bare": {"argv": ["x"], "enabled": True}}}}
+        (self.root / ".gatekit" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            workers.resolve(self.root, "bare", read_only=True)
+
+    def test_resolve_read_only_still_rejects_bypass_flags(self) -> None:
+        cfg = {"worker": {"backends": {"bad": {"argv": ["x"], "read_only_argv": ["x", "--dangerously-skip"], "enabled": True}}}}
+        (self.root / ".gatekit" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            workers.resolve(self.root, "bad", read_only=True)
+
+    def test_set_evaluator_persists(self) -> None:
+        from gatekit import config
+        self.assertEqual(workers.run(["set-evaluator", "codex", "--root", str(self.root)]), 0)
+        self.assertEqual(config.load(self.root)["verify"]["evaluator"], "codex")
+        self.assertEqual(workers.run(["set-evaluator", "agent", "--root", str(self.root)]), 0)
+        self.assertEqual(config.load(self.root)["verify"]["evaluator"], "agent")
+
+    def test_set_evaluator_rejects_unknown(self) -> None:
+        self.assertNotEqual(workers.run(["set-evaluator", "vim", "--root", str(self.root)]), 0)
+
+    def test_evaluator_name_helper(self) -> None:
+        self.assertEqual(workers.evaluator_name(self.root), "agent")

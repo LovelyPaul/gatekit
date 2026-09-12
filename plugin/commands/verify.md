@@ -34,10 +34,35 @@ Re-derive first: the contract must match the current `spec/05-gate.md`, or every
 run comes back `unverified` with `contract_stale`. If `spec/05-gate.md` is
 missing, stop and route the user to `/gatekit:gate`.
 
-## Step 2 — spawn the evaluator
+## Step 2 — run the evaluator
 
-Spawn one Agent. Its prompt **must** contain this fence verbatim — the spawn gate
-parses it as JSON and denies the spawn without it:
+Read who grades:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers list --json
+```
+
+and take `verify.evaluator` from `.gatekit/config.json` (default `agent`).
+
+**If the evaluator is a backend name** (set with `workers set-evaluator
+<name>`), the grader is a separate CLI, possibly a different model, running
+with that backend's `read_only_argv`. Write the bullet list below (from "You
+are the evaluator" onward, in `output_lang`, minus the `spec/PROGRESS.md`
+bullet — a CLI evaluator cannot write) to `.gatekit/evaluator-prompt.md`,
+then run:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs evaluate --prompt .gatekit/evaluator-prompt.md --lang <output_lang>
+```
+
+It prints the evaluator's reply tail (the verdict table) and its state.
+`failed` or `timeout` means the evaluator did not finish; that is
+`unverified` for every criterion, never a pass. Then continue at Step 3 and
+write `spec/PROGRESS.md` yourself in Step 5.
+
+**If the evaluator is `agent`**, spawn one Agent. Its prompt **must** contain
+this fence verbatim — the spawn gate parses it as JSON and denies the spawn
+without it:
 
 ````
 ```gatekit-scope

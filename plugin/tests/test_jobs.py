@@ -424,3 +424,108 @@ class TestLoadTasks(JobTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEvaluate(JobTestCase):
+    """`jobs evaluate` runs one read-only worker as the independent evaluator."""
+
+    def write_eval_config(self, read_only=True, exit_code=0) -> None:
+        backend = {
+            "argv": [sys.executable, "/nonexistent/should-not-run"],
+            "enabled": True,
+        }
+        if read_only:
+            backend["read_only_argv"] = [sys.executable, str(FAKE_WORKER)]
+        cfg = {
+            "worker": {"default": "fake", "backends": {"fake": backend}},
+            "build": {"task_timeout_s": 60},
+            "verify": {"evaluator": "fake"},
+        }
+        (self.root / ".gatekit" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+        self.set_env(FAKE_WORKER_EXIT=exit_code)
+
+    def test_uses_read_only_argv_and_records_state(self) -> None:
+        self.write_eval_config()
+        result = jobs.evaluate(self.root)
+        self.assertEqual(result["state"], "passed")
+        self.assertEqual(result["exit"], 0)
+        edir = self.root / ".gatekit" / "jobs" / result["job_id"] / "evaluate"
+        self.assertTrue((edir / "output.txt").is_file())
+        status = json.loads((edir / "status.json").read_text(encoding="utf-8"))
+        self.assertEqual(status["state"], "passed")
+        job = json.loads((self.root / ".gatekit" / "jobs" / result["job_id"] / "job.json").read_text(encoding="utf-8"))
+        self.assertTrue(job["backend"]["read_only"])
+        self.assertEqual(job["kind"], "evaluate")
+
+    def test_worker_sees_evaluate_task_id_and_read_only_scope(self) -> None:
+        self.write_eval_config()
+        result = jobs.evaluate(self.root)
+        edir = self.root / ".gatekit" / "jobs" / result["job_id"] / "evaluate"
+        stderr = (edir / "stderr.txt").read_text(encoding="utf-8")
+        self.assertIn("task=evaluate", stderr)
+        task = json.loads((edir / "task.json").read_text(encoding="utf-8"))
+        self.assertEqual(task["write_scope"], "read-only")
+
+    def test_prompt_file_is_used_verbatim(self) -> None:
+        self.write_eval_config()
+        brief = self.root / "brief.md"
+        brief.write_text("EVALUATE THIS\n", encoding="utf-8")
+        result = jobs.evaluate(self.root, prompt_path=brief)
+        edir = self.root / ".gatekit" / "jobs" / result["job_id"] / "evaluate"
+        self.assertEqual((edir / "prompt.md").read_text(encoding="utf-8"), "EVALUATE THIS\n")
+
+    def test_default_brief_mentions_contract_run_and_read_only(self) -> None:
+        self.write_eval_config()
+        result = jobs.evaluate(self.root)
+        edir = self.root / ".gatekit" / "jobs" / result["job_id"] / "evaluate"
+        text = (edir / "prompt.md").read_text(encoding="utf-8")
+        self.assertIn("contract run", text)
+        self.assertIn("unverified", text)
+        self.assertIn("Do not fix", text)
+
+    def test_nonzero_exit_is_failed(self) -> None:
+        self.write_eval_config(exit_code=3)
+        self.assertEqual(jobs.evaluate(self.root)["state"], "failed")
+
+    def test_output_tail_returned(self) -> None:
+        self.write_eval_config()
+        result = jobs.evaluate(self.root)
+        self.assertIn("fake-worker report", result["output_tail"])
+
+    def test_missing_read_only_argv_refuses(self) -> None:
+        self.write_eval_config(read_only=False)
+        with self.assertRaises(ValueError):
+            jobs.evaluate(self.root)
+
+    def test_agent_evaluator_refuses_cli_path(self) -> None:
+        self.write_eval_config()
+        cfg = json.loads((self.root / ".gatekit" / "config.json").read_text(encoding="utf-8"))
+        cfg["verify"]["evaluator"] = "agent"
+        (self.root / ".gatekit" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+        with self.assertRaises(ValueError):
+            jobs.evaluate(self.root)
+
+    def test_explicit_backend_overrides_config(self) -> None:
+        self.write_eval_config()
+        cfg = json.loads((self.root / ".gatekit" / "config.json").read_text(encoding="utf-8"))
+        cfg["verify"]["evaluator"] = "agent"
+        (self.root / ".gatekit" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+        self.assertEqual(jobs.evaluate(self.root, backend_name="fake")["state"], "passed")
+
+    def test_cli_prints_tail_and_exits_zero(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+        self.write_eval_config()
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            code = jobs.run(["evaluate", "--root", str(self.root)])
+        self.assertEqual(code, 0)
+        self.assertIn("fake-worker report", buf.getvalue())
+        self.assertIn("passed", buf.getvalue())
+
+    def test_cli_nonzero_on_failed(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+        self.write_eval_config(exit_code=2)
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(jobs.run(["evaluate", "--root", str(self.root)]), 1)

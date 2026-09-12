@@ -6,6 +6,8 @@ returns a complete, usable dictionary: the file is deep-merged onto
 
 Sandboxing is never disabled by default. A backend that passes a bypass flag has
 to say so explicitly with ``"unsafe": true``, and the job receipt records it.
+Each backend carries two argv lists: ``argv`` for build workers and
+``read_only_argv`` for the evaluator, which must never be able to write.
 """
 from __future__ import annotations
 
@@ -33,16 +35,29 @@ DEFAULTS: Dict[str, Any] = {
                     "--permission-mode",
                     "acceptEdits",
                 ],
+                "read_only_argv": [
+                    "claude",
+                    "-p",
+                    "--output-format",
+                    "json",
+                    "--permission-mode",
+                    "plan",
+                ],
                 "enabled": True,
             },
             "codex": {
                 "argv": ["codex", "exec", "--sandbox", "workspace-write"],
+                "read_only_argv": ["codex", "exec", "--sandbox", "read-only"],
                 "enabled": False,
             },
         },
     },
     "build": {"max_retries": 2, "parallel": 3, "task_timeout_s": 900},
     "questions": {"interview_max_calls": 2, "items_per_call": 4},
+    # Who grades in /gatekit:verify: "agent" spawns a read-only subagent of
+    # the host; a backend name runs that CLI with its read_only_argv, so the
+    # grader can be a different model from the one that built the code.
+    "verify": {"evaluator": "agent"},
 }
 
 
