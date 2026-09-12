@@ -318,3 +318,9 @@ class TestCodexSkillInvocation(PromptProject):
         prompt_gate.handle(self.event("$gatekit-build"))
         prompt_gate.handle(self.event("later maybe $gatekit-verify"))
         self.assertEqual(self.led().data["active_pipeline"], "build")
+
+
+class TestHeadingSkillForm(PromptProject):
+    def test_heading_with_dollar_form_sets_pipeline(self) -> None:
+        prompt_gate.handle(self.event("---\nname: build\n---\n\n# $gatekit-build\n"))
+        self.assertEqual(self.led().data["active_pipeline"], "build")

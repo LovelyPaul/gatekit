@@ -259,7 +259,9 @@ def run_gates(root, task: dict) -> dict:
 
 def _spawn_worker(root, backend: dict, task: dict, job_id: str, tdir, timeout_s: float) -> dict:
     """Run the worker for one task; returns {"exit", "timed_out"}."""
-    env = dict(os.environ)
+    # A worker gets exactly the two gatekit variables it needs; nothing a
+    # parent worker or evaluator session exported leaks into it.
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GATEKIT_")}
     env["GATEKIT_TASK_ID"] = str(task.get("id", ""))
     env["GATEKIT_JOB_ID"] = job_id
     prompt = (tdir / "prompt.md").read_text(encoding="utf-8")

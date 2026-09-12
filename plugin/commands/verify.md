@@ -36,20 +36,20 @@ missing, stop and route the user to `/gatekit:gate`.
 
 ## Step 2 — run the evaluator
 
-Read who grades:
+Read who grades — the `evaluator` field of:
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers list --json
 ```
 
-and take `verify.evaluator` from `.gatekit/config.json` (default `agent`).
+It is `agent` unless the user ran `workers set-evaluator <backend>`.
 
 **If the evaluator is a backend name** (set with `workers set-evaluator
 <name>`), the grader is a separate CLI, possibly a different model, running
 with that backend's `read_only_argv`. Write the bullet list below (from "You
-are the evaluator" onward, in `output_lang`, minus the `spec/PROGRESS.md`
-bullet — a CLI evaluator cannot write) to `.gatekit/evaluator-prompt.md`,
-then run:
+are the evaluator" onward, in `output_lang`, leaving out the one bullet that
+starts "Record the result under" — a CLI evaluator cannot write) to
+`.gatekit/evaluator-prompt.md`, then run:
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs evaluate --prompt .gatekit/evaluator-prompt.md --lang <output_lang>

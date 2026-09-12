@@ -27,7 +27,9 @@ import sys
 
 PATTERN = re.compile(r"(/Users/[A-Za-z0-9_.-]+|/home/[A-Za-z0-9_.-]+|C:\\Users\\)")
 
-SKIP_DIR_NAMES = {".git"}
+# .codex/ and .agents/ are the generated Codex host layer, which legitimately
+# carries the installing user's checkout path; they are git-ignored.
+SKIP_DIR_NAMES = {".git", ".codex", ".agents"}
 
 # Fixture directories/files that intentionally contain absolute paths as
 # gate test data — never scanned for real violations.

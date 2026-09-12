@@ -423,8 +423,11 @@ class Ledger:
 def run(argv: list[str]) -> int
 
 # hookio.py
+HOSTS: tuple[str, ...]                                 # ("claude", "codex")
 def read_event() -> dict
-def run(handler) -> None                               # never raises; always exit 0
+def host_from_argv(argv: list[str] | None = None) -> str   # "--host <name>", default "claude"
+def adapt_output(payload: dict | None, host: str) -> dict | None   # render the Stop block / command names per host
+def run(handler, stdin=None, exit_process=True, host: str | None = None) -> int   # never raises; always exit 0
 def deny(reason: str) -> dict                          # PreToolUse deny payload
 def block_stop(reason: str) -> dict                    # Stop block payload
 def add_context(text: str) -> dict                     # UserPromptSubmit payload
@@ -460,5 +463,14 @@ def run(argv: list[str]) -> int
 
 # doctor.py
 def diagnose(root: pathlib.Path) -> dict               # {"verdict","axes":[{"axis","verdict","detail","fix"}]}
+
+# hosts.py
+INSTALLABLE_HOSTS: tuple[str, ...]                     # ("codex",)
+def install(root: pathlib.Path, host: str, plugin_root: pathlib.Path | None = None, dry_run: bool = False) -> dict   # {"host","written":[relpaths]}
+def status(root: pathlib.Path, host: str, plugin_root: pathlib.Path | None = None) -> dict   # {"verdict","detail","fix"}
+def codex_hooks(plugin_root: pathlib.Path) -> dict     # the .codex/hooks.json document
+def rewrite_command(text: str, plugin_root: pathlib.Path) -> str
+def merged_agents_md(existing: str | None, plugin_root: pathlib.Path) -> str
+def run(argv: list[str]) -> int
 def run(argv: list[str]) -> int
 ```

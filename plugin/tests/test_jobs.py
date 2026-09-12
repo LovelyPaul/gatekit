@@ -529,3 +529,22 @@ class TestEvaluate(JobTestCase):
         self.write_eval_config(exit_code=2)
         with redirect_stdout(io.StringIO()):
             self.assertEqual(jobs.run(["evaluate", "--root", str(self.root)]), 1)
+
+
+class TestWorkerEnvIsolation(JobTestCase):
+    def test_parent_gatekit_env_is_not_inherited(self) -> None:
+        self.write_config()
+        self.set_env(GATEKIT_LEAK="x", FAKE_WORKER_OUT="src/note.txt")
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root)
+        stderr = (self.task_dir(job["job_id"], "write-note") / "stderr.txt").read_text(encoding="utf-8")
+        self.assertIn("task=write-note", stderr)
+        # the fake worker echoes GATEKIT_TASK_ID/JOB_ID only; prove the leak key is gone via a probe
+        probe = self.root / "probe.py"
+        probe.write_text("import os,sys; sys.exit(1 if 'GATEKIT_LEAK' in os.environ else 0)", encoding="utf-8")
+        cfg = json.loads((self.root / ".gatekit" / "config.json").read_text(encoding="utf-8"))
+        cfg["worker"]["backends"]["fake"]["argv"] = [sys.executable, str(probe)]
+        (self.root / ".gatekit" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+        job = jobs.start(self.root)
+        status = json.loads((self.task_dir(job["job_id"], "write-note") / "status.json").read_text(encoding="utf-8"))
+        self.assertEqual(status["exit"], 0)

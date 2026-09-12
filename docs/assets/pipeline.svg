@@ -14,7 +14,7 @@
   <text x="1262" y="106" font-size="13" fill="#6B6459">아무 때나</text>
   <text x="1078" y="136" font-size="16" font-weight="600" fill="#12312E" font-family="ui-monospace, SFMono-Regular, Menlo, monospace">/gatekit:setup</text>
   <text x="1262" y="136" font-size="13" fill="#6B6459">프로젝트 최초 1회</text>
-  <text x="1078" y="156" font-size="13" fill="#8C8577">설치·상태 7축 진단 / config·워커 점검</text>
+  <text x="1078" y="156" font-size="13" fill="#8C8577">설치·상태 8축 진단 / config·워커 점검</text>
 
   <!-- ===== Rail ===== -->
   <line x1="72" y1="286" x2="1368" y2="286" stroke="#DCD5C8" stroke-width="2"/>

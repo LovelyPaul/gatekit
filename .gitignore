@@ -6,3 +6,6 @@ __pycache__/
 .DS_Store
 .review/
 dist/
+# generated Codex host layer (gatekit install --host codex); regenerate, do not commit
+.codex/
+.agents/

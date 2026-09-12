@@ -131,7 +131,12 @@ def _frontmatter_field(text: str, key: str) -> str:
 def rewrite_command(text: str, plugin_root: pathlib.Path) -> str:
     """The command body as Codex must read it."""
     out = text.replace("${CLAUDE_PLUGIN_ROOT}", str(pathlib.Path(plugin_root)))
-    out = re.sub(r"/gatekit:([a-z-]+)", r"$gatekit-\1", out)
+    names = sorted((p.stem for p in (pathlib.Path(plugin_root) / "commands").glob("*.md")), key=len, reverse=True)
+    if names:
+        # Only real command names, not preceded by a URL path character and
+        # not followed by more identifier, become skill references.
+        pattern = re.compile(r"(?<![\w/])/gatekit:(%s)(?![\w-])" % "|".join(re.escape(n) for n in names))
+        out = pattern.sub(r"$gatekit-\1", out)
     return out
 
 
@@ -155,8 +160,10 @@ def merged_agents_md(existing: Optional[str], plugin_root: pathlib.Path) -> str:
         return block
     if BLOCK_BEGIN in existing and BLOCK_END in existing:
         start = existing.index(BLOCK_BEGIN)
-        end = existing.index(BLOCK_END) + len(BLOCK_END)
-        return existing[:start] + block.rstrip("\n") + existing[end:]
+        end = existing.index(BLOCK_END, start) if BLOCK_END in existing[start:] else -1
+        if end > start:
+            return existing[:start] + block.rstrip("\n") + existing[end + len(BLOCK_END):]
+        # markers out of order: leave the user's text alone and append a fresh block
     joiner = "" if existing.endswith("\n\n") else ("\n" if existing.endswith("\n") else "\n\n")
     return existing + joiner + block
 
@@ -189,6 +196,18 @@ def install(
     agents = root / "AGENTS.md"
     existing = agents.read_text(encoding="utf-8") if agents.is_file() else None
     planned.append((agents, merged_agents_md(existing, proot)))
+
+    real_root = root.resolve()
+    for path, _ in planned:
+        # A symlinked .codex/ or .agents/ must not carry the layer outside the
+        # project; resolve the deepest existing ancestor and check it.
+        probe = path.parent
+        while not probe.exists() and probe != probe.parent:
+            probe = probe.parent
+        try:
+            probe.resolve().relative_to(real_root)
+        except ValueError:
+            raise ValueError("%s resolves outside the project root; refusing to write" % path.relative_to(root))
 
     written: List[str] = []
     for path, content in planned:

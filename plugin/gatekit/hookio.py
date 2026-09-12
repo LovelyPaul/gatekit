@@ -20,6 +20,7 @@ from __future__ import annotations
 import datetime
 import json
 import pathlib
+import re
 import sys
 from typing import Any, Callable, Dict, Optional, TextIO
 
@@ -139,9 +140,26 @@ def adapt_output(payload: Optional[Dict[str, Any]], host: str) -> Optional[Dict[
     """
     if payload is None or host == DEFAULT_HOST:
         return payload
-    if host == "codex" and payload.get("decision") == "block" and "hookSpecificOutput" not in payload:
-        return {"continue": False, "stopReason": str(payload.get("reason", ""))}
+    if host == "codex":
+        if payload.get("decision") == "block" and "hookSpecificOutput" not in payload:
+            return {"continue": False, "stopReason": _codex_names(str(payload.get("reason", "")))}
+        inner = payload.get("hookSpecificOutput")
+        if isinstance(inner, dict):
+            inner = dict(inner)
+            for key in ("permissionDecisionReason", "additionalContext"):
+                if isinstance(inner.get(key), str):
+                    inner[key] = _codex_names(inner[key])
+            payload = dict(payload)
+            payload["hookSpecificOutput"] = inner
     return payload
+
+
+_COMMAND_NAME_RE = re.compile(r"/gatekit:([a-z-]+)")
+
+
+def _codex_names(text: str) -> str:
+    """Commands are skills under Codex: ``/gatekit:x`` reads as ``$gatekit-x``."""
+    return _COMMAND_NAME_RE.sub(r"$gatekit-\1", text)
 
 
 # --------------------------------------------------------------------------

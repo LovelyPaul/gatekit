@@ -50,7 +50,7 @@ NON_PIPELINE_COMMANDS = ("doctor", "setup")
 _INVOCATION_RE = re.compile(
     r"(?:<command-name>\s*/gatekit:([a-z-]+)\s*</command-name>)"
     r"|(?:^\s*(?:#\s+)?/gatekit:([a-z-]+)\b)"
-    r"|(?:^\s*\$gatekit-([a-z-]+)\b)",
+    r"|(?:^\s*(?:#\s+)?\$gatekit-([a-z-]+)\b)",
     re.MULTILINE,
 )
 #: Only the leading lines of the prompt are inspected.

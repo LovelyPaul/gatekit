@@ -244,7 +244,7 @@ def run(argv: list) -> int:
                 }
             )
         if as_json:
-            print(json.dumps({"default": default, "backends": rows}, indent=2))
+            print(json.dumps({"default": default, "evaluator": evaluator_name(root), "backends": rows}, indent=2))
         else:
             for row in rows:
                 mark = "*" if row["default"] else " "
@@ -252,6 +252,7 @@ def run(argv: list) -> int:
                 if row["unsafe"]:
                     state += ", unsafe"
                 print("%s %-10s [%s] %s" % (mark, row["name"], state, " ".join(row["argv"])))
+            print("evaluator: %s" % evaluator_name(root))
         return 0
 
     if cmd == "check":

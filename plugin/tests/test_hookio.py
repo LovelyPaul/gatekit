@@ -256,3 +256,21 @@ class TestHostAdapter(unittest.TestCase):
         with redirect_stdout(buf):
             hookio.run(lambda e: hookio.block_stop("x"), stdin=io.StringIO("{}"), exit_process=False, host="codex")
         self.assertEqual(json.loads(buf.getvalue()), {"continue": False, "stopReason": "x"})
+
+
+class TestHostCommandNames(unittest.TestCase):
+    def test_codex_reasons_use_skill_syntax(self) -> None:
+        deny = hookio.deny("run the /gatekit:gate pipeline")
+        out = hookio.adapt_output(deny, "codex")
+        self.assertIn("$gatekit-gate", out["hookSpecificOutput"]["permissionDecisionReason"])
+        self.assertNotIn("/gatekit:", json.dumps(out))
+
+    def test_codex_context_and_stop_reason_rewritten(self) -> None:
+        ctx = hookio.adapt_output(hookio.add_context("next: /gatekit:verify"), "codex")
+        self.assertIn("$gatekit-verify", ctx["hookSpecificOutput"]["additionalContext"])
+        stop = hookio.adapt_output(hookio.block_stop("run /gatekit:build again"), "codex")
+        self.assertIn("$gatekit-build", stop["stopReason"])
+
+    def test_claude_reasons_untouched(self) -> None:
+        deny = hookio.deny("run the /gatekit:gate pipeline")
+        self.assertEqual(hookio.adapt_output(deny, "claude"), deny)

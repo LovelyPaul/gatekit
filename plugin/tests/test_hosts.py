@@ -196,3 +196,43 @@ class TestDoctorAxis(HostProject):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestInstallSafety(HostProject):
+    def test_symlinked_dir_outside_root_is_refused(self) -> None:
+        import shutil
+        outside = pathlib.Path(tempfile.mkdtemp())
+        try:
+            os.symlink(str(outside), str(self.root / ".agents"))
+            with self.assertRaises(ValueError):
+                self.install()
+            self.assertFalse(list(outside.iterdir()))
+        finally:
+            shutil.rmtree(outside, ignore_errors=True)
+
+    def test_reversed_markers_do_not_swallow_user_text(self) -> None:
+        (self.root / "AGENTS.md").write_text(
+            "keep A\n" + hosts.BLOCK_END + "\nkeep B\n" + hosts.BLOCK_BEGIN + "\nkeep C\n", encoding="utf-8"
+        )
+        self.install()
+        text = (self.root / "AGENTS.md").read_text(encoding="utf-8")
+        for part in ("keep A", "keep B", "keep C"):
+            self.assertIn(part, text)
+        self.assertEqual(text.count(hosts.BLOCK_BEGIN), 2)
+
+    def test_rewrite_keeps_urls_and_unknown_suffixes(self) -> None:
+        text = "see https://example.com/gatekit:build and /gatekit:build-x and /gatekit:verify."
+        out = hosts.rewrite_command(text, PLUGIN_DIR)
+        self.assertIn("https://example.com/gatekit:build", out)
+        self.assertIn("/gatekit:build-x", out)
+        self.assertIn("$gatekit-verify.", out)
+
+    def test_workers_list_json_reports_evaluator(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+        from gatekit import workers
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            workers.run(["list", "--json", "--root", str(self.root)])
+        self.assertEqual(json.loads(buf.getvalue())["evaluator"], "agent")
