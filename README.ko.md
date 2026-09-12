@@ -61,11 +61,11 @@ python3 "gatekit/plugin/bin/gatekit.py" install --host codex
 |---|---|---|
 | 커널 CLI, 템플릿, `spec validate`, 계약 | ok | ok |
 | write 게이트 (스펙 우선, 태스크 범위) | ok | ok — `apply_patch`와 셸 리다이렉션 포함 |
-| bash 게이트 | ok | ok |
+| bash 게이트 | ok | ok — 관측: code-mode `exec`가 셸 명령 하나당 `Bash` 이벤트로 풀려서 전달됨 |
 | stop 게이트 (세션 종료 시 계약 실행) | ok | ok — Codex Stop 형식 |
 | prompt 게이트 (`active_pipeline`, 언어) | ok | ok — `$gatekit-<name>` 호출 인식 |
-| spawn 게이트 (서브에이전트 범위 펜스) | ok | unverified — Codex 서브에이전트 도구 이름 미관측 |
-| question 게이트 (질문 예산) | ok | unverified — Codex에 `AskUserQuestion` 없음, 질문은 평문 |
+| spawn 게이트 (서브에이전트 범위 펜스) | ok | warn — `collaborationspawn_agent`는 프롬프트를 훅에 숨겨 펜스를 검사할 수 없음. 서브에이전트의 쓰기는 write·bash 게이트를 그대로 거침(관측됨) |
+| question 게이트 (질문 예산) | ok | n/a — Codex에 `AskUserQuestion` 없음, 질문은 평문이라 세지 않음 |
 | 커맨드의 `AskUserQuestion` | 기본 선택 UI | 평문 번호 선택지 |
 | 빌드 워커를 다른 CLI로 | ok (`codex`) | ok (`claude`) |
 | 평가자를 다른 CLI로 | ok (`workers set-evaluator codex`) | ok (`workers set-evaluator claude`) |

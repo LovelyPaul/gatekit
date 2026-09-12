@@ -44,7 +44,7 @@ _CODEX_HOOKS = (
     ("UserPromptSubmit", None, "prompt.py", 10),
     ("PreToolUse", "Write|Edit|MultiEdit|NotebookEdit|apply_patch", "write.py", 10),
     ("PreToolUse", "Bash", "bash.py", 10),
-    ("PreToolUse", "Agent|Task", "spawn.py", 10),
+    ("PreToolUse", "Agent|Task|collaborationspawn_agent", "spawn.py", 10),
     ("PostToolUse", "AskUserQuestion", "question.py", 10),
     ("Stop", None, "stop.py", None),  # timeout copied from the Claude hooks file
 )

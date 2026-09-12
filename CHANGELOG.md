@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## 0.3.0 — 2026-09-13
 
+### Fixed
+
+- Language detection ignores path and identifier tokens: a Codex session
+  switched to English on `src/hello.ts 만들어줘`.
+
 ### Added
 
 - Codex CLI as a second host (ADR-0006). The gates read `--host <name>` from
@@ -22,6 +27,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `workers set-evaluator` sets it; `jobs evaluate` runs the backend once,
   read-only, with `GATEKIT_TASK_ID=evaluate` so the write gate refuses writes
   inside its session; `/gatekit:verify` branches on the setting.
+- Observed in a real Codex 0.154 session and folded back in: shell commands
+  arrive as `Bash` events (bash gate confirmed), subagents spawn through
+  `collaborationspawn_agent` with an encrypted prompt (the spawn gate allows
+  and records `spawn_unscoped`; the subagent's own writes still meet the
+  gates), and the parity table says so.
 
 ## 0.2.0 — 2026-09-11
 

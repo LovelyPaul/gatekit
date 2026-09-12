@@ -57,11 +57,24 @@ class TestDetect(unittest.TestCase):
         # 3 Latin letters is 50% even though most characters are ASCII.
         self.assertEqual(lang.detect("v1.2.3 / 100% -- 고쳐줘 now"), "ko")
 
-    def test_long_ascii_identifier_outweighs_short_korean_verb(self) -> None:
-        # A path is mostly Latin letters, so the 30% rule reports en. This is
-        # the documented threshold behaving as specified, not a bug: the prompt
-        # gate sees the whole prompt, where prose dominates identifiers.
-        self.assertEqual(lang.detect("src/auth/token.ts 를 고쳐줘"), "en")
+    def test_path_tokens_do_not_count(self) -> None:
+        # Observed in a Codex session: "src/hello.ts 만들어줘" flipped the
+        # session to English. Paths and identifiers are named, not written.
+        self.assertEqual(lang.detect("src/auth/token.ts 를 고쳐줘"), "ko")
+        self.assertEqual(lang.detect("src/hello.ts 만들어줘"), "ko")
+        self.assertEqual(lang.detect("README.md 읽어줘"), "ko")
+        self.assertEqual(lang.detect("`user_id` 컬럼 추가"), "ko")
+
+    def test_english_around_a_path_stays_english(self) -> None:
+        self.assertEqual(lang.detect("please create src/hello.ts now"), "en")
+        self.assertEqual(lang.detect("make src/hello.ts"), "en")
+
+    def test_trailing_period_is_not_an_identifier_marker(self) -> None:
+        self.assertEqual(lang.detect("Hello world."), "en")
+        self.assertEqual(lang.detect("안녕하세요 world."), "ko")
+
+    def test_only_identifiers_is_english(self) -> None:
+        self.assertEqual(lang.detect("src/a.ts src/b.ts"), "en")
 
     def test_cjk_han_is_not_hangul(self) -> None:
         self.assertEqual(lang.detect("漢字 only here"), "en")

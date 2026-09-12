@@ -65,11 +65,11 @@ beyond `python3` is required.
 |---|---|---|
 | Kernel CLI, templates, `spec validate`, contracts | ok | ok |
 | write gate (spec before code, task scope) | ok | ok — `apply_patch` and shell redirects |
-| bash gate | ok | ok |
+| bash gate | ok | ok — observed: code-mode `exec` is unwrapped into one `Bash` event per shell command |
 | stop gate (contract at session end) | ok | ok — Codex Stop dialect |
 | prompt gate (`active_pipeline`, language) | ok | ok — `$gatekit-<name>` invocation |
-| spawn gate (subagent scope fence) | ok | unverified — Codex's subagent tool name not yet observed |
-| question gate (question budget) | ok | unverified — Codex has no `AskUserQuestion`; questions are plain chat |
+| spawn gate (subagent scope fence) | ok | warn — `collaborationspawn_agent` hides the prompt from hooks, so the fence cannot be checked; the subagent's own writes still meet the write and bash gates (observed) |
+| question gate (question budget) | ok | n/a — Codex has no `AskUserQuestion`; questions are plain chat and uncounted |
 | `AskUserQuestion` in commands | native picker | numbered options in plain chat |
 | Build worker can be the other CLI | ok (`codex`) | ok (`claude`) |
 | Evaluator can be the other CLI | ok (`workers set-evaluator codex`) | ok (`workers set-evaluator claude`) |
