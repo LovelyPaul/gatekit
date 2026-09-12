@@ -43,12 +43,14 @@ NON_PIPELINE_COMMANDS = ("doctor", "setup")
 #: it. For a slash command the prompt body is the tagged form
 #: ``<command-message>…</command-message>\n<command-name>/gatekit:<name></command-name>\n<command-args>…``
 #: (observed in session transcripts); the bare ``/gatekit:<name>`` at the
-#: start of a prompt and the ``# /gatekit:<name>`` title line of an expanded
-#: command body are accepted too. A mention mid-sentence is conversation, not
+#: start of a prompt, the ``# /gatekit:<name>`` title line of an expanded
+#: command body, and Codex's ``$gatekit-<name>`` skill invocation are
+#: accepted too. A mention mid-sentence is conversation, not
 #: an invocation.
 _INVOCATION_RE = re.compile(
     r"(?:<command-name>\s*/gatekit:([a-z-]+)\s*</command-name>)"
-    r"|(?:^\s*(?:#\s+)?/gatekit:([a-z-]+)\b)",
+    r"|(?:^\s*(?:#\s+)?/gatekit:([a-z-]+)\b)"
+    r"|(?:^\s*\$gatekit-([a-z-]+)\b)",
     re.MULTILINE,
 )
 #: Only the leading lines of the prompt are inspected.
@@ -56,6 +58,7 @@ _HEAD_LINES = 12
 
 
 _ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.DOTALL)
+_SKILL_PREFIX_RE = re.compile(r"^\s*\$gatekit-[a-z-]+\b")
 
 
 def language_signal(text: str) -> str:
@@ -68,7 +71,8 @@ def language_signal(text: str) -> str:
     if "<command-name>" in text:
         match = _ARGS_RE.search(text)
         return match.group(1) if match else ""
-    return text
+    # Codex skill syntax: the name is an identifier, the rest is the user's.
+    return _SKILL_PREFIX_RE.sub("", text, count=1)
 
 
 def detect_command(text: str) -> Optional[str]:
@@ -77,7 +81,7 @@ def detect_command(text: str) -> Optional[str]:
     match = _INVOCATION_RE.search(head)
     if not match:
         return None
-    return match.group(1) or match.group(2)
+    return match.group(1) or match.group(2) or match.group(3)
 
 
 def apply_command(led: "ledger.Ledger", text: str) -> None:

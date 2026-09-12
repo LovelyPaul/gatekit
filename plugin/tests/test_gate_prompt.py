@@ -302,3 +302,19 @@ class TestLanguageFromSlashCommand(PromptProject):
         prompt_gate.handle(self.event("러닝크루"))
         prompt_gate.handle(self.event(self.tagged("interview", "an attendance app for my running crew")))
         self.assertEqual(self.led().output_lang, "en")
+
+
+class TestCodexSkillInvocation(PromptProject):
+    def test_dollar_skill_syntax_sets_pipeline(self) -> None:
+        prompt_gate.handle(self.event("$gatekit-build"))
+        self.assertEqual(self.led().data["active_pipeline"], "build")
+
+    def test_dollar_skill_with_args(self) -> None:
+        prompt_gate.handle(self.event("$gatekit-interview 출석 앱"))
+        self.assertEqual(self.led().data["active_pipeline"], "interview")
+        self.assertEqual(self.led().output_lang, "ko")
+
+    def test_dollar_mid_sentence_is_not_invocation(self) -> None:
+        prompt_gate.handle(self.event("$gatekit-build"))
+        prompt_gate.handle(self.event("later maybe $gatekit-verify"))
+        self.assertEqual(self.led().data["active_pipeline"], "build")

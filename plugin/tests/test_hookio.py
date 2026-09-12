@@ -213,3 +213,46 @@ class TestHelpers(unittest.TestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+class TestHostAdapter(unittest.TestCase):
+    """Codex speaks the same hook JSON as Claude Code except for the Stop
+    block; the adapter renders per host and nothing else changes."""
+
+    def test_default_host_is_claude(self) -> None:
+        self.assertEqual(hookio.host_from_argv([]), "claude")
+
+    def test_host_flag_is_read(self) -> None:
+        self.assertEqual(hookio.host_from_argv(["--host", "codex"]), "codex")
+
+    def test_unknown_host_falls_back_to_claude(self) -> None:
+        self.assertEqual(hookio.host_from_argv(["--host", "vim"]), "claude")
+
+    def test_hosts_constant(self) -> None:
+        self.assertEqual(hookio.HOSTS, ("claude", "codex"))
+
+    def test_stop_block_rendered_for_codex(self) -> None:
+        payload = hookio.adapt_output(hookio.block_stop("not done"), "codex")
+        self.assertEqual(payload, {"continue": False, "stopReason": "not done"})
+
+    def test_stop_block_unchanged_for_claude(self) -> None:
+        payload = hookio.adapt_output(hookio.block_stop("not done"), "claude")
+        self.assertEqual(payload, {"decision": "block", "reason": "not done"})
+
+    def test_deny_and_context_unchanged_for_codex(self) -> None:
+        deny = hookio.deny("no")
+        ctx = hookio.add_context("hi")
+        self.assertEqual(hookio.adapt_output(deny, "codex"), deny)
+        self.assertEqual(hookio.adapt_output(ctx, "codex"), ctx)
+
+    def test_none_stays_none(self) -> None:
+        self.assertIsNone(hookio.adapt_output(None, "codex"))
+
+    def test_run_applies_host_from_explicit_argument(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            hookio.run(lambda e: hookio.block_stop("x"), stdin=io.StringIO("{}"), exit_process=False, host="codex")
+        self.assertEqual(json.loads(buf.getvalue()), {"continue": False, "stopReason": "x"})

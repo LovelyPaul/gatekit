@@ -363,3 +363,23 @@ class TestEndToEndViaPromptGate(StopProject):
         self.prompt("/gatekit:build")
         self.prompt("/gatekit:doctor")
         self.assertIsNone(stop_gate.handle(self.event()))
+
+
+class TestCodexHostOutput(StopProject):
+    def test_stop_block_uses_codex_shape_with_host_flag(self) -> None:
+        self.failing()
+        self.set_pipeline("build")
+        env = {k: v for k, v in os.environ.items() if not k.startswith("GATEKIT_")}
+        env.pop("PYTHONPATH", None)
+        proc = subprocess.run(
+            [PY, str(GATE_SCRIPT), "--host", "codex"],
+            input=json.dumps(self.event()),
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=60,
+        )
+        self.assertEqual(proc.returncode, 0)
+        payload = json.loads(proc.stdout)
+        self.assertIs(payload["continue"], False)
+        self.assertIn("bad-crit", payload["stopReason"])
