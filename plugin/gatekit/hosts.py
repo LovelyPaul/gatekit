@@ -77,8 +77,8 @@ the gatekit plugin by `python3 "{launcher}" install --host codex`.
   anything else, including edits made through `apply_patch` and shell
   redirects.
 - Invoke the pipeline as skills: `$gatekit-discover`, `$gatekit-interview`,
-  `$gatekit-mockup`, `$gatekit-tasks`, `$gatekit-gate`, `$gatekit-build`,
-  `$gatekit-verify`, `$gatekit-doctor`, `$gatekit-setup`.
+  `$gatekit-mockup`, `$gatekit-design`, `$gatekit-tasks`, `$gatekit-gate`,
+  `$gatekit-build`, `$gatekit-verify`, `$gatekit-doctor`, `$gatekit-setup`.
 - After writing any file under `spec/`, run
   `python3 "{launcher}" spec validate` and fix `fail` findings before
   reporting.

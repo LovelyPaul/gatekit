@@ -10,7 +10,7 @@
 | 스펙 검증 실패 — 제목 누락 | 템플릿의 H2 제목을 지우거나 바꿈 | `heading-map.json`의 해당 언어 제목을 그대로 복원. 06번 문서에 전체 목록이 있다 |
 | 스펙 검증 실패 — 다른 언어 제목 혼입 | 한 파일에 `## 목표`와 `## Goals`가 섞임 | 한 언어로 통일. 특히 `PROGRESS.md`에 프리핸드 제목을 쓸 때 자주 생긴다. 템플릿에서 복사한다 |
 | 스펙 검증 실패 — 가정 원장 번호 불일치 | 인라인 표시 번호와 원장 행 번호가 안 맞음 | 인라인에 있고 행이 없으면 `fail`이니 행을 추가. 행만 있고 인라인이 없으면 `warn` |
-| 계약이 stale | `05-gate.md`가 파생 이후 변경됨 | `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract derive` 재실행. 승인도 만료됐으면 다시 승인 |
+| 계약이 stale | `05-gate.md`가 파생 이후 변경됨, 또는 디자인 입력(`02-screens.md`, `02-design.md`, `tokens.json`)이 바뀜 — `contract status`가 바뀐 파일명을 알려준다 | `/gatekit:tasks` 후 `/gatekit:gate` 재실행 (디자인이 바뀐 경우), 또는 `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract derive` 재실행 (05만 바뀐 경우). 승인도 만료됐으면 다시 승인 |
 | `approve check`가 `fail` | 승인 후 파일이 바뀜 | 사용자가 다시 읽고 다시 승인. 해시를 맞추려고 파일을 되돌리면 안 된다 |
 | `approve check`가 `unverified` | 승인 기록 자체가 없음 | `/gatekit:gate`를 처음부터 실행 |
 | 워커 없음 (`workers check`가 `fail`) | 기본 백엔드 바이너리가 PATH에 없음 | 해당 CLI 설치, 또는 `workers set-default <name>`으로 다른 백엔드 지정 |

@@ -76,7 +76,9 @@ Common cases:
   parse. Show the parse error; the file has to be fixed or removed by hand.
 - **spec set** — route to the pipeline owning the failing file.
 - **contract freshness** fail — `spec/05-gate.md` changed after the contract was
-  derived. Re-derive.
+  derived, or a design input did (`02-screens.md`, `02-design.md`, or
+  `tokens.json`); the detail names which file changed. Fix either case with
+  `/gatekit:tasks` then `/gatekit:gate`.
 - **workers** fail — the default backend's binary is not on PATH. Route to
   `/gatekit:setup`.
 - **python** fail — the interpreter is below 3.9.

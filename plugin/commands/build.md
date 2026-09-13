@@ -38,7 +38,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" approve check spec/05-gate.md
 - `approve check` must print `ok`. `fail` means the gate file changed after it
   was approved; `unverified` means it was never approved. In either case **stop**
   and tell the user to run `/gatekit:gate`. Never approve on their behalf, and
-  never edit `spec/05-gate.md` to make a hash match.
+  never edit `spec/05-gate.md` to make a hash match. A stale contract can now
+  also come from a changed design input (`02-screens.md`, `02-design.md`, or
+  `tokens.json`); the fix is the same: `/gatekit:tasks` then `/gatekit:gate`.
 
 Then confirm a worker is actually available:
 

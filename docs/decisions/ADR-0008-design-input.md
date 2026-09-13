@@ -1,6 +1,8 @@
 # ADR-0008: Design enters as data, at any stage, reaches the worker by prompt, and stale design is stale
 
-Status: draft — not yet accepted. Nothing under `plugin/` implements it.
+Status: accepted 2026-09-13.
+
+Token gate scope at acceptance: colours only; lengths remain an open question.
 
 ## Context
 
@@ -219,9 +221,6 @@ library only in the kernel, and the verdict words are
   `"design"`, the gate table gains `tokens`, and the parity table gains
   a row for the URL branch marked `unverified` under Codex.
 
-## Open questions before acceptance
+## Open questions
 
-- How wide should the token gate's scan be at first? Colours alone are
-  unambiguous; `px` lengths collide with non-design values (image sizes,
-  `1px` borders) and may need an allowlist in `tokens.json`.
 - Which presets ship first, and who observes them in a real build?

@@ -32,7 +32,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract derive
 
 Re-derive first: the contract must match the current `spec/05-gate.md`, or every
 run comes back `unverified` with `contract_stale`. If `spec/05-gate.md` is
-missing, stop and route the user to `/gatekit:gate`.
+missing, stop and route the user to `/gatekit:gate`. The contract can also go
+stale because a design input changed (`02-screens.md`, `02-design.md`, or
+`tokens.json`); `contract status` names which file changed. The fix is the
+same either way: `/gatekit:tasks` then `/gatekit:gate`.
 
 ## Step 2 — run the evaluator
 

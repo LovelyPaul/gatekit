@@ -67,6 +67,7 @@ python3 "gatekit/plugin/bin/gatekit.py" install --host codex
 | spawn 게이트 (서브에이전트 범위 펜스) | ok | warn — `collaborationspawn_agent`는 프롬프트를 훅에 숨겨 펜스를 검사할 수 없음. 서브에이전트의 쓰기는 write·bash 게이트를 그대로 거침(관측됨) |
 | question 게이트 (질문 예산) | ok | n/a — Codex에 `AskUserQuestion` 없음, 질문은 평문이라 세지 않음 |
 | 커맨드의 `AskUserQuestion` | 기본 선택 UI | 평문 번호 선택지 |
+| `/gatekit:design` 라이브 사이트 분기 (`WebFetch`, Chrome 도구) | ok | unverified — 실제 Codex 세션에서 아직 관측되지 않음. 이 경우 커맨드는 URL로 추측하지 않고 로컬 캡처를 요청함 |
 | 빌드 워커를 다른 CLI로 | ok (`codex`) | ok (`claude`) |
 | 평가자를 다른 CLI로 | ok (`workers set-evaluator codex`) | ok (`workers set-evaluator claude`) |
 
@@ -84,9 +85,14 @@ gatekit은 아이디어에서 검증된 변경까지 가는 세 가지 경로를
 1. **인터뷰 → 스펙.** 무엇을 만들지에 대한 짧고 구조화된 인터뷰에
    답하면, gatekit이 가정 원장을 포함한 `spec/01-prd.md`,
    `spec/03-architecture.md`를 작성합니다.
-2. **목업 → 스펙.** 시각적 목업이나 기존 화면에서 시작하면, gatekit이
-   `spec/02-screens.md`와 `spec/tokens.json`을 도출합니다. 추측이
-   필요한 부분은 조용히 채우지 않고 원장에 갭 항목으로 기록합니다.
+2. **목업 또는 디자인 → 스펙.** 시각적 목업이나 기존 화면에서 시작하면,
+   gatekit이 `spec/02-screens.md`와 `spec/tokens.json`을 도출합니다.
+   추측이 필요한 부분은 조용히 채우지 않고 원장에 갭 항목으로 기록합니다.
+   `/gatekit:design`은 목업이 다루지 않는 디자인 입력을 처리합니다 —
+   화면을 가로지르는 디자인 패턴이나 레퍼런스 사이트(Figma, 라이브
+   URL, 스크린샷, HTML, 프리셋, 또는 직접 쓴 패턴 파일)입니다.
+   `spec/02-design.md`를 쓰고 같은 `spec/tokens.json`에 병합하며,
+   빌드 도중을 포함해 파이프라인 어느 단계에서든 실행할 수 있습니다.
 3. **빌드 → 검증.** 스펙이 승인되면 gatekit이 이를 작업으로 쪼개고
    완료 계약을 도출한 뒤, 선언된 쓰기 범위 안에서 워커에게 작업을
    맡깁니다. 이후 독립적으로 검증합니다 — 무언가를 만든 에이전트가
@@ -99,6 +105,7 @@ gatekit은 아이디어에서 검증된 변경까지 가는 세 가지 경로를
 | `/gatekit:discover` | `spec/00-discovery.md` — 아직 뭘 만들지 모르는 사용자를 위한 발굴 단계 |
 | `/gatekit:interview` | `spec/01-prd.md`, `spec/03-architecture.md` |
 | `/gatekit:mockup` | `spec/02-screens.md`, `spec/tokens.json`, 원장 갭 항목 |
+| `/gatekit:design` | `spec/02-design.md`, `spec/tokens.json`, 원장 갭 항목 |
 | `/gatekit:tasks` | `spec/04-tasks.md` |
 | `/gatekit:gate` | `spec/05-gate.md`, `.gatekit/contract.json`, 승인 기록 |
 | `/gatekit:build` | `spec/04-tasks.md` 기준 워커 작업 실행 |
@@ -115,12 +122,14 @@ Markdown/JSON이며, 커밋되는 것을 전제로 합니다.
 spec/
 ├── 01-prd.md            # 가정 원장 포함
 ├── 02-screens.md
+├── 02-design.md         # 선택적 — 패턴, 컴포넌트, 토큰 요약
 ├── 03-architecture.md
 ├── 04-tasks.md          # gatekit-task JSON 블록으로 표현된 작업들
 ├── 05-gate.md           # gatekit-criterion JSON 블록으로 표현된 완료 기준
 ├── RECOVERY.md
 ├── PROGRESS.md
-└── tokens.json          # 목업 흐름에서 나온 선택적 산출물
+├── tokens.json          # 목업 또는 디자인 흐름에서 나온 선택적 산출물
+└── design/              # 선택적 — 02-design.md가 근거로 인용하는 캡처
 ```
 
 ## 상태 저장 구조

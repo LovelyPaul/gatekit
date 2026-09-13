@@ -9,6 +9,9 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, mcp__figma__get_design_conte
 
 Input: `$ARGUMENTS` — a Figma URL, one or more HTML files, or screenshot paths.
 
+`spec/tokens.json` is shared with `/gatekit:design`: either command may
+create it, and both merge into it rather than overwriting.
+
 ## Step 0 — load policy and language
 
 1. Read `${CLAUDE_PLUGIN_ROOT}/policy/language.md`,
@@ -26,7 +29,16 @@ message instead. Call the result `output_lang`.
 3. Read `${CLAUDE_PLUGIN_ROOT}/spec-kit/heading-map.json` and
    `${CLAUDE_PLUGIN_ROOT}/spec-kit/templates/<output_lang>/02-screens.md`.
 
-## Step 1 — read the source deterministically
+## Step 1 — re-entry check
+
+If `spec/02-screens.md` or `spec/tokens.json` already exists, you are
+**revising**, not creating: keep every existing `S<n>` id stable, add new
+rows rather than overwriting, and when a new source contradicts an existing
+row, do not delete it — append a new row whose evidence reads
+`supersedes A<n>: <source>` in the assumption ledger, and note the
+supersession next to the row it replaces.
+
+## Step 2 — read the source deterministically
 
 Pick the branch that matches the input. Extract; do not imagine.
 
@@ -45,7 +57,7 @@ record which file each observation came from.
 Every extracted item carries its evidence: the frame name, file path, or
 selector it came from.
 
-## Step 2 — write spec/02-screens.md
+## Step 3 — write spec/02-screens.md
 
 Fill the template. Headings verbatim from `heading-map.json[<output_lang>]`.
 
@@ -61,9 +73,12 @@ Fill the template. Headings verbatim from `heading-map.json[<output_lang>]`.
   empty, you did not read closely enough. Look for: offline, permissions,
   long lists, long strings, error recovery, first-run.
 
-## Step 3 — write spec/tokens.json
+## Step 4 — write spec/tokens.json
 
-Machine-readable values, grouped by kind:
+Machine-readable values, grouped by kind. If the file already exists (from a
+prior mockup run or from `/gatekit:design`), merge into it rather than
+overwriting — add new token names and append to `source` rather than
+replacing it:
 
 ```json
 {"version": 1, "source": "<figma url or file path>",
@@ -74,7 +89,7 @@ Machine-readable values, grouped by kind:
 Token names are identifiers: keep them as the design system spells them. Omit a
 group entirely rather than inventing values for it.
 
-## Step 4 — push gaps into the assumption ledger
+## Step 5 — push gaps into the assumption ledger
 
 Every state, flow, or component **not** evidenced by the mockup becomes a row in
 the assumption ledger of `spec/01-prd.md`, plus an inline marker in
@@ -85,9 +100,10 @@ the assumption ledger of `spec/01-prd.md`, plus an inline marker in
   headings, mark unknown sections "not yet interviewed", and record the gaps.
   Then tell the user to run `/gatekit:interview` to complete it.
 
-Inline marker numbers and ledger row numbers must match exactly.
+Inline marker numbers and ledger row numbers must match exactly. A
+supersession row from Step 1 is a ledger row like any other.
 
-## Step 5 — validate
+## Step 6 — validate
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" spec validate --json
@@ -96,7 +112,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" spec validate --json
 On `fail`, rewrite the offending file from the template rather than patching.
 Never deliver a failing file. Missing 03, 04, 05 are expected `warn` here.
 
-## Step 6 — ask only about gaps
+## Step 7 — ask only about gaps
 
 At most **one** `AskUserQuestion` call, four options, in `output_lang`. Use it
 for the single gap where guessing wrong would cost the most, usually an error
@@ -104,7 +120,7 @@ or empty state with a real branch behind it.
 
 Skip it after a stop signal.
 
-## Step 7 — report
+## Step 8 — report
 
 In `output_lang`:
 

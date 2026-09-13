@@ -7,6 +7,7 @@
 | `/gatekit:discover` | 선택. 거친 아이디어나 빈 인자 | `spec/00-discovery.md` | 0 (평문 질문, 게이트당 최대 3개) |
 | `/gatekit:interview` | 만들려는 것에 대한 설명 | `spec/01-prd.md`, `spec/03-architecture.md` | 최대 2 + 확인 1 |
 | `/gatekit:mockup` | Figma URL, HTML 경로, 스크린샷 경로 | `spec/02-screens.md`, `spec/tokens.json` | 최대 1 |
+| `/gatekit:design` | Figma URL, 스크린샷·HTML 경로, 라이브 사이트 URL, 프리셋 이름, 패턴 파일 | `spec/02-design.md`, `spec/tokens.json` | 최대 1 |
 | `/gatekit:tasks` | 선택적 제약 (예: "round 1만") | `spec/04-tasks.md` | 0 |
 | `/gatekit:gate` | 선택적 추가 기준 | `spec/05-gate.md`, `.gatekit/contract.json`, 승인 | 승인 1 (수정 시 반복) |
 | `/gatekit:build` | 선택적 태스크 id 목록 | 잡 디렉터리, `spec/PROGRESS.md` | 0 |
@@ -53,6 +54,20 @@
 **실패하면**: Figma MCP 도구를 쓸 수 없으면 그 사실을 말하고 내보내기나 스크린샷을 요청한 뒤 멈춘다. URL만 보고 디자인을 추측하지 않는다.
 
 **주의**: 목업은 정상·빈·오류·로딩 4개 상태를 거의 다 보여주지 않는다. 빠진 상태는 설계해서 쓰되 전부 가정으로 표시한다. `## 근거 없는 영역` 절이 비어 있으면 제대로 읽지 않은 것이다.
+
+## /gatekit:design
+
+**언제**: 목업이 아니라 화면을 가로지르는 디자인 패턴이나 레퍼런스 사이트가 입력일 때. 선택 단계이며, 파이프라인의 어느 단계에서든, `build` 도중에도 실행할 수 있다.
+
+**읽는 것**: Figma MCP 도구, 스크린샷·HTML 파일, 라이브 사이트 URL(`WebFetch`로 먼저 읽고 클라이언트 렌더링 셸이면 Chrome 도구로 캡처), 프리셋 이름, 또는 사용자가 쓴 패턴 파일. 각 추출 항목은 근거(프레임 이름·파일 경로·프리셋 이름)를 함께 기록하고, URL 캡처는 모두 `spec/design/`에 저장한 뒤 그 파일을 근거로 인용한다.
+
+**쓰는 것**: `spec/02-design.md`, `spec/tokens.json`(`/gatekit:mockup`과 공유, 있으면 병합), 그리고 `spec/01-prd.md`의 가정 원장에 gap 행 추가. 이미 두 파일이 있으면 개정 모드로 동작한다: 기존 `S<n>`·`P<n>` id는 그대로 두고 새 행만 추가하며, 새 출처가 기존 행과 모순되면 지우지 않고 가정 원장에 `supersedes A<n>: <출처>` 행을 덧붙인다.
+
+**질문**: 최대 1회. 틀렸을 때 대가가 가장 큰 단일 gap에 대해서만 묻는다.
+
+**실패하면**: `WebFetch`나 Chrome 도구를 쓸 수 없으면(Codex 등) 그 사실을 말하고 로컬 캡처를 요청한 뒤 멈춘다. URL만 보고 디자인을 추측하지 않는다. 스크린샷은 1MB를 넘으면 줄이거나 거절한다.
+
+**주의**: `active_pipeline`이 `build`였다면 `04-tasks.md`나 `05-gate.md`를 직접 고치지 않고 `design impact`로 영향받는 작업 목록만 보고한다. 재위임은 `/gatekit:tasks`와 `/gatekit:gate`를 다시 거쳐야 하며, 그동안 계약은 stale이다.
 
 ## /gatekit:tasks
 

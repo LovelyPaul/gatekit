@@ -17,7 +17,13 @@
         │            ┌──────────────────┐
         └───────────▶│ 2. mockup (선택) │──▶ spec/02-screens.md
                      │                  │    spec/tokens.json
-                     └──────────────────┘    01의 가정 원장에 gap 행 추가
+   패턴·레퍼런스 사이트 └──────────────────┘    01의 가정 원장에 gap 행 추가
+        │                     │
+        │            ┌──────────────────┐
+        └───────────▶│ 2b. design (선택)│──▶ spec/02-design.md
+                     │  (아무 단계에서나│    spec/tokens.json (mockup과 공유)
+                     │   재진입 가능)   │    01의 가정 원장에 gap 행 추가
+                     └──────────────────┘
                               │
                               ▼
                      ┌──────────────────┐
@@ -54,12 +60,15 @@
 | 0 | `/gatekit:discover` | 아무것도 없어도 된다. 최근 2주의 불편 | `00-discovery.md` | `spec validate`가 심화 게이트 6개의 빈 칸을 `warn`으로 표시. 선택 단계 |
 | 1 | `/gatekit:interview` | 사용자의 한 문장 설명, 기존 레포, 있으면 `00-discovery.md` | `01-prd.md`, `03-architecture.md` | question 게이트가 질문 2회로 예산 관리 |
 | 2 | `/gatekit:mockup` | Figma URL, HTML, 스크린샷 | `02-screens.md`, `tokens.json`, 원장 gap 행 | question 게이트 |
-| 3 | `/gatekit:tasks` | `01`, `02`, `03`, 실제 레포 구조 | `04-tasks.md` | 없음. 계획만 한다 |
+| 2b | `/gatekit:design` | Figma URL, 스크린샷, HTML, 라이브 사이트 URL, 프리셋 이름, 사용자 패턴 파일 | `02-design.md`, `tokens.json`(공유), 원장 gap 행 | question 게이트. `spec/tokens.json`이 있으면 `tasks`가 스타일 관련 작업에 tokens 게이트를 기본 추가 |
+| 3 | `/gatekit:tasks` | `01`, `02`, `02-design`, `03`, 실제 레포 구조 | `04-tasks.md` | 없음. 계획만 한다 |
 | 4 | `/gatekit:gate` | `01`의 수용 기준, `04`의 작업 | `05-gate.md`, `contract.json`, 승인 | 승인이 쓰기 게이트를 연다 |
-| 5 | `/gatekit:build` | `04-tasks.md`, 승인된 `05-gate.md` | 잡 디렉터리, `PROGRESS.md` | write 게이트가 `write_scope` 강제 |
+| 5 | `/gatekit:build` | `04-tasks.md`, 승인된 `05-gate.md` | 잡 디렉터리, `PROGRESS.md` | write 게이트가 `write_scope` 강제. tokens 게이트가 스타일 리터럴 검사 |
 | 6 | `/gatekit:verify` | `contract.json`, `05-gate.md` | 판정표, `PROGRESS.md` 마지막 검증 | spawn 게이트가 평가자 범위 검사, stop 게이트가 계약 실행 |
 
 `doctor`와 `setup`은 이 순서에 속하지 않는다. `setup`은 프로젝트 최초 1회, `doctor`는 문제가 의심될 때 언제든 실행한다.
+
+`/gatekit:design`은 이 표의 다른 단계와 달리 순서에 고정되지 않는다. 목업 이전, 목업과 함께, 또는 `build` 도중에도 실행할 수 있다. `build` 도중 실행되면 `04-tasks.md`나 `05-gate.md`를 직접 고치지 않고, 영향받는 작업 목록만 보고한다 — 재위임은 `/gatekit:tasks`와 `/gatekit:gate`를 다시 거쳐야 한다. `02-screens.md`, `02-design.md`, `tokens.json` 중 하나라도 계약 파생 이후 바뀌면 `contract status`가 `fail`(stale)을 반환한다.
 
 ## 각 단계에서 무엇이 막히는가
 

@@ -26,6 +26,12 @@ derives `spec/02-screens.md` and `spec/tokens.json`, and records anything
 it had to guess at as a ledger gap entry rather than silently filling it
 in.
 
+If your design input is a pattern that applies across screens, or a
+reference site rather than a mockup — a Figma file, a live URL, a preset,
+or a pattern file you wrote — run `/gatekit:design` instead. It writes
+`spec/02-design.md` and merges into the same `spec/tokens.json`, and it can
+run at any stage, including after tasks are already underway.
+
 ## Break the spec into tasks
 
 ```

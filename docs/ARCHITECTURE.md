@@ -36,6 +36,7 @@ gatekit/
 │   │   ├── discover.md    /gatekit:discover    → spec/00-discovery.md (optional first step)
 │   │   ├── interview.md   /gatekit:interview   → spec/01-prd.md, spec/03-architecture.md
 │   │   ├── mockup.md      /gatekit:mockup      → spec/02-screens.md, spec/tokens.json, gap entries in ledger
+│   │   ├── design.md      /gatekit:design      → spec/02-design.md, spec/tokens.json, spec/design/, gap entries in ledger
 │   │   ├── tasks.md       /gatekit:tasks       → spec/04-tasks.md
 │   │   ├── gate.md        /gatekit:gate        → spec/05-gate.md, .gatekit/contract.json, approvals
 │   │   ├── build.md       /gatekit:build       → worker jobs over spec/04-tasks.md
@@ -79,12 +80,14 @@ gatekit/
 │   ├── 00-discovery.md         # optional; ```gatekit-discovery JSON fence (§6a)
 │   ├── 01-prd.md               # includes "## Assumption Ledger" / "## 가정 원장"
 │   ├── 02-screens.md
+│   ├── 02-design.md            # optional; patterns, components, tokens summary (ADR-0008)
 │   ├── 03-architecture.md
 │   ├── 04-tasks.md             # tasks as ```gatekit-task JSON fences (§6)
 │   ├── 05-gate.md              # criteria as ```gatekit-criterion JSON fences (§5)
 │   ├── RECOVERY.md
 │   ├── PROGRESS.md
-│   └── tokens.json             # optional, from mockup pipeline
+│   ├── tokens.json             # optional, from mockup or design pipeline
+│   └── design/                 # optional; captures cited as evidence by 02-design.md (ADR-0008)
 └── .gatekit/
     ├── config.json             # committed. see §9
     ├── approvals.json          # committed. see §7
@@ -161,7 +164,7 @@ fallback. Schema (version 1):
   "session_id": "…",
   "created_at": "iso", "updated_at": "iso",
   "output_lang": "ko|en",
-  "active_pipeline": null | "discover" | "interview" | "mockup" | "tasks" | "gate" | "build" | "verify",
+  "active_pipeline": null | "discover" | "interview" | "mockup" | "design" | "tasks" | "gate" | "build" | "verify",
   "questions": {"asked": 0, "max_calls": 2, "budget_exceeded": false},
   "scopes": [{"owner": "agent-label-or-prompt-hash", "write_scope": ["src/auth/**"], "declared_at": "iso"}],
   "stop": {"block_count": 0, "final_verdict": null, "last_reasons": []},
@@ -184,8 +187,17 @@ Criteria are declared in `spec/05-gate.md` as fenced JSON blocks:
 `gatekit contract derive` parses all fences into `.gatekit/contract.json`:
 
 ```json
-{"version": 1, "source_sha256": "<sha of 05-gate.md>", "criteria": [ … ], "derived_at": "iso"}
+{"version": 1, "source_sha256": "<sha of 05-gate.md>", "criteria": [ … ], "derived_at": "iso",
+ "inputs": {"spec/02-screens.md": "<sha256 or \"\">", "spec/02-design.md": "<sha256 or \"\">", "spec/tokens.json": "<sha256 or \"\">"}}
 ```
+
+`inputs` (ADR-0008) records the sha256 of the design files at derive time;
+an absent file hashes to `""`. These are contract inputs, not the contract
+itself: `contract status` is `ok` only when both `source_sha256` and every
+entry in `inputs` still match the file on disk, and `fail` when any of them
+differs, naming the changed file. There is no new verdict for this — a
+changed design input makes the contract stale exactly as a changed
+`05-gate.md` does, and the fix is the same: re-derive, then re-approve.
 
 `gatekit contract run [--json]` executes each criterion with `subprocess.run`
 (no shell), `cwd` = project root, per-criterion timeout = `min(timeout_s, remaining)`
@@ -240,6 +252,25 @@ with intersecting write_scope, every task has ≥ 1 gate. `spec.py` also
 status under `.gatekit/jobs/`: a session that ended between the build and
 the progress write leaves a file that reports the state before the tasks
 finished.
+
+A task gate is an `argv` command like any other in `gates`, run by
+`jobs.py` after the worker exits (§10) — distinct from the hook-driven gates
+in §3, which fire during the session rather than after a task. One ships in
+the plugin: `plugin/gatekit/gates/tokens.py [--root DIR] [--lang ko|en]
+[--json] GLOB...` (ADR-0008), which scans the files matching the given
+globs (typically the task's own `write_scope`) for colour literals not
+present in `spec/tokens.json`. Its exit code is the task-gate convention,
+not the hook convention: `0` (`ok`, every literal found matches a token),
+`1` (`fail`, a literal named with the file, line, and nearest token by
+value), `3` (`unverified`, `tokens.json` absent or unparsable, or the task
+wrote no file the gate knows how to scan). `/gatekit:tasks` adds it by
+default to every task whose `write_scope` touches a stylesheet, component,
+or template path when `spec/tokens.json` exists. The scan is deliberately
+narrow — colours only at this version — so a `fail` from it stays
+trustworthy. `--root` defaults to `.`, and `jobs.run_gates` always runs a
+task gate with the project root as its `cwd`, which is why the fence in
+`04-tasks.md` never needs `--root`; run it by hand from another directory
+without `--root` and it reports `unverified`, not the project's real state.
 
 ## 6a. Discovery record in `spec/00-discovery.md` (ADR-0005)
 
@@ -328,7 +359,14 @@ Job dir `.gatekit/jobs/<job_id>/`: `job.json` (tasks, backend, started_at,
 config snapshot), per task `tasks/<id>/{task.json,status.json,prompt.md,output.txt,stderr.txt,gates.json,attempt-N/}`.
 All JSON writes atomic. Worker = argv list + the prompt on stdin, env includes
 `GATEKIT_TASK_ID=<id>` and `GATEKIT_JOB_ID=<job_id>` so the write gate can
-enforce `write_scope` inside the worker session. `status.json.state` ∈
+enforce `write_scope` inside the worker session. When `spec/tokens.json`
+exists, `jobs.build_prompt` (§14) adds a `## Design` section to the prompt,
+generated by code from `tokens.json`: the `P<n>` pattern rows whose
+`applies_to` is `all` or names an `S<n>` the task's instruction mentions,
+every token group as `name: value` lines, and a pointer to
+`spec/02-design.md` and `spec/02-screens.md` for anything the section does
+not carry (ADR-0008). When `tokens.json` is absent the section is omitted
+and the prompt is unchanged from before ADR-0008. `status.json.state` ∈
 `queued|running|gating|passed|failed|timeout|redelegated`. Gates run only after
 the worker exits; a worker that exits 0 but fails a gate is `failed`, never
 `passed`. `redelegate <task>` archives the attempt to `attempt-N/` and re-runs

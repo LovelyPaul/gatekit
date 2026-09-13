@@ -71,6 +71,7 @@ beyond `python3` is required.
 | spawn gate (subagent scope fence) | ok | warn — `collaborationspawn_agent` hides the prompt from hooks, so the fence cannot be checked; the subagent's own writes still meet the write and bash gates (observed) |
 | question gate (question budget) | ok | n/a — Codex has no `AskUserQuestion`; questions are plain chat and uncounted |
 | `AskUserQuestion` in commands | native picker | numbered options in plain chat |
+| `/gatekit:design` live-site branch (`WebFetch`, Chrome tools) | ok | unverified — not yet observed in a real Codex session; the command asks for local captures instead of guessing from the URL |
 | Build worker can be the other CLI | ok (`codex`) | ok (`claude`) |
 | Evaluator can be the other CLI | ok (`workers set-evaluator codex`) | ok (`workers set-evaluator claude`) |
 
@@ -89,10 +90,15 @@ change:
 1. **Interview → spec.** Answer a short structured interview about what
    you're building; gatekit writes `spec/01-prd.md` and
    `spec/03-architecture.md`, including the assumption ledger.
-2. **Mockup → spec.** Start from a visual mockup or existing screens;
-   gatekit derives `spec/02-screens.md` and `spec/tokens.json`, and records
-   any gaps it had to guess at as ledger entries instead of silently
-   filling them in.
+2. **Mockup or design → spec.** Start from a visual mockup or existing
+   screens; gatekit derives `spec/02-screens.md` and `spec/tokens.json`, and
+   records any gaps it had to guess at as ledger entries instead of
+   silently filling them in. `/gatekit:design` covers the design inputs a
+   mockup doesn't: a design pattern that applies across screens, or a
+   reference site (Figma, a live URL, screenshots, HTML, a preset, or a
+   pattern file you wrote) — it writes `spec/02-design.md` and merges into
+   the same `spec/tokens.json`, and it may run at any stage, including
+   mid-build.
 3. **Build → verify.** Once a spec is approved, gatekit breaks it into
    tasks, derives a completion contract, hands tasks to a worker under a
    declared write scope, and then verifies the result independently —
@@ -105,6 +111,7 @@ change:
 | `/gatekit:discover` | `spec/00-discovery.md` — for the user who does not yet know what to build |
 | `/gatekit:interview` | `spec/01-prd.md`, `spec/03-architecture.md` |
 | `/gatekit:mockup` | `spec/02-screens.md`, `spec/tokens.json`, ledger gap entries |
+| `/gatekit:design` | `spec/02-design.md`, `spec/tokens.json`, ledger gap entries |
 | `/gatekit:tasks` | `spec/04-tasks.md` |
 | `/gatekit:gate` | `spec/05-gate.md`, `.gatekit/contract.json`, approvals |
 | `/gatekit:build` | worker jobs run against `spec/04-tasks.md` |
@@ -121,12 +128,14 @@ Markdown and JSON, meant to be committed:
 spec/
 ├── 01-prd.md            # includes an Assumption Ledger
 ├── 02-screens.md
+├── 02-design.md         # optional — patterns, components, tokens summary
 ├── 03-architecture.md
 ├── 04-tasks.md          # tasks as fenced gatekit-task JSON blocks
 ├── 05-gate.md           # completion criteria as fenced gatekit-criterion JSON blocks
 ├── RECOVERY.md
 ├── PROGRESS.md
-└── tokens.json          # optional, from the mockup flow
+├── tokens.json          # optional, from the mockup or design flow
+└── design/              # optional — captures cited as evidence by 02-design.md
 ```
 
 ## State layout

@@ -28,8 +28,10 @@ Call it `output_lang`.
 
 Read `spec/01-prd.md` (features `F<n>`, acceptance criteria, assumption
 ledger), `spec/02-screens.md` if it exists (screens `S<n>`, states,
-components), and `spec/03-architecture.md` (stack, data model, naming rules,
-constraints).
+components), `spec/02-design.md` if it exists (patterns `P<n>`, components,
+design tokens), and `spec/03-architecture.md` (stack, data model, naming
+rules, constraints). A task instruction may cite a `P<n>` for emphasis when
+its write scope touches something that pattern governs.
 
 Then look at the actual repository: which directories exist, what the test
 command is, how files are currently named. Task write scopes must point at real
@@ -85,6 +87,28 @@ fails when the task is not done.
 The gate must be a command that exists in this repository. Verify it runs
 before writing it into the file. A gate that always passes is worse than no
 gate, because it manufactures false evidence.
+
+**The token gate.** When `spec/tokens.json` exists, add this gate by default
+to every task whose `write_scope` includes a stylesheet, component, or
+template path — pass the task's own `write_scope` globs as the gate's
+arguments so it scans only what that task writes:
+
+```json
+{"name": "tokens", "argv": ["python3", "${CLAUDE_PLUGIN_ROOT}/gatekit/gates/tokens.py", "--lang", "<output_lang>", "<write_scope glob>", "..."]}
+```
+
+No `--root` is needed here: `jobs.run_gates` runs every task gate with the
+project root as its `cwd`, and `tokens.py --root` defaults to `.`. Running
+the same fence by hand from another directory resolves `.` to the wrong
+root and reports `unverified` unless you pass `--root` explicitly.
+
+It scans the task's own files for colour literals that are not in
+`tokens.json` and exits 0 (`ok`), 1 (`fail`, a literal named), or 3
+(`unverified`, `tokens.json` absent or unparsable, or nothing the gate knows
+how to scan). Treat exit 3 the same as any other `unverified` result:
+never round it to a pass. Do not add it to a task whose write scope has no
+such path (e.g. pure backend logic, `"read-only"` tasks) — the ADR keeps the
+scan narrow so a `fail` from it stays trustworthy.
 
 ## Step 5 — write spec/04-tasks.md
 
