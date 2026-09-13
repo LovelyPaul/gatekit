@@ -43,11 +43,17 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" approve check spec/05-gate.md
 Then confirm a worker is actually available:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers check "$(python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers list --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["default"])')"
+python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers check "$(python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers list --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["default"])')" --probe
 ```
 
-`fail` means the backend binary is missing — stop and route to `/gatekit:setup`.
-`unverified` is not a blocker; say so once and continue.
+`--probe` sends one trivial prompt through the backend's read-only argv. It
+takes a few seconds and is the only check that catches a CLI that exists but
+cannot answer here: not logged in, or run inside a sandbox that hides its
+credentials. `fail` means exactly that — stop, show the detail, and do not
+start the job; the fix is to log in, or (under a sandboxed host such as
+Codex) to run this command and `jobs start` with the host's escalated
+permissions so the worker CLI can reach its credentials and network.
+`unverified` (the probe timed out) is not a blocker; say so once and continue.
 
 ## Step 2 — start the job
 

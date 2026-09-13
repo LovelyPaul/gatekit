@@ -58,6 +58,11 @@ _SKILL_NOTES = """
   keep the fence in the prompt you give the subagent; the spawn gate reads it.
 - Commands are invoked as `$gatekit-<name>`, not `/gatekit:<name>`.
 - Project hooks fire only after you trust this project's `.codex/` layer.
+- Build workers and CLI evaluators are other agent CLIs (`claude`, `codex`)
+  that need the user's login and network. Inside the Codex sandbox they fail
+  with "Not logged in" (observed). Run `workers check <name> --probe` first,
+  and run `jobs start`, `jobs redelegate` and `jobs evaluate` with escalated
+  permissions when Codex asks; say so to the user before doing it.
 """
 
 _AGENTS_BLOCK = """{begin}
@@ -82,6 +87,11 @@ the gatekit plugin by `python3 "{launcher}" install --host codex`.
 - Codex has no `AskUserQuestion` tool: where a command calls for it, ask the
   same options as a numbered list in plain chat.
 - Do not claim a task is done; the gates and `contract run` decide.
+- `jobs start`, `jobs redelegate` and `jobs evaluate` launch another agent
+  CLI that needs the user's login and network; the Codex sandbox hides those
+  (observed: "Not logged in"). Probe first with `workers check <name>
+  --probe`, then run those commands with escalated permissions, telling the
+  user why.
 {end}
 """
 

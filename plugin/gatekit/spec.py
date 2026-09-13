@@ -156,6 +156,7 @@ MESSAGES = {
         "crit_argv": "완료 기준 {id}의 argv는 비어 있지 않은 문자열 리스트여야 합니다.",
         "crit_not_done_section": "\"완료로 보지 않는 조건\" 절이 없습니다.",
         "trace_missing": "작업 {id}를 참조하는 완료 기준이 없습니다.",
+        "progress_stale": "PROGRESS.md 가 마지막 잡 결과({job} · {when})보다 오래되었습니다. 세션이 중간에 끊긴 흔적입니다. `jobs results` 로 확인하고 갱신하세요.",
         "disc_no_fence": "```gatekit-discovery 블록이 정확히 하나 있어야 합니다 (현재 {count}개).",
         "disc_no_problem": "problem 이 비어 있습니다. 해법이 섞이지 않은 문제 문장 한 줄이 필요합니다.",
         "disc_gate_unfilled": "심화 게이트 {gate} 가 채워지지 않았습니다 ({why}). 일부러 건너뛰었다면 unpassed 에 적으세요.",
@@ -195,6 +196,7 @@ MESSAGES = {
         "crit_argv": "Criterion {id} needs argv to be a non-empty list of strings.",
         "crit_not_done_section": "The \"not counted as done\" section is missing.",
         "trace_missing": "No completion criterion references task {id}.",
+        "progress_stale": "PROGRESS.md is older than the latest job result ({job} · {when}); a session was cut short. Check `jobs results` and update it.",
         "disc_no_fence": "Exactly one ```gatekit-discovery block is required (found {count}).",
         "disc_no_problem": "problem is empty. One problem sentence with no solution in it is required.",
         "disc_gate_unfilled": "Deepening gate {gate} is not filled ({why}). If it was skipped on purpose, list it in unpassed.",
@@ -539,6 +541,69 @@ def _check_traceability(tasks_text: str, gate_text: str, lang: str) -> List[dict
 
 
 # --------------------------------------------------------------------------
+# progress freshness
+# --------------------------------------------------------------------------
+
+_TERMINAL_STATES = ("passed", "failed", "timeout", "redelegated")
+
+
+def _latest_job_finish(root: pathlib.Path):
+    """``(job_id, iso)`` of the most recent terminal task status, or ``None``."""
+    jobs_dir = paths.state_dir(root) / "jobs"
+    if not jobs_dir.is_dir():
+        return None
+    latest = None
+    for status_path in jobs_dir.glob("*/tasks/*/status.json"):
+        try:
+            data = json.loads(status_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if not isinstance(data, dict) or data.get("state") not in _TERMINAL_STATES:
+            continue
+        stamp = data.get("finished_at") or data.get("updated_at")
+        if not isinstance(stamp, str):
+            continue
+        job_id = status_path.parents[2].name
+        if latest is None or stamp > latest[1]:
+            latest = (job_id, stamp)
+    return latest
+
+
+def _iso_to_epoch(stamp: str) -> Optional[float]:
+    import datetime as _dt
+
+    text = stamp.strip().replace("Z", "+00:00")
+    try:
+        parsed = _dt.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=_dt.timezone.utc)
+    return parsed.timestamp()
+
+
+def _check_progress_freshness(root: pathlib.Path, lang: str) -> List[dict]:
+    """A PROGRESS.md written before the latest job finished is stale: the
+    session that ran the job ended before Step 5 could record the result."""
+    progress = paths.spec_dir(root) / "PROGRESS.md"
+    if not progress.is_file():
+        return []
+    latest = _latest_job_finish(root)
+    if latest is None:
+        return []
+    finished = _iso_to_epoch(latest[1])
+    if finished is None:
+        return []
+    try:
+        mtime = progress.stat().st_mtime
+    except OSError:
+        return []
+    if mtime + 1.0 >= finished:
+        return []
+    return [_finding("PROGRESS.md", V.WARN, _msg(lang, "progress_stale", job=latest[0], when=latest[1]))]
+
+
+# --------------------------------------------------------------------------
 # discovery
 # --------------------------------------------------------------------------
 
@@ -737,6 +802,8 @@ def validate(root: pathlib.Path, lang: Optional[str] = None) -> dict:
     discovery = contents.get("00-discovery.md")
     if discovery is not None:
         findings.extend(_check_discovery(discovery, lang))
+
+    findings.extend(_check_progress_freshness(root, lang))
 
     prd = contents.get("01-prd.md")
     if prd is not None:

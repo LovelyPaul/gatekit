@@ -217,3 +217,61 @@ class TestReadOnlyArgv(unittest.TestCase):
 
     def test_evaluator_name_helper(self) -> None:
         self.assertEqual(workers.evaluator_name(self.root), "agent")
+
+
+class TestProbe(WorkerTestCase):
+    """`workers check --probe` runs the backend once with a trivial prompt, so
+    a binary that exists but cannot answer (not logged in, sandboxed away from
+    its credentials) is caught before a build, not by the build."""
+
+    def stub_probe(self, exit_code: int, body: str, sleep: float = 0) -> None:
+        path = self.bindir / "claude"
+        path.write_text(
+            "#!/bin/sh\n/bin/cat >/dev/null\n/bin/sleep %s\necho '%s'\nexit %d\n" % (sleep, body, exit_code),
+            encoding="utf-8",
+        )
+        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+    def test_probe_ok_when_backend_answers(self) -> None:
+        self.stub_probe(0, "READY")
+        result = workers.check(self.root, "claude", probe=True)
+        self.assertEqual(result["verdict"], verdict.OK)
+        self.assertIn("probe", result["detail"])
+
+    def test_probe_fail_when_backend_cannot_run_a_prompt(self) -> None:
+        self.stub_probe(1, "Not logged in · Please run /login")
+        result = workers.check(self.root, "claude", probe=True)
+        self.assertEqual(result["verdict"], verdict.FAIL)
+        self.assertIn("Not logged in", result["detail"])
+
+    def test_probe_timeout_is_unverified(self) -> None:
+        self.stub_probe(0, "late", sleep=3)
+        workers.PROBE_TIMEOUT_S = 1.0
+        try:
+            result = workers.check(self.root, "claude", probe=True)
+        finally:
+            workers.PROBE_TIMEOUT_S = 60.0
+        self.assertEqual(result["verdict"], verdict.UNVERIFIED)
+
+    def test_probe_uses_read_only_argv(self) -> None:
+        path = self.bindir / "claude"
+        path.write_text("#!/bin/sh\n/bin/cat >/dev/null\necho \"$@\"\nexit 0\n", encoding="utf-8")
+        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+        result = workers.check(self.root, "claude", probe=True)
+        self.assertIn("plan", result["detail"])
+        self.assertNotIn("acceptEdits", result["detail"])
+
+    def test_probe_not_run_without_flag(self) -> None:
+        self.stub_probe(1, "Not logged in")
+        # --version probe of the same stub exits 1 -> unverified, not fail
+        result = workers.check(self.root, "claude")
+        self.assertEqual(result["verdict"], verdict.UNVERIFIED)
+
+    def test_cli_probe_flag(self) -> None:
+        import contextlib, io
+        self.stub_probe(1, "Not logged in")
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            code = workers.run(["check", "claude", "--probe", "--root", str(self.root)])
+        self.assertEqual(code, 1)
+        self.assertIn("fail", buf.getvalue())

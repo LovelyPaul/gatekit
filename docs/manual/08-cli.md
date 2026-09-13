@@ -126,7 +126,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs clean [--all]
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers list [--json] [--root PATH]
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers check <name> [--json]
+python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers check <name> [--probe] [--json]
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers set-default <name>
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers enable <name>
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers set-evaluator <agent|name>
@@ -141,6 +141,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers set-evaluator <agent|name
 | `fail` | PATH에 없거나, 백엔드가 없거나, `argv`가 유효하지 않음 |
 
 `enable`은 argv에 샌드박스 bypass 플래그가 있는데 설정 항목에 `"unsafe": true`가 없으면 거부한다.
+
+`check --probe`는 백엔드의 `read_only_argv`로 한 문장짜리 프롬프트를 실제로 보낸다. 바이너리는 있는데 답을 못 하는 상태(로그인 안 됨, 샌드박스가 자격증명을 가림)를 빌드 전에 잡는 유일한 검사다. 답하면 `ok`, 0이 아닌 종료 코드면 출력 꼬리와 함께 `fail`, 시간 초과면 `unverified`다. `/gatekit:build`가 잡을 시작하기 전에 이 검사를 돌린다.
 
 | 종료 코드 | 뜻 |
 |---|---|

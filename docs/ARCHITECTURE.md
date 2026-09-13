@@ -225,7 +225,11 @@ Aggregate verdict follows `verdict.aggregate` (§11).
 
 `jobs.py` reads these; `spec.py` validates: unique ids, non-empty write_scope
 (or `"read-only"`), every `depends_on` exists, no two tasks in the same round
-with intersecting write_scope, every task has ≥ 1 gate.
+with intersecting write_scope, every task has ≥ 1 gate. `spec.py` also
+`warn`s when `spec/PROGRESS.md` is older than the latest terminal task
+status under `.gatekit/jobs/`: a session that ended between the build and
+the progress write leaves a file that reports the state before the tasks
+finished.
 
 ## 6a. Discovery record in `spec/00-discovery.md` (ADR-0005)
 
@@ -331,9 +335,13 @@ CLI sandbox. `state` ∈ `passed|failed|timeout`; anything but `passed` is
 `unverified` for every criterion. Its stdout ends with the evaluator's reply
 tail, which is the verdict table.
 
-`workers.py`: `list`, `check <name>` (`shutil.which` on argv[0] → ok/fail,
-`--version` probe → ok/unverified), `set-default <name>`, `enable <name>`,
-`set-evaluator <agent|name>`.
+`workers.py`: `list`, `check <name> [--probe]` (`shutil.which` on argv[0] →
+ok/fail, `--version` probe → ok/unverified; with `--probe`, one trivial
+prompt through `read_only_argv`: answered → ok, non-zero exit → `fail` with
+the output tail, since a binary that cannot run a prompt here — not logged
+in, or sandboxed away from its credentials — will fail every task; timed out
+→ unverified), `set-default <name>`, `enable <name>`, `set-evaluator
+<agent|name>`. `/gatekit:build` runs the live probe before `jobs start`.
 `claude` is enabled by default; `codex` is disabled until `/gatekit:setup codex`
 runs `check` and the user confirms.
 

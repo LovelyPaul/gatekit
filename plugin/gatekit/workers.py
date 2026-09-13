@@ -27,6 +27,12 @@ UNSAFE_MARKERS = ("bypass", "dangerously", "--yolo")
 
 VERSION_PROBE_TIMEOUT_S = 5.0
 
+#: A live probe sends one trivial prompt through the backend's read-only argv.
+#: It is what catches "binary present, cannot answer" — not logged in, or a
+#: sandbox that hides the credentials — before a build spends its budget.
+PROBE_TIMEOUT_S = 60.0
+PROBE_PROMPT = "Reply with the single word READY and nothing else.\n"
+
 
 def _is_unsafe_argv(argv) -> bool:
     for item in argv or ():
@@ -115,12 +121,44 @@ def resolve(root, name: Optional[str] = None, read_only: bool = False) -> dict:
     return out
 
 
-def check(root, name: str) -> dict:
+def _live_probe(root, name: str, exe: str) -> dict:
+    """Run one prompt through the backend; ``ok`` only when it answers."""
+    entry = backends(root).get(name) or {}
+    argv = entry.get("read_only_argv") or entry.get("argv") or []
+    argv = [exe] + [str(a) for a in argv[1:]]
+    try:
+        proc = subprocess.run(
+            argv,
+            input=PROBE_PROMPT.encode("utf-8"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=PROBE_TIMEOUT_S,
+            cwd=str(root),
+        )
+    except subprocess.TimeoutExpired:
+        return {"name": name, "verdict": verdict.UNVERIFIED,
+                "detail": "%s found; live probe gave no answer within %ds" % (name, int(PROBE_TIMEOUT_S))}
+    except OSError as exc:
+        return {"name": name, "verdict": verdict.UNVERIFIED,
+                "detail": "%s found; live probe could not run (%s)" % (name, exc)}
+    tail = (proc.stdout or b"").decode("utf-8", "replace").strip().replace("\n", " ")[-240:]
+    if proc.returncode != 0:
+        return {"name": name, "verdict": verdict.FAIL,
+                "detail": "%s found but a live probe exited %d — it cannot run a prompt here (not logged in, or sandboxed away from its credentials): %s"
+                % (name, proc.returncode, tail)}
+    return {"name": name, "verdict": verdict.OK,
+            "detail": "%s answered a live probe via %s: %s" % (name, " ".join(argv[1:]) or "(no args)", tail[:120])}
+
+
+def check(root, name: str, probe: bool = False) -> dict:
     """Probe a backend's executable. `{"name", "verdict", "detail"}`.
 
-    fail        — argv[0] is not on PATH (or the backend is unknown/misconfigured)
-    ok          — on PATH and `argv[0] --version` exited 0
-    unverified  — on PATH but the version probe failed, errored or timed out
+    fail        — argv[0] is not on PATH (or the backend is unknown/misconfigured);
+                  with *probe*, also when a live prompt exits non-zero
+    ok          — on PATH and `argv[0] --version` exited 0; with *probe*, the
+                  backend answered one prompt through its read_only_argv
+    unverified  — on PATH but the version probe failed, errored or timed out;
+                  with *probe*, the live prompt timed out
     """
     all_backends = backends(root)
     entry = all_backends.get(name)
@@ -164,6 +202,9 @@ def check(root, name: str) -> dict:
             "detail": "%s found at %s; --version could not run (%s)" % (argv[0], exe, exc),
         }
 
+    if probe:
+        return _live_probe(root, name, exe)
+
     text = (proc.stdout or b"").decode("utf-8", "replace").strip().splitlines()
     first = text[0][:120] if text else ""
     if proc.returncode != 0:
@@ -198,7 +239,7 @@ def _usage() -> str:
     return (
         "usage: python3 -m gatekit workers <command>\n"
         "  list [--json]          show every backend, its argv and state\n"
-        "  check <name>           probe the backend executable\n"
+        "  check <name> [--probe] probe the executable; --probe also sends one prompt through it\n"
         "  set-default <name>     make <name> the default worker backend\n"
         "  enable <name>          enable a backend (e.g. codex)\n"
         "  set-evaluator <name>   who grades in verify: agent (default) or a backend name\n"
@@ -259,7 +300,7 @@ def run(argv: list) -> int:
         if not rest:
             print("workers check: missing <name>", file=sys.stderr)
             return 2
-        result = check(root, rest[0])
+        result = check(root, rest[0], probe="--probe" in rest)
         if "--json" in rest:
             print(json.dumps(result, indent=2))
         else:

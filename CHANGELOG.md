@@ -4,6 +4,21 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.3.1 — 2026-09-13
+
+### Added
+
+- `workers check --probe` sends one trivial prompt through the backend's
+  `read_only_argv`. A Codex-hosted build failed both tasks with
+  "Not logged in" because the sandbox hid the Claude CLI's credentials while
+  the plain check said `ok`; the probe reports `fail` with the output tail
+  before a job starts. `/gatekit:build` runs it, and the Codex layer's
+  AGENTS block and skill notes say to run worker commands with escalated
+  permissions.
+- `spec validate` warns when `spec/PROGRESS.md` is older than the latest
+  terminal task status: a session that ended between the build and the
+  progress write leaves a file that claims failure after the tasks passed.
+
 ## 0.3.0 — 2026-09-13
 
 ### Fixed
