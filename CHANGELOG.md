@@ -4,6 +4,31 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.5.0 — 2026-09-13
+
+### Added
+
+- `/gatekit:design` (ADR-0008): design enters at any stage from a Figma
+  URL, screenshots, HTML, a live site URL, a preset name or a pattern file,
+  into `spec/02-design.md` and `spec/tokens.json` v2 (open token groups,
+  machine-readable `P<n>` patterns). Re-running revises instead of
+  overwriting and records superseded ledger rows; during a build it reports
+  the tasks a change touches and edits neither 04 nor 05.
+- Worker briefs carry a generated `## Design` section with the patterns and
+  token values the task touches; absent design leaves the brief unchanged.
+- `gates/tokens.py`, a task gate: colour literals a worker wrote must be
+  design tokens. Exit 0 ok, 1 fail, 3 unverified; `run_gates` now reads
+  exit 3 as `unverified`. Colours only at this release.
+- `gatekit design merge-preset <name>` and `gatekit design impact`.
+
+### Changed
+
+- `contract derive` records the hashes of `02-screens.md`, `02-design.md`
+  and `tokens.json`; `contract status` is `fail` when any of them changed,
+  the rule `05-gate.md` already had, and `doctor` names the changed file.
+- `spec validate` checks the `tokens.json` shape (warn only) and warns on a
+  superseded assumption row that is still the one cited inline.
+
 ## 0.4.0 — 2026-09-13
 
 ### Added
