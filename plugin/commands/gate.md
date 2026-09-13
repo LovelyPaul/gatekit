@@ -51,6 +51,11 @@ Requirements:
   budget to hide a slow test you have not looked at
 - `artifacts` only for files the command genuinely produces. A declared
   artifact that does not appear is a `fail`, so do not declare aspirational ones.
+- `expect` beyond `exit` when the exit code alone can lie. A test runner that
+  reports skips still exits 0, so pin it: `"expect": {"exit": 0,
+  "stdout_not_contains": ["skipped", "SKIP"]}`. `stdout_contains`,
+  `stdout_regex` and the `stderr_*` forms exist too; every unknown key is a
+  derive error, so spell them exactly.
 
 Every criterion must be **runnable in this repository right now**. Run each one
 before writing it in. A criterion you have not executed is a guess, and the
@@ -61,7 +66,9 @@ Stop hook will execute it for real.
 This section is the point of the file. Write the conditions that make a
 plausible-looking pass invalid, at minimum:
 
-- tests passing because they were skipped, disabled, or narrowed
+- tests passing because they were skipped, disabled, or narrowed — and where
+  the runner prints skips, make that a criterion with `stdout_not_contains`
+  rather than only a sentence here
 - a criterion that timed out, which is `unverified` and never a pass
 - a command exiting 0 with its declared artifact absent
 - TODOs, stubs, or empty implementations left behind

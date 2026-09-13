@@ -205,6 +205,16 @@ is worse than one that reports `unverified` and stands down. A declared budget
 that is absent, non-numeric, zero, negative, duplicated, or above the cap is a
 `derive` error. Result per criterion:
 `{"id", "verdict": "ok|fail|unverified", "exit", "elapsed_s", "stdout_tail", "stderr_tail", "artifact_hashes": {path: sha256}}`.
+`expect` may say more than the exit code: `stdout_contains` /
+`stdout_not_contains` / `stderr_contains` / `stderr_not_contains` take a
+string or a list of strings (all must hold), `stdout_regex` / `stderr_regex`
+one pattern searched with `re.MULTILINE`. Output expectations are judged over
+the whole stream, not the stored tail, after the exit code; an unmet one is
+`fail` with the expectation named in `stderr_tail`. An unknown `expect` key, a
+non-integer `exit`, a non-string value or an invalid regex is a `derive`
+error and a `spec validate` `fail` — both call `contract.validate_expect`, so
+they cannot disagree. This is how "no test was skipped" becomes a criterion
+(`{"exit": 0, "stdout_not_contains": ["skipped", "SKIP"]}`) instead of prose.
 Timeout or budget exhaustion → `unverified`, never `ok`. Missing artifact → `fail`.
 Artifact paths must be relative, must not contain `..`, and after
 `os.path.realpath` must stay inside the project root (symlink escape → `fail`).
@@ -453,6 +463,9 @@ def approve(root: pathlib.Path, relpath: str, note: str = "", by: str = "user") 
 def run(argv: list[str]) -> int
 
 # contract.py
+EXPECT_KEYS: tuple[str, ...]
+def validate_expect(expect, ident: str = "?") -> list[str]   # problems; empty when valid
+def judge_output(expect: dict, stdout: str, stderr: str) -> list[str]   # unmet output expectations
 def derive(root: pathlib.Path) -> dict                 # writes .gatekit/contract.json, returns it
 def status(root: pathlib.Path) -> str                  # ok (fresh) | fail (stale) | unverified (absent)
 def execute(root: pathlib.Path, total_budget_s: float | None = None, cap_s: float | None = None) -> dict   # {"verdict", "criteria":[...], "reasons":[...], "total_budget_s"}; cap_s lowers the applied budget

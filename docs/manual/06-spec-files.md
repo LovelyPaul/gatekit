@@ -79,7 +79,7 @@
 |---|---|---|
 | `id` | 문자열 | 고유. 검증하는 작업 id를 포함시키면 추적성 경고가 사라진다 |
 | `argv` | 문자열 리스트 | 비어 있지 않음. 셸 없이 실행되므로 `&&`·파이프·리다이렉션 불가 |
-| `expect` | 객체 | 보통 `{"exit": 0}` |
+| `expect` | 객체 | `exit`(정수, 기본 0) 외에 `stdout_contains` / `stdout_not_contains` / `stderr_contains` / `stderr_not_contains`(문자열 또는 문자열 리스트, 전부 성립해야 함), `stdout_regex` / `stderr_regex`(패턴 하나). 출력 검사는 저장된 꼬리가 아니라 전체 스트림에 대해 한다. 모르는 키·잘못된 타입·잘못된 정규식은 `derive` 오류이자 `validate` `fail` |
 | `timeout_s` | 숫자 | 이 기준의 상한 |
 | `artifacts` | 상대 경로 리스트 | 실행 후 존재해야 한다. 없으면 `fail` |
 
@@ -89,6 +89,15 @@
  "expect": {"exit": 0},
  "timeout_s": 45,
  "artifacts": []}
+```
+
+"skip 없음"을 산문이 아니라 기준으로 만들려면 출력 기대를 쓴다.
+
+```json
+{"id": "task-note-search-no-skips",
+ "argv": ["python3", "-m", "unittest", "tests.test_notes_search", "-v"],
+ "expect": {"exit": 0, "stdout_not_contains": ["skipped", "SKIP"], "stderr_not_contains": ["skipped"]},
+ "timeout_s": 45}
 ```
 
 `artifacts` 경로는 상대 경로여야 하고 `..`를 포함할 수 없으며, `realpath` 해석 후에도 프로젝트 루트 안에 있어야 한다. 심볼릭 링크로 탈출하면 `fail`이다.

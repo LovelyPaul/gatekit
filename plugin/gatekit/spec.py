@@ -154,6 +154,7 @@ MESSAGES = {
         "crit_missing_id": "{line}번째 줄 기준 블록에 id가 없습니다.",
         "crit_duplicate_id": "완료 기준 id가 중복됩니다: {id}",
         "crit_argv": "완료 기준 {id}의 argv는 비어 있지 않은 문자열 리스트여야 합니다.",
+        "crit_expect": "완료 기준 {id}의 expect 가 잘못되었습니다: {detail}",
         "crit_not_done_section": "\"완료로 보지 않는 조건\" 절이 없습니다.",
         "trace_missing": "작업 {id}를 참조하는 완료 기준이 없습니다.",
         "progress_stale": "PROGRESS.md 가 마지막 잡 결과({job} · {when})보다 오래되었습니다. 세션이 중간에 끊긴 흔적입니다. `jobs results` 로 확인하고 갱신하세요.",
@@ -194,6 +195,7 @@ MESSAGES = {
         "crit_missing_id": "The criterion block at line {line} has no id.",
         "crit_duplicate_id": "Duplicate criterion id: {id}",
         "crit_argv": "Criterion {id} needs argv to be a non-empty list of strings.",
+        "crit_expect": "Criterion {id} has an invalid expect: {detail}",
         "crit_not_done_section": "The \"not counted as done\" section is missing.",
         "trace_missing": "No completion criterion references task {id}.",
         "progress_stale": "PROGRESS.md is older than the latest job result ({job} · {when}); a session was cut short. Check `jobs results` and update it.",
@@ -513,6 +515,11 @@ def _check_criteria(text: str, lang: str) -> List[dict]:
             or not all(isinstance(a, str) and a != "" for a in argv)
         ):
             findings.append(_finding(name, V.FAIL, _msg(lang, "crit_argv", id=cid)))
+        if "expect" in crit and crit["expect"] is not None:
+            from gatekit import contract as contract_mod
+
+            for problem in contract_mod.validate_expect(crit["expect"], cid):
+                findings.append(_finding(name, V.FAIL, _msg(lang, "crit_expect", id=cid, detail=problem)))
 
     not_done = _not_done_heading(lang)
     if not_done not in set(_present_headings(text)):

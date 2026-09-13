@@ -4,6 +4,18 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.4.0 — 2026-09-13
+
+### Added
+
+- `expect` in a `gatekit-criterion` can pin output, not only the exit code:
+  `stdout_contains`, `stdout_not_contains`, `stdout_regex` and the `stderr_*`
+  forms. Judged over the whole stream after the exit code; an unmet one is
+  `fail` naming the expectation. Unknown keys, wrong types and invalid
+  regexes are refused by `derive` and reported by `spec validate` through one
+  shared validator. "No test was skipped" is now a criterion, not prose; the
+  gate command says when to use it.
+
 ## 0.3.1 — 2026-09-13
 
 ### Added

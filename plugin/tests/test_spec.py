@@ -591,3 +591,39 @@ class TemplateConsistencyTests(unittest.TestCase):
 
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
+
+
+class ExpectFieldTests(unittest.TestCase):
+    """spec validate rejects an `expect` the contract would refuse to derive."""
+
+    def setUp(self):
+        import shutil, tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self._tmp.name) / "case"
+        shutil.copytree(FIXTURES / "valid-en", self.root)
+        self.gate = self.root / "spec" / "05-gate.md"
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def with_expect(self, expect) -> list:
+        text = self.gate.read_text(encoding="utf-8")
+        import re
+        new = re.sub(
+            r'"expect":\s*\{[^}]*\}', '"expect": ' + json.dumps(expect), text, count=1
+        )
+        self.gate.write_text(new, encoding="utf-8")
+        return [f for f in spec.validate(self.root, "en")["findings"] if f["file"] == "05-gate.md" and f["verdict"] == "fail"]
+
+    def test_valid_output_expectation_passes(self):
+        self.assertEqual(self.with_expect({"exit": 0, "stdout_not_contains": ["skipped"]}), [])
+
+    def test_unknown_key_fails(self):
+        fails = self.with_expect({"exit": 0, "stdout_contain": "x"})
+        self.assertTrue(any("stdout_contain" in f["message"] for f in fails))
+
+    def test_wrong_type_fails(self):
+        self.assertTrue(self.with_expect({"stdout_contains": {"a": 1}}))
+
+    def test_bad_regex_fails(self):
+        self.assertTrue(self.with_expect({"stdout_regex": "["}))

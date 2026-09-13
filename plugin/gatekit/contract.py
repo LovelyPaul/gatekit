@@ -51,6 +51,82 @@ DEFAULT_TIMEOUT_S = 30
 #: How much of stdout/stderr is retained per criterion.
 TAIL_CHARS = 2000
 
+#: Everything ``expect`` may say. ``exit`` is an integer; the ``*_contains``
+#: and ``*_not_contains`` keys take a string or a list of strings (all must
+#: hold); the ``*_regex`` keys take one pattern searched with re.MULTILINE.
+#: Output expectations are judged over the whole stream, not the stored tail.
+#: An unknown key is a derive error, so a typo cannot become a silent pass.
+EXPECT_KEYS = (
+    "exit",
+    "stdout_contains",
+    "stdout_not_contains",
+    "stdout_regex",
+    "stderr_contains",
+    "stderr_not_contains",
+    "stderr_regex",
+)
+
+
+def _as_str_list(value: Any) -> Optional[List[str]]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list) and all(isinstance(v, str) for v in value):
+        return list(value)
+    return None
+
+
+def validate_expect(expect: Any, ident: str = "?") -> List[str]:
+    """Problems with an ``expect`` object, as messages; empty when valid.
+
+    Shared by ``derive`` (which refuses) and ``spec validate`` (which reports)
+    so the two can never disagree about what a criterion may say.
+    """
+    if not isinstance(expect, dict):
+        return ["criterion '%s': 'expect' must be an object" % ident]
+    problems: List[str] = []
+    for key, value in expect.items():
+        if key not in EXPECT_KEYS:
+            problems.append(
+                "criterion '%s': unknown expect key '%s' (allowed: %s)" % (ident, key, ", ".join(EXPECT_KEYS))
+            )
+        elif key == "exit":
+            if isinstance(value, bool) or not isinstance(value, int):
+                problems.append("criterion '%s': expect.exit must be an integer" % ident)
+        elif key.endswith("_regex"):
+            if not isinstance(value, str):
+                problems.append("criterion '%s': expect.%s must be a string" % (ident, key))
+            else:
+                try:
+                    re.compile(value)
+                except re.error as err:
+                    problems.append("criterion '%s': expect.%s is not a valid regex: %s" % (ident, key, err))
+        elif _as_str_list(value) is None:
+            problems.append("criterion '%s': expect.%s must be a string or a list of strings" % (ident, key))
+    return problems
+
+
+def judge_output(expect: Dict[str, Any], stdout: str, stderr: str) -> List[str]:
+    """Expectations over the streams that did not hold; empty means all held."""
+    streams = {"stdout": stdout or "", "stderr": stderr or ""}
+    failures: List[str] = []
+    for key, value in expect.items():
+        if key == "exit" or key not in EXPECT_KEYS:
+            continue
+        stream_name, _, kind = key.partition("_")
+        text = streams[stream_name]
+        if kind == "regex":
+            if not re.search(value, text, re.MULTILINE):
+                failures.append("expect.%s did not match: %r" % (key, value))
+        elif kind == "contains":
+            for needle in _as_str_list(value) or []:
+                if needle not in text:
+                    failures.append("expect.%s missing: %r" % (key, needle))
+        elif kind == "not_contains":
+            for needle in _as_str_list(value) or []:
+                if needle in text:
+                    failures.append("expect.%s matched: %r" % (key, needle))
+    return failures
+
 FENCE_NAME = "gatekit-criterion"
 
 #: Optional single fence declaring the run-wide budget.
@@ -106,8 +182,12 @@ def _normalize_criterion(raw: Dict[str, Any], index: int) -> Dict[str, Any]:
         raise ValueError(f"criterion '{ident}' needs 'argv' as a non-empty list of strings")
 
     expect = raw.get("expect")
-    if not isinstance(expect, dict):
+    if expect is None:
         expect = {"exit": 0}
+    problems = validate_expect(expect, ident.strip() if isinstance(ident, str) else "?")
+    if problems:
+        raise ValueError("; ".join(problems))
+    expect = dict(expect)
     expect.setdefault("exit", 0)
 
     artifacts = raw.get("artifacts")
@@ -302,9 +382,18 @@ def _run_one(
     result["stdout_tail"] = _tail(completed.stdout)
     result["stderr_tail"] = _tail(completed.stderr)
 
-    expected_exit = crit.get("expect", {}).get("exit", 0)
+    expect = crit.get("expect", {}) or {}
+    expected_exit = expect.get("exit", 0)
     if completed.returncode != expected_exit:
         result["verdict"] = verdict.FAIL
+        return result
+
+    unmet = judge_output(expect, completed.stdout, completed.stderr)
+    if unmet:
+        result["verdict"] = verdict.FAIL
+        result["stderr_tail"] = _tail(
+            (result["stderr_tail"] + "\n" + "; ".join(unmet)).strip()
+        )
         return result
 
     hashes, problems = _artifact_hashes(root, crit.get("artifacts", []))

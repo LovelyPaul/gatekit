@@ -456,3 +456,91 @@ class TestDeclaredTotalBudget(unittest.TestCase):
         self._write_gate('\n```gatekit-budget\n{"total_budget_s": 99999}\n```\n')
         with self.assertRaises(ValueError):
             contract.derive(self.root)
+
+
+PY = sys.executable
+
+
+class TestExpectOutput(TempProject):
+    """`expect` can pin what a command prints, not only how it exits. This is
+    what turns "no test was skipped" from prose into a criterion."""
+
+    def run_one(self, expect: dict, code: str = "print('ran 3 tests\\nOK')") -> dict:
+        self.write_gate({"id": "c", "argv": [PY, "-c", code], "expect": expect, "timeout_s": 20})
+        contract.derive(self.root)
+        return contract.execute(self.root)["criteria"][0]
+
+    def test_stdout_contains_string_passes(self) -> None:
+        self.assertEqual(self.run_one({"stdout_contains": "OK"})["verdict"], "ok")
+
+    def test_stdout_contains_missing_fails_and_names_the_expectation(self) -> None:
+        result = self.run_one({"stdout_contains": "PASSED"})
+        self.assertEqual(result["verdict"], "fail")
+        self.assertIn("stdout_contains", result["stderr_tail"])
+        self.assertIn("PASSED", result["stderr_tail"])
+
+    def test_stdout_contains_list_requires_all(self) -> None:
+        self.assertEqual(self.run_one({"stdout_contains": ["ran 3", "OK"]})["verdict"], "ok")
+        self.assertEqual(self.run_one({"stdout_contains": ["ran 3", "FAILED"]})["verdict"], "fail")
+
+    def test_stdout_not_contains_catches_skips(self) -> None:
+        skipped = "print('ran 3 tests\\nOK (skipped=2)')"
+        result = self.run_one({"stdout_not_contains": "skipped"}, skipped)
+        self.assertEqual(result["verdict"], "fail")
+        self.assertIn("skipped", result["stderr_tail"])
+        self.assertEqual(self.run_one({"stdout_not_contains": ["skipped", "TODO"]})["verdict"], "ok")
+
+    def test_stdout_regex(self) -> None:
+        self.assertEqual(self.run_one({"stdout_regex": r"ran \d+ tests"})["verdict"], "ok")
+        self.assertEqual(self.run_one({"stdout_regex": r"ran 0 tests"})["verdict"], "fail")
+
+    def test_stderr_expectations(self) -> None:
+        code = "import sys; sys.stderr.write('warning: deprecated\\n')"
+        self.assertEqual(self.run_one({"stderr_contains": "deprecated"}, code)["verdict"], "ok")
+        self.assertEqual(self.run_one({"stderr_not_contains": "deprecated"}, code)["verdict"], "fail")
+
+    def test_output_checked_beyond_the_tail(self) -> None:
+        # The stored tail is 2000 chars; the expectation must see the whole stream.
+        code = "print('MARKER'); print('x' * 5000)"
+        self.assertEqual(self.run_one({"stdout_contains": "MARKER"}, code)["verdict"], "ok")
+
+    def test_exit_checked_before_output(self) -> None:
+        code = "print('OK'); raise SystemExit(1)"
+        result = self.run_one({"exit": 0, "stdout_contains": "OK"}, code)
+        self.assertEqual(result["verdict"], "fail")
+        self.assertEqual(result["exit"], 1)
+
+    def test_unverified_stays_unverified(self) -> None:
+        self.write_gate({"id": "c", "argv": ["/nonexistent-binary-xyz"], "expect": {"stdout_contains": "OK"}})
+        contract.derive(self.root)
+        self.assertEqual(contract.execute(self.root)["criteria"][0]["verdict"], "unverified")
+
+
+class TestExpectValidation(TempProject):
+    def test_unknown_expect_key_is_a_derive_error(self) -> None:
+        self.write_gate({"id": "c", "argv": [PY, "-c", "pass"], "expect": {"exit": 0, "stdout_contain": "x"}})
+        with self.assertRaises(ValueError) as ctx:
+            contract.derive(self.root)
+        self.assertIn("stdout_contain", str(ctx.exception))
+
+    def test_non_string_expectation_is_a_derive_error(self) -> None:
+        self.write_gate({"id": "c", "argv": [PY, "-c", "pass"], "expect": {"stdout_contains": 3}})
+        with self.assertRaises(ValueError):
+            contract.derive(self.root)
+
+    def test_invalid_regex_is_a_derive_error(self) -> None:
+        self.write_gate({"id": "c", "argv": [PY, "-c", "pass"], "expect": {"stdout_regex": "("}})
+        with self.assertRaises(ValueError):
+            contract.derive(self.root)
+
+    def test_non_integer_exit_is_a_derive_error(self) -> None:
+        self.write_gate({"id": "c", "argv": [PY, "-c", "pass"], "expect": {"exit": "zero"}})
+        with self.assertRaises(ValueError):
+            contract.derive(self.root)
+
+    def test_expect_keys_constant(self) -> None:
+        self.assertEqual(
+            contract.EXPECT_KEYS,
+            ("exit", "stdout_contains", "stdout_not_contains", "stdout_regex",
+             "stderr_contains", "stderr_not_contains", "stderr_regex"),
+        )
