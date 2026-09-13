@@ -14,6 +14,7 @@ import datetime
 import json
 import os
 import pathlib
+import re
 import secrets
 import shutil
 import subprocess
@@ -35,6 +36,11 @@ STATES = (
 )
 
 GATE_TIMEOUT_S = 60.0
+#: Exit code by which a task gate reports `unverified`: it ran, but it could not
+#: judge (ADR-0008 decision 5 — the token gate uses it when tokens.json is
+#: absent or the task wrote no file it knows how to scan). 0 is `ok`, every
+#: other non-zero code is `fail`.
+GATE_UNVERIFIED_EXIT = 3
 TAIL_BYTES = 4000
 #: How much failed-gate output `redelegate` appends to the next prompt.
 REDELEGATE_TAIL_CHARS = 2000
@@ -113,8 +119,125 @@ def load_tasks(root) -> list:
 # ------------------------------------------------------------------- prompt
 
 
-def build_prompt(task: dict, job_id: str, extra: str = "") -> str:
-    """The self-contained brief handed to the worker on stdin."""
+def _pattern_applies(pattern: dict, task_text: str) -> bool:
+    """True when *pattern* governs a task whose words are *task_text*.
+
+    ``applies_to: "all"`` always applies. A list applies when the task names one
+    of its screen ids. Ids are compared on their canonical spelling, so `S01`
+    matches `S1` while `S12` still does not drag in a pattern scoped to `S1`.
+    """
+    from gatekit import design as design_mod
+
+    applies_to = pattern.get("applies_to")
+    if isinstance(applies_to, str):
+        return applies_to.strip().lower() == "all"
+    if not isinstance(applies_to, list):
+        return False
+    # Compare on the canonical spelling so `S01` in applies_to still matches a
+    # task that writes `S1`, and neither matches `S10`.
+    mentioned = set(design_mod.referenced_ids(task_text))
+    for screen in applies_to:
+        if not isinstance(screen, str) or not screen.strip():
+            continue
+        try:
+            wanted = design_mod.normalize_id(screen.strip())
+        except (ValueError, IndexError):
+            # Not an `S<n>`-shaped id; fall back to a literal bounded match.
+            if re.search(
+                r"(?<![A-Za-z0-9])%s(?![A-Za-z0-9])" % re.escape(screen.strip()), task_text
+            ):
+                return True
+            continue
+        if wanted in mentioned:
+            return True
+    return False
+
+
+def _applies_to_text(pattern: dict) -> str:
+    applies_to = pattern.get("applies_to")
+    if isinstance(applies_to, list):
+        return ", ".join(str(s) for s in applies_to)
+    return str(applies_to)
+
+
+def _token_lines(prefix: str, value) -> list:
+    """Render one token as ``<prefix>: <value>`` lines.
+
+    A dict carrying a ``value`` key is one token that knows where it came from,
+    which is the shape ``design merge-preset`` writes. Only its value reaches
+    the worker: ``evidence`` is bookkeeping for the spec reader, and rendering
+    it as ``color.primary.evidence`` would read like a second usable token.
+    A dict without ``value`` is a genuinely nested group and still recurses.
+    """
+    if isinstance(value, dict):
+        if "value" in value:
+            return ["%s: %s" % (prefix, value["value"])]
+        lines = []
+        for key, child in value.items():
+            lines.extend(_token_lines("%s.%s" % (prefix, key), child))
+        return lines
+    return ["%s: %s" % (prefix, value)]
+
+
+def has_design(tokens: dict) -> bool:
+    """True when *tokens* carries anything a worker could act on.
+
+    A parsable file is not the same as a design. ``{}`` and a file holding only
+    ``version``/``source`` normalize to a truthy dict but say nothing, so the
+    prompt must stay byte-identical to the one with no file at all.
+    """
+    from gatekit import design as design_mod
+
+    if any(entries for entries in design_mod.token_groups(tokens).values()):
+        return True
+    return bool(tokens.get("patterns"))
+
+
+def _design_lines(task: dict, tokens: dict) -> list:
+    """The ``## Design`` section body, generated from tokens.json by code.
+
+    ADR-0008 decision 4: a pattern reaches the worker through the same brief as
+    its instruction, so nothing depends on the task author having remembered to
+    write "follow P2" into the text.
+    """
+    from gatekit import design as design_mod
+
+    task_text = "\n".join(
+        [str(task.get("title", "")), str(task.get("instruction", ""))]
+    )
+    lines = []
+    for pattern in tokens.get("patterns") or []:
+        if not isinstance(pattern, dict) or not _pattern_applies(pattern, task_text):
+            continue
+        lines.append(
+            "- %s: %s (applies to %s)"
+            % (pattern.get("id", "P?"), str(pattern.get("rule", "")).strip(), _applies_to_text(pattern))
+        )
+
+    token_lines = []
+    for group, entries in sorted(design_mod.token_groups(tokens).items()):
+        for name, value in entries.items():
+            token_lines.extend(_token_lines("%s.%s" % (group, name), value))
+    if token_lines:
+        if lines:
+            lines.append("")
+        lines.extend(token_lines)
+
+    if lines:
+        lines.append("")
+    lines.append(
+        "Read spec/02-design.md and spec/02-screens.md for anything not listed here."
+    )
+    return lines
+
+
+def build_prompt(task: dict, job_id: str, extra: str = "", root=None) -> str:
+    """The self-contained brief handed to the worker on stdin.
+
+    *root* is optional so existing callers keep working: without it, and
+    whenever ``spec/tokens.json`` is absent or unparsable, the prompt is
+    byte-identical to the one this function produced before ADR-0008.
+    """
     scope = task.get("write_scope")
     if isinstance(scope, list):
         scope_text = "\n".join("- %s" % s for s in scope) or "- (none)"
@@ -152,6 +275,16 @@ def build_prompt(task: dict, job_id: str, extra: str = "") -> str:
         "",
         gate_text,
         "",
+    ]
+
+    if root is not None:
+        from gatekit import design as design_mod
+
+        tokens = design_mod.load_tokens(root)
+        if has_design(tokens):
+            parts += ["## Design", ""] + _design_lines(task, tokens) + [""]
+
+    parts += [
         "## Reporting",
         "",
         "When you are done, reply with a short report: what you changed and what",
@@ -235,12 +368,21 @@ def run_gates(root, task: dict) -> dict:
             continue
         out = (proc.stdout or b"").decode("utf-8", "replace")
         err = (proc.stderr or b"").decode("utf-8", "replace")
+        if proc.returncode == 0:
+            gate_verdict, detail = verdict.OK, "exit 0"
+        elif proc.returncode == GATE_UNVERIFIED_EXIT:
+            # A gate that could not judge says so by exit code rather than by
+            # guessing. `unverified` is never rounded to either side, so this
+            # task neither passes nor fails on it.
+            gate_verdict, detail = verdict.UNVERIFIED, "exit %d (unverified)" % GATE_UNVERIFIED_EXIT
+        else:
+            gate_verdict, detail = verdict.FAIL, "exit %d" % proc.returncode
         results.append(
             {
                 "name": name,
-                "verdict": verdict.OK if proc.returncode == 0 else verdict.FAIL,
+                "verdict": gate_verdict,
                 "exit": proc.returncode,
-                "detail": "exit %d" % proc.returncode,
+                "detail": detail,
                 "elapsed_s": round(time.time() - started, 3),
                 "stdout_tail": _tail(out),
                 "stderr_tail": _tail(err),
@@ -555,7 +697,9 @@ def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False) 
         tdir = _task_dir(jdir, task_id)
         tdir.mkdir(parents=True, exist_ok=True)
         write_json(tdir / "task.json", task)
-        (tdir / "prompt.md").write_text(build_prompt(task, job_id), encoding="utf-8")
+        (tdir / "prompt.md").write_text(
+            build_prompt(task, job_id, root=root), encoding="utf-8"
+        )
         _set_status(jdir, task_id, state="queued", attempt=1, created_at=_now())
 
     if dry_run:
@@ -683,7 +827,9 @@ def redelegate(root, task_id: str, job_id: Optional[str] = None) -> dict:
                 "may have exited non-zero or timed out). Re-do the task." % attempt
 
     task = read_json(tdir / "task.json", {}) or {}
-    (tdir / "prompt.md").write_text(build_prompt(task, job_id, extra), encoding="utf-8")
+    (tdir / "prompt.md").write_text(
+        build_prompt(task, job_id, extra, root=root), encoding="utf-8"
+    )
     _set_status(jdir, task_id, state="queued", attempt=attempt + 1, created_at=_now(),
                 detail="redelegated after attempt %d" % attempt)
 

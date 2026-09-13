@@ -548,3 +548,257 @@ class TestWorkerEnvIsolation(JobTestCase):
         job = jobs.start(self.root)
         status = json.loads((self.task_dir(job["job_id"], "write-note") / "status.json").read_text(encoding="utf-8"))
         self.assertEqual(status["exit"], 0)
+
+
+# ------------------------------------------------------- design in the prompt
+
+
+class TestDesignSection(JobTestCase):
+    """ADR-0008 decision 4: the brief carries the design its task touches."""
+
+    def write_tokens(self, data: dict) -> None:
+        (self.root / "spec" / "tokens.json").write_text(
+            json.dumps(data, ensure_ascii=False), encoding="utf-8"
+        )
+
+    def v2(self, **kw) -> dict:
+        data = {"version": 2, "source": [], "patterns": []}
+        data.update(kw)
+        return data
+
+    def test_prompt_without_tokens_is_byte_identical_to_today(self) -> None:
+        task = self.simple_task()
+        before = jobs.build_prompt(task, "job-1")
+        after = jobs.build_prompt(task, "job-1", root=self.root)
+        self.assertEqual(before, after)
+        self.assertNotIn("## Design", after)
+
+    def test_unparsable_tokens_leaves_the_prompt_unchanged(self) -> None:
+        (self.root / "spec" / "tokens.json").write_text("{nope", encoding="utf-8")
+        task = self.simple_task()
+        self.assertEqual(
+            jobs.build_prompt(task, "job-1"),
+            jobs.build_prompt(task, "job-1", root=self.root),
+        )
+
+    def test_design_section_sits_between_gates_and_reporting(self) -> None:
+        self.write_tokens(self.v2(color={"primary": "#3366ff"}))
+        prompt = jobs.build_prompt(self.simple_task(), "job-1", root=self.root)
+        gates_at = prompt.index("## Gates that will judge this task")
+        design_at = prompt.index("## Design")
+        report_at = prompt.index("## Reporting")
+        self.assertLess(gates_at, design_at)
+        self.assertLess(design_at, report_at)
+
+    def test_token_groups_are_rendered_as_group_dot_name_lines(self) -> None:
+        self.write_tokens(self.v2(color={"primary": "#3366ff"}, space={"md": "16px"}))
+        prompt = jobs.build_prompt(self.simple_task(), "job-1", root=self.root)
+        self.assertIn("color.primary: #3366ff", prompt)
+        self.assertIn("space.md: 16px", prompt)
+
+    def test_open_groups_need_no_code_change(self) -> None:
+        self.write_tokens(self.v2(radius={"sm": "4px"}, motion={"fast": "120ms"}))
+        prompt = jobs.build_prompt(self.simple_task(), "job-1", root=self.root)
+        self.assertIn("radius.sm: 4px", prompt)
+        self.assertIn("motion.fast: 120ms", prompt)
+
+    def test_object_token_with_a_value_key_renders_as_one_line(self) -> None:
+        """`{"value": ..., "evidence": ...}` is one token, not two.
+
+        The worker needs the value. `evidence` is bookkeeping for the spec
+        reader, and rendering it as `color.primary.evidence` would read like a
+        second token it could use.
+        """
+        self.write_tokens(self.v2(color={"primary": {"value": "#3366ff", "evidence": "preset:calm"}}))
+        prompt = jobs.build_prompt(self.simple_task(), "job-1", root=self.root)
+        self.assertIn("color.primary: #3366ff", prompt)
+        self.assertNotIn("color.primary.value", prompt)
+        self.assertNotIn("preset:calm", prompt)
+
+    def test_a_merged_preset_token_renders_as_its_value(self) -> None:
+        """What `design merge-preset` writes must read correctly in a brief."""
+        self.write_tokens(
+            self.v2(
+                source=["preset:calm"],
+                color={"primary": "#aaaaaa", "accent": {"value": "#ff0000", "evidence": "preset:calm"}},
+                radius={"md": {"value": "8px", "evidence": "preset:calm"}},
+            )
+        )
+        prompt = jobs.build_prompt(self.simple_task(), "job-1", root=self.root)
+        self.assertIn("color.primary: #aaaaaa", prompt)
+        self.assertIn("color.accent: #ff0000", prompt)
+        self.assertIn("radius.md: 8px", prompt)
+        self.assertNotIn(".evidence", prompt)
+
+    def test_nested_object_without_a_value_key_still_recurses(self) -> None:
+        self.write_tokens(self.v2(font={"body": {"size": "16px", "leading": "1.5"}}))
+        prompt = jobs.build_prompt(self.simple_task(), "job-1", root=self.root)
+        self.assertIn("font.body.size: 16px", prompt)
+        self.assertIn("font.body.leading: 1.5", prompt)
+
+    def test_empty_tokens_object_leaves_the_prompt_unchanged(self) -> None:
+        """A file holding `{}` carries no design, so it adds no section."""
+        (self.root / "spec" / "tokens.json").write_text("{}", encoding="utf-8")
+        task = self.simple_task()
+        self.assertEqual(
+            jobs.build_prompt(task, "job-1"),
+            jobs.build_prompt(task, "job-1", root=self.root),
+        )
+
+    def test_tokens_with_no_groups_and_no_patterns_leaves_the_prompt_unchanged(self) -> None:
+        self.write_tokens(self.v2(source=["figma.com/x"]))
+        task = self.simple_task()
+        self.assertEqual(
+            jobs.build_prompt(task, "job-1"),
+            jobs.build_prompt(task, "job-1", root=self.root),
+        )
+
+    def test_patterns_alone_are_enough_to_produce_a_section(self) -> None:
+        self.write_tokens(
+            self.v2(patterns=[{"id": "P1", "rule": "Cards in a list.", "applies_to": "all", "evidence": "x"}])
+        )
+        prompt = jobs.build_prompt(self.simple_task(), "job-1", root=self.root)
+        self.assertIn("## Design", prompt)
+
+    def test_an_empty_group_alone_does_not_produce_a_section(self) -> None:
+        self.write_tokens(self.v2(color={}))
+        task = self.simple_task()
+        self.assertEqual(
+            jobs.build_prompt(task, "job-1"),
+            jobs.build_prompt(task, "job-1", root=self.root),
+        )
+
+    def test_pattern_applying_to_all_is_always_included(self) -> None:
+        self.write_tokens(
+            self.v2(patterns=[{"id": "P1", "rule": "Cards in a list.", "applies_to": "all", "evidence": "x"}])
+        )
+        prompt = jobs.build_prompt(self.simple_task(), "job-1", root=self.root)
+        self.assertIn("- P1: Cards in a list. (applies to all)", prompt)
+
+    def test_pattern_scoped_to_a_screen_the_task_names_is_included(self) -> None:
+        self.write_tokens(
+            self.v2(patterns=[{"id": "P2", "rule": "Bottom sheet on mobile.", "applies_to": ["S3"], "evidence": "x"}])
+        )
+        task = self.simple_task(instruction="Build the S3 detail view.")
+        prompt = jobs.build_prompt(task, "job-1", root=self.root)
+        self.assertIn("- P2: Bottom sheet on mobile. (applies to S3)", prompt)
+
+    def test_pattern_scoped_to_a_screen_the_task_does_not_name_is_omitted(self) -> None:
+        self.write_tokens(
+            self.v2(patterns=[{"id": "P2", "rule": "Bottom sheet on mobile.", "applies_to": ["S9"], "evidence": "x"}])
+        )
+        task = self.simple_task(instruction="Build the S3 detail view.")
+        self.assertNotIn("P2", jobs.build_prompt(task, "job-1", root=self.root))
+
+    def test_screen_reference_in_the_title_counts(self) -> None:
+        self.write_tokens(
+            self.v2(patterns=[{"id": "P2", "rule": "Card grid.", "applies_to": ["S4"], "evidence": "x"}])
+        )
+        task = self.simple_task(title="S4 gallery", instruction="plain")
+        self.assertIn("- P2: Card grid. (applies to S4)", jobs.build_prompt(task, "job-1", root=self.root))
+
+    def test_zero_padded_applies_to_matches_the_unpadded_form(self) -> None:
+        """`S01` in applies_to and `S1` in the task are the same screen.
+
+        Missing the match loses the worker a design rule silently, which is
+        worse than a rule it did not need.
+        """
+        self.write_tokens(
+            self.v2(patterns=[{"id": "P2", "rule": "Card grid.", "applies_to": ["S01"], "evidence": "x"}])
+        )
+        task = self.simple_task(instruction="Build the S1 view.")
+        self.assertIn("- P2: Card grid.", jobs.build_prompt(task, "job-1", root=self.root))
+
+    def test_unpadded_applies_to_matches_a_padded_mention(self) -> None:
+        self.write_tokens(
+            self.v2(patterns=[{"id": "P2", "rule": "Card grid.", "applies_to": ["S1"], "evidence": "x"}])
+        )
+        task = self.simple_task(instruction="Build the S01 view.")
+        self.assertIn("- P2: Card grid.", jobs.build_prompt(task, "job-1", root=self.root))
+
+    def test_padding_does_not_make_different_screens_match(self) -> None:
+        self.write_tokens(
+            self.v2(patterns=[{"id": "P2", "rule": "Card grid.", "applies_to": ["S01"], "evidence": "x"}])
+        )
+        task = self.simple_task(instruction="Build the S10 view.")
+        self.assertNotIn("P2", jobs.build_prompt(task, "job-1", root=self.root))
+
+    def test_screen_match_respects_word_boundaries(self) -> None:
+        self.write_tokens(
+            self.v2(patterns=[{"id": "P2", "rule": "Card grid.", "applies_to": ["S1"], "evidence": "x"}])
+        )
+        task = self.simple_task(title="plain", instruction="Touch nothing in S12.")
+        self.assertNotIn("P2", jobs.build_prompt(task, "job-1", root=self.root))
+
+    def test_design_section_names_the_spec_files_to_read(self) -> None:
+        self.write_tokens(self.v2(color={"primary": "#3366ff"}))
+        prompt = jobs.build_prompt(self.simple_task(), "job-1", root=self.root)
+        self.assertIn(
+            "Read spec/02-design.md and spec/02-screens.md for anything not listed here.",
+            prompt,
+        )
+
+    def test_v1_tokens_reach_the_prompt_too(self) -> None:
+        self.write_tokens({"source": "figma", "color": {"primary": "#3366ff"}})
+        prompt = jobs.build_prompt(self.simple_task(), "job-1", root=self.root)
+        self.assertIn("## Design", prompt)
+        self.assertIn("color.primary: #3366ff", prompt)
+
+    def test_reserved_keys_are_not_rendered_as_groups(self) -> None:
+        self.write_tokens(self.v2(source=["figma"], color={"primary": "#3366ff"}))
+        prompt = jobs.build_prompt(self.simple_task(), "job-1", root=self.root)
+        self.assertNotIn("source.", prompt)
+        self.assertNotIn("version", prompt.split("## Design")[1].split("## Reporting")[0])
+
+    def test_extra_section_still_follows_the_design_section(self) -> None:
+        self.write_tokens(self.v2(color={"primary": "#3366ff"}))
+        prompt = jobs.build_prompt(self.simple_task(), "job-1", "gate output", root=self.root)
+        self.assertLess(prompt.index("## Design"), prompt.index("## Previous attempt failed"))
+
+    def test_start_threads_the_root_into_the_written_prompt(self) -> None:
+        self.write_config()
+        self.write_tokens(self.v2(color={"primary": "#3366ff"}))
+        task = self.simple_task()
+        self.write_tasks(task)
+        job = jobs.start(self.root, dry_run=True)
+        written = (self.task_dir(job["job_id"], "write-note") / "prompt.md").read_text(encoding="utf-8")
+        self.assertIn("color.primary: #3366ff", written)
+
+
+# ----------------------------------------------------- exit 3 is unverified
+
+
+class TestGateExitThree(JobTestCase):
+    """ADR-0008 decision 5 needs a gate that can say `unverified` by exit code."""
+
+    def gate_exiting(self, code: int) -> dict:
+        return {
+            "name": "coded",
+            "argv": [sys.executable, "-c", "import sys; sys.exit(%d)" % code],
+        }
+
+    def test_exit_three_is_unverified(self) -> None:
+        result = jobs.run_gates(self.root, {"gates": [self.gate_exiting(3)]})
+        self.assertEqual(result["gates"][0]["verdict"], verdict.UNVERIFIED)
+        self.assertEqual(result["verdict"], verdict.UNVERIFIED)
+
+    def test_exit_three_detail_says_unverified(self) -> None:
+        result = jobs.run_gates(self.root, {"gates": [self.gate_exiting(3)]})
+        self.assertEqual(result["gates"][0]["detail"], "exit 3 (unverified)")
+        self.assertEqual(result["gates"][0]["exit"], 3)
+
+    def test_exit_zero_is_still_ok(self) -> None:
+        result = jobs.run_gates(self.root, {"gates": [self.gate_exiting(0)]})
+        self.assertEqual(result["gates"][0]["verdict"], verdict.OK)
+        self.assertEqual(result["gates"][0]["detail"], "exit 0")
+
+    def test_other_non_zero_exits_are_still_fail(self) -> None:
+        for code in (1, 2, 4):
+            result = jobs.run_gates(self.root, {"gates": [self.gate_exiting(code)]})
+            self.assertEqual(result["gates"][0]["verdict"], verdict.FAIL, "exit %d" % code)
+            self.assertEqual(result["gates"][0]["detail"], "exit %d" % code)
+
+    def test_unverified_gate_is_not_counted_as_passed(self) -> None:
+        result = jobs.run_gates(self.root, {"gates": [self.gate_exiting(3)]})
+        self.assertEqual(result["passed"], 0)
+        self.assertEqual(result["total"], 1)

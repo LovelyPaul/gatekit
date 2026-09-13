@@ -627,3 +627,286 @@ class ExpectFieldTests(unittest.TestCase):
 
     def test_bad_regex_fails(self):
         self.assertTrue(self.with_expect({"stdout_regex": "["}))
+
+
+# ---------------------------------------------------------------------------
+# 02-design.md (ADR-0008 decision 2)
+# ---------------------------------------------------------------------------
+
+
+class DesignFileTests(unittest.TestCase):
+    """02-design.md is an optional stage with its own canonical H2 set."""
+
+    def test_design_file_is_listed_and_optional(self):
+        hm = spec.heading_map()
+        self.assertIn("02-design.md", hm["files"])
+        self.assertIn("02-design.md", hm["absent_ok"])
+        self.assertNotIn("02-design.md", hm["required_files"])
+
+    def test_canonical_headings_for_both_languages(self):
+        hm = spec.heading_map()
+        self.assertEqual(
+            hm["ko"]["02-design.md"],
+            ["## 출처", "## 디자인 패턴", "## 컴포넌트", "## 디자인 토큰", "## 근거 없는 영역"],
+        )
+        self.assertEqual(
+            hm["en"]["02-design.md"],
+            ["## Sources", "## Design patterns", "## Components", "## Design tokens", "## Not covered"],
+        )
+
+    def test_absent_design_file_produces_no_finding(self):
+        report = spec.validate(FIXTURES / "valid-en")
+        self.assertEqual(
+            [f for f in report["findings"] if f["file"] == "02-design.md"], []
+        )
+
+    def test_headings_shared_with_02_screens_do_not_misfire(self):
+        """`## Components` is canonical in both 02-screens.md and 02-design.md.
+
+        _check_headings works per file, so a heading valid in this file's own
+        canonical set is never reported as cross-language residue.
+        """
+        text = "\n".join(
+            [
+                "# Design",
+                "## Sources",
+                "## Design patterns",
+                "## Components",
+                "## Design tokens",
+                "## Not covered",
+                "",
+            ]
+        )
+        self.assertEqual(spec._check_headings("02-design.md", text, "en"), [])
+        ko = "\n".join(
+            ["# 디자인", "## 출처", "## 디자인 패턴", "## 컴포넌트", "## 디자인 토큰", "## 근거 없는 영역", ""]
+        )
+        self.assertEqual(spec._check_headings("02-design.md", ko, "ko"), [])
+
+    def test_cross_language_heading_in_design_file_still_fails(self):
+        text = "\n".join(
+            ["## Sources", "## Design patterns", "## Components", "## Design tokens", "## 근거 없는 영역", ""]
+        )
+        findings = spec._check_headings("02-design.md", text, "en")
+        self.assertTrue(any(f["verdict"] == "fail" for f in findings))
+
+    def test_screens_component_heading_is_still_accepted_in_screens(self):
+        hm = spec.heading_map()
+        self.assertIn("## Components", hm["en"]["02-screens.md"])
+        self.assertIn("## Components", hm["en"]["02-design.md"])
+        screens = "\n".join(hm["en"]["02-screens.md"]) + "\n"
+        self.assertEqual(spec._check_headings("02-screens.md", screens, "en"), [])
+
+
+# ---------------------------------------------------------------------------
+# tokens.json (ADR-0008 decision 9)
+# ---------------------------------------------------------------------------
+
+
+class TokensJsonTests(unittest.TestCase):
+    def setUp(self):
+        import shutil, tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self._tmp.name) / "case"
+        shutil.copytree(FIXTURES / "valid-en", self.root)
+        self.tokens = self.root / "spec" / "tokens.json"
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def findings(self):
+        return [
+            f for f in spec.validate(self.root, "en")["findings"]
+            if f["file"] == "tokens.json"
+        ]
+
+    def write(self, text):
+        self.tokens.write_text(text, encoding="utf-8")
+
+    def write_json(self, data):
+        self.write(json.dumps(data, ensure_ascii=False))
+
+    def test_absent_tokens_file_produces_no_finding(self):
+        self.assertEqual(self.findings(), [])
+
+    def test_v1_shape_is_accepted(self):
+        self.write_json(
+            {
+                "source": "figma.com/file/abc",
+                "color": {"primary": "#000000"},
+                "space": {"md": "16px"},
+                "font": {"body": "16px/1.5"},
+            }
+        )
+        self.assertEqual(self.findings(), [])
+
+    def test_explicit_version_one_is_accepted(self):
+        self.write_json({"version": 1, "source": "x", "color": {"a": "#000"}})
+        self.assertEqual(self.findings(), [])
+
+    def test_valid_v2_is_accepted(self):
+        self.write_json(
+            {
+                "version": 2,
+                "source": ["spec/design/home.png"],
+                "patterns": [
+                    {"id": "P1", "rule": "Cards in a list.", "applies_to": ["S1"], "evidence": "spec/design/home.png"}
+                ],
+                "color": {"primary": {"value": "#000", "evidence": "P1"}},
+                "radius": {"sm": "4px"},
+            }
+        )
+        self.assertEqual(self.findings(), [])
+
+    def test_unparsable_file_warns_never_fails(self):
+        self.write("{not json")
+        found = self.findings()
+        self.assertTrue(found)
+        self.assertTrue(all(f["verdict"] == "warn" for f in found))
+
+    def test_non_object_file_warns(self):
+        self.write("[1, 2]")
+        self.assertTrue(all(f["verdict"] == "warn" for f in self.findings()))
+
+    def test_v2_source_must_be_a_list(self):
+        self.write_json({"version": 2, "source": "one string", "patterns": []})
+        found = self.findings()
+        self.assertTrue(any("source" in f["message"] for f in found))
+        self.assertTrue(all(f["verdict"] == "warn" for f in found))
+
+    def test_v2_patterns_must_be_a_list(self):
+        self.write_json({"version": 2, "source": [], "patterns": {"P1": {}}})
+        self.assertTrue(any("patterns" in f["message"] for f in self.findings()))
+
+    def test_pattern_row_missing_a_key_warns_and_names_it(self):
+        self.write_json(
+            {"version": 2, "source": [], "patterns": [{"id": "P1", "rule": "x", "applies_to": "all"}]}
+        )
+        found = self.findings()
+        self.assertTrue(any("evidence" in f["message"] for f in found))
+        self.assertTrue(all(f["verdict"] == "warn" for f in found))
+
+    def test_pattern_applies_to_must_be_all_or_a_list(self):
+        self.write_json(
+            {
+                "version": 2,
+                "source": [],
+                "patterns": [{"id": "P1", "rule": "x", "applies_to": 3, "evidence": "y"}],
+            }
+        )
+        self.assertTrue(any("applies_to" in f["message"] for f in self.findings()))
+
+    def test_group_must_map_to_an_object(self):
+        self.write_json({"version": 2, "source": [], "patterns": [], "color": "#000"})
+        found = self.findings()
+        self.assertTrue(any("color" in f["message"] for f in found))
+        self.assertTrue(all(f["verdict"] == "warn" for f in found))
+
+    def test_token_value_must_be_a_string_or_object(self):
+        self.write_json({"version": 2, "source": [], "patterns": [], "color": {"primary": [1]}})
+        self.assertTrue(any("primary" in f["message"] for f in self.findings()))
+
+    def test_a_malformed_tokens_file_never_makes_the_set_fail(self):
+        self.write("{not json")
+        self.assertNotEqual(spec.validate(self.root, "en")["verdict"], "fail")
+
+
+# ---------------------------------------------------------------------------
+# ledger supersession (ADR-0008 decision 8)
+# ---------------------------------------------------------------------------
+
+
+class LedgerSupersessionTests(unittest.TestCase):
+    """A row whose evidence says `supersedes A<n>` retires row n."""
+
+    HEAD = "\n".join(
+        [
+            "# PRD",
+            "## Problem",
+            "## Current state (measured)",
+            "## Goals",
+            "## Non-goals",
+            "## Users",
+            "## Features",
+            "## Acceptance criteria",
+            "",
+        ]
+    )
+
+    def prd(self, inline_nums, rows, lang="en"):
+        if lang == "en":
+            head = self.HEAD
+            ledger_heading = "## Assumption ledger"
+            marker = "> Assumption %d: text"
+        else:
+            head = "\n".join(
+                ["# PRD", "## 문제", "## 현재 상태 (측정값)", "## 목표", "## 목표가 아닌 것",
+                 "## 사용자", "## 기능", "## 수용 기준", ""]
+            )
+            ledger_heading = "## 가정 원장"
+            marker = "> 가정 %d: 내용"
+        lines = [head]
+        lines += [marker % n for n in inline_nums]
+        lines += ["", ledger_heading, "", "| # | Assumption | Impact | Evidence |", "|---|---|---|---|"]
+        for num, evidence in rows:
+            lines.append("| A%d | something | low | %s |" % (num, evidence))
+        return "\n".join(lines) + "\n"
+
+    def findings(self, text, lang="en"):
+        return spec._check_ledger(text, lang)
+
+    def test_superseded_row_still_referenced_alone_warns(self):
+        text = self.prd([1], [(1, "interview"), (2, "supersedes A1: spec/design/home.png")])
+        found = self.findings(text)
+        self.assertTrue(any(f["verdict"] == "warn" and "A1" in f["message"] for f in found))
+
+    def test_successor_also_referenced_is_silent(self):
+        text = self.prd([1, 2], [(1, "interview"), (2, "supersedes A1: spec/design/home.png")])
+        messages = [f["message"] for f in self.findings(text)]
+        self.assertFalse(any("supersed" in m.lower() or "대체" in m for m in messages))
+
+    def test_korean_marker_form_is_recognised(self):
+        text = self.prd([1], [(1, "인터뷰"), (2, "A1 대체: spec/design/home.png")], lang="ko")
+        found = self.findings(text, "ko")
+        self.assertTrue(any(f["verdict"] == "warn" and "A1" in f["message"] for f in found))
+
+    def test_orphan_checks_are_unchanged(self):
+        text = self.prd([3], [(1, "interview")])
+        verdicts = {f["verdict"] for f in self.findings(text)}
+        self.assertIn("fail", verdicts)   # inline 3 has no row
+        self.assertIn("warn", verdicts)   # row 1 has no inline
+
+    def test_no_supersession_marker_produces_no_supersession_finding(self):
+        text = self.prd([1, 2], [(1, "interview"), (2, "interview")])
+        self.assertEqual(self.findings(text), [])
+
+    def test_korean_plain_digit_before_대체_is_not_a_supersession(self):
+        """`카드 3 대체 수단` is prose about alternatives, not a ledger pointer.
+
+        A bare digit before 대체 was matching, which retired row 3 on the
+        strength of an unrelated sentence. A supersession must name the row.
+        """
+        text = self.prd([1], [(1, "인터뷰"), (4, "카드 3 대체 수단을 지원한다")], lang="ko")
+        messages = [f["message"] for f in self.findings(text, "ko")]
+        self.assertFalse(any("대체" in m for m in messages), messages)
+
+    def test_korean_option_phrasing_is_not_a_supersession(self):
+        text = self.prd([1], [(1, "인터뷰"), (4, "옵션 1 대체 불가")], lang="ko")
+        messages = [f["message"] for f in self.findings(text, "ko")]
+        self.assertFalse(any("대체" in m for m in messages), messages)
+
+    def test_korean_a_prefixed_row_reference_is_a_supersession(self):
+        text = self.prd([1], [(1, "인터뷰"), (2, "A1 대체")], lang="ko")
+        found = self.findings(text, "ko")
+        self.assertTrue(any(f["verdict"] == "warn" and "A1" in f["message"] for f in found))
+
+    def test_supersessions_records_only_explicit_row_references(self):
+        self.assertEqual(spec._supersessions("| A4 | x | low | 카드 3 대체 수단을 지원한다 |"), {})
+        self.assertEqual(spec._supersessions("| A4 | x | low | 옵션 1 대체 불가 |"), {})
+        self.assertEqual(spec._supersessions("| A4 | x | low | A2 대체 |"), {2: 4})
+        self.assertEqual(spec._supersessions("| A4 | x | low | A2 번 대체 |"), {2: 4})
+        self.assertEqual(spec._supersessions("| A4 | x | low | 대체: A2 |"), {2: 4})
+        self.assertEqual(spec._supersessions("| A4 | x | low | supersedes A2: home.png |"), {2: 4})
+
+    def test_english_supersedes_still_requires_a_row_number(self):
+        self.assertEqual(spec._supersessions("| A4 | x | low | supersedes nothing |"), {})

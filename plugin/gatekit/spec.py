@@ -9,7 +9,10 @@ the structural conventions the rest of gatekit depends on:
   gate is a warn, never silent
 * headings: every canonical heading present, no heading from the other
   language's set (cross-language residue is a hard fail)
-* 01-prd.md: inline assumption blockquotes match the assumption ledger table
+* 01-prd.md: inline assumption blockquotes match the assumption ledger table,
+  and no inline marker still cites a row a later row supersedes
+* tokens.json: the v2 shape, when the file exists; every finding is a warn,
+  because the kernel does not need this file to run
 * 04-tasks.md: ```gatekit-task fences are well-formed and mutually consistent
 * 05-gate.md: ```gatekit-criterion fences are well-formed, plus a
   "not counted as done" section
@@ -142,6 +145,15 @@ MESSAGES = {
         "ledger_missing_section": "가정 원장 표를 찾을 수 없습니다.",
         "ledger_orphan_inline": "본문 가정 {num}번에 대응하는 원장 행이 없습니다.",
         "ledger_orphan_row": "원장 {num}번 행에 대응하는 본문 가정 표기가 없습니다.",
+        "ledger_superseded": "본문이 아직 대체된 가정 A{num}을(를) 가리키고 있습니다. 이를 대체한 A{successor}을(를) 참조하도록 고치세요.",
+        "tokens_unparsable": "spec/tokens.json 을 JSON 객체로 읽을 수 없습니다: {err}",
+        "tokens_source": "source 는 {expect} 여야 합니다.",
+        "tokens_patterns": "patterns 는 행 객체의 리스트여야 합니다.",
+        "tokens_pattern_row": "patterns[{index}] 는 객체여야 합니다.",
+        "tokens_pattern_key": "patterns[{index}] 에 {field} 가 없거나 비어 있습니다.",
+        "tokens_pattern_applies_to": "patterns[{index}] 의 applies_to 는 \"all\" 이거나 화면 id 리스트여야 합니다.",
+        "tokens_group": "{group} 은(는) 토큰 객체를 값으로 가져야 합니다.",
+        "tokens_value": "{group}.{name} 의 값은 문자열이거나 객체여야 합니다.",
         "fence_malformed": "{line}번째 줄의 ```{name} 블록 JSON이 잘못되었습니다: {err}",
         "task_no_fences": "```gatekit-task 블록이 하나도 없습니다.",
         "task_missing_id": "{line}번째 줄 작업 블록에 id가 없습니다.",
@@ -183,6 +195,15 @@ MESSAGES = {
         "ledger_missing_section": "Assumption ledger table not found.",
         "ledger_orphan_inline": "Inline assumption {num} has no matching ledger row.",
         "ledger_orphan_row": "Ledger row {num} has no matching inline assumption marker.",
+        "ledger_superseded": "The text still points at superseded assumption A{num}. Reference A{successor}, which supersedes it.",
+        "tokens_unparsable": "spec/tokens.json could not be read as a JSON object: {err}",
+        "tokens_source": "source must be {expect}.",
+        "tokens_patterns": "patterns must be a list of row objects.",
+        "tokens_pattern_row": "patterns[{index}] must be an object.",
+        "tokens_pattern_key": "patterns[{index}] is missing a non-empty {field}.",
+        "tokens_pattern_applies_to": "patterns[{index}] needs applies_to to be \"all\" or a list of screen ids.",
+        "tokens_group": "{group} must map to an object of tokens.",
+        "tokens_value": "{group}.{name} must be a string or an object.",
         "fence_malformed": "Malformed JSON in the ```{name} block at line {line}: {err}",
         "task_no_fences": "No ```gatekit-task blocks found.",
         "task_missing_id": "The task block at line {line} has no id.",
@@ -285,6 +306,44 @@ def _ledger_row_numbers(section: str) -> List[int]:
     return nums
 
 
+# A design input that contradicts an existing assumption does not delete its
+# row; it appends one whose evidence says which row it retires (ADR-0008
+# decision 8). Both language forms are recognised because the ledger is written
+# in the project's output_lang.
+#
+# Both forms require an explicit ``A<n>`` row reference. A bare digit before
+# 대체 is ordinary prose — "카드 3 대체 수단을 지원한다" is about fallbacks, not
+# about retiring ledger row 3 — and matching it retired rows on the strength of
+# an unrelated sentence.
+_SUPERSEDES_RE = re.compile(
+    r"(?:supersedes\s*[A#]\s*(?P<num_en>\d+)"
+    r"|[A#]\s*(?P<num_ko>\d+)\s*(?:번\s*)?대체"
+    r"|대체\s*[:：]\s*[A#]\s*(?P<num_ko2>\d+))",
+    re.IGNORECASE,
+)
+
+
+def _supersessions(section: str) -> Dict[int, int]:
+    """``{superseded_row: superseding_row}`` from the ledger's evidence cells."""
+    out: Dict[int, int] = {}
+    for line in section.splitlines():
+        row = _LEDGER_ROW_RE.match(line)
+        if not row:
+            continue
+        successor = int(row.group("num"))
+        # Look only past the row's own id cell, so `| A2 | ... |` never reads
+        # its own number as the one it supersedes.
+        rest = line.split("|", 2)[-1]
+        for match in _SUPERSEDES_RE.finditer(rest):
+            num = match.group("num_en") or match.group("num_ko") or match.group("num_ko2")
+            if num is None:
+                continue
+            superseded = int(num)
+            if superseded != successor:
+                out[superseded] = successor
+    return out
+
+
 def _check_ledger(text: str, lang: str) -> List[dict]:
     findings: List[dict] = []
     section = _ledger_section(text, lang)
@@ -302,6 +361,17 @@ def _check_ledger(text: str, lang: str) -> List[dict]:
         findings.append(
             _finding("01-prd.md", V.WARN, _msg(lang, "ledger_orphan_row", num=num))
         )
+    # A superseded row that the text still cites, while nothing cites the row
+    # that replaced it, means the reader is being sent to the retired answer.
+    for superseded, successor in sorted(_supersessions(section).items()):
+        if superseded in inline_set and successor not in inline_set:
+            findings.append(
+                _finding(
+                    "01-prd.md",
+                    V.WARN,
+                    _msg(lang, "ledger_superseded", num=superseded, successor=successor),
+                )
+            )
     return findings
 
 
@@ -757,6 +827,100 @@ def _check_discovery(text: str, lang: str) -> List[dict]:
 
 
 # --------------------------------------------------------------------------
+# tokens.json (ADR-0008 decision 9)
+# --------------------------------------------------------------------------
+
+#: Keys every ``patterns`` row must carry.
+_PATTERN_KEYS = ("id", "rule", "applies_to", "evidence")
+
+
+def _check_tokens(root: pathlib.Path, lang: str) -> List[dict]:
+    """Validate ``spec/tokens.json`` when it exists.
+
+    Every finding is a ``warn``. The kernel does not depend on this file to
+    run: a malformed one costs the worker its design section, not the build.
+    Naming the offending key is the whole value of the check.
+    """
+    from gatekit import design as design_mod
+
+    name = "tokens.json"
+    path = design_mod.tokens_file(root)
+    if not path.is_file():
+        return []
+
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return [_finding(name, V.WARN, _msg(lang, "tokens_unparsable", err=exc))]
+    if not isinstance(raw, dict):
+        return [
+            _finding(
+                name, V.WARN, _msg(lang, "tokens_unparsable", err="top level is not an object")
+            )
+        ]
+
+    findings: List[dict] = []
+    version = raw.get("version")
+    is_v2 = version == 2
+
+    source = raw.get("source")
+    if is_v2:
+        if source is not None and not isinstance(source, list):
+            findings.append(_finding(name, V.WARN, _msg(lang, "tokens_source", expect="a list")))
+    elif source is not None and not isinstance(source, (str, list)):
+        findings.append(
+            _finding(name, V.WARN, _msg(lang, "tokens_source", expect="a string or a list"))
+        )
+
+    patterns = raw.get("patterns")
+    if patterns is not None:
+        if not isinstance(patterns, list):
+            findings.append(_finding(name, V.WARN, _msg(lang, "tokens_patterns")))
+        else:
+            for index, row in enumerate(patterns):
+                if not isinstance(row, dict):
+                    findings.append(
+                        _finding(name, V.WARN, _msg(lang, "tokens_pattern_row", index=index))
+                    )
+                    continue
+                for key in _PATTERN_KEYS:
+                    value = row.get(key)
+                    if key == "applies_to":
+                        continue
+                    if not isinstance(value, str) or not value.strip():
+                        findings.append(
+                            _finding(
+                                name, V.WARN, _msg(lang, "tokens_pattern_key", index=index, field=key)
+                            )
+                        )
+                applies_to = row.get("applies_to")
+                ok_all = isinstance(applies_to, str) and applies_to.strip().lower() == "all"
+                ok_list = isinstance(applies_to, list) and all(
+                    isinstance(item, str) for item in applies_to
+                )
+                if not (ok_all or ok_list):
+                    findings.append(
+                        _finding(
+                            name, V.WARN, _msg(lang, "tokens_pattern_applies_to", index=index)
+                        )
+                    )
+
+    for group in raw:
+        if group in design_mod.RESERVED_KEYS:
+            continue
+        tokens = raw[group]
+        if not isinstance(tokens, dict):
+            findings.append(_finding(name, V.WARN, _msg(lang, "tokens_group", group=group)))
+            continue
+        for token_name, value in tokens.items():
+            if not isinstance(value, (str, dict)):
+                findings.append(
+                    _finding(name, V.WARN, _msg(lang, "tokens_value", group=group, name=token_name))
+                )
+    return findings
+
+
+# --------------------------------------------------------------------------
 # entry point
 # --------------------------------------------------------------------------
 
@@ -811,6 +975,7 @@ def validate(root: pathlib.Path, lang: Optional[str] = None) -> dict:
         findings.extend(_check_discovery(discovery, lang))
 
     findings.extend(_check_progress_freshness(root, lang))
+    findings.extend(_check_tokens(root, lang))
 
     prd = contents.get("01-prd.md")
     if prd is not None:

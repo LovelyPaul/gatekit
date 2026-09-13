@@ -224,8 +224,15 @@ def axis_contract_freshness(root) -> dict:
         return _axis("contract freshness", verdict.UNVERIFIED,
                      "no .gatekit/contract.json yet",
                      paths.cli_invocation() + " contract derive")
-    return _axis("contract freshness", verdict.FAIL,
-                 "contract is stale: spec/05-gate.md changed since it was derived",
+    try:
+        changed = contract_mod.stale_inputs(root)
+    except Exception:  # noqa: BLE001 — a diagnosis must never crash doctor
+        changed = []
+    if changed:
+        detail = "contract is stale: %s changed since it was derived" % ", ".join(changed)
+    else:
+        detail = "contract is stale: spec/05-gate.md changed since it was derived"
+    return _axis("contract freshness", verdict.FAIL, detail,
                  paths.cli_invocation() + " contract derive")
 
 

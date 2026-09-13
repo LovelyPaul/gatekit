@@ -14,6 +14,7 @@ SUBCOMMANDS = {
     "spec":     ("gatekit.spec",     "Validate the spec set (spec/01..05, RECOVERY, PROGRESS)."),
     "contract": ("gatekit.contract", "Derive and run the completion contract from spec/05-gate.md."),
     "approve":  ("gatekit.approval", "Hash-anchored approvals: approve / check / list."),
+    "design":   ("gatekit.design",   "Design tokens: merge-preset / impact."),
     "jobs":     ("gatekit.jobs",     "Worker jobs: start / status / wait / results / redelegate / clean."),
     "workers":  ("gatekit.workers",  "Worker backends: list / check / set-default (claude default, codex optional)."),
     "ledger":   ("gatekit.ledger",   "Session ledger: show / init / set-pipeline."),

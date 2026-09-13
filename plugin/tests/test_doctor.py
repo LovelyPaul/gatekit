@@ -282,6 +282,18 @@ class TestAxisContractFreshness(DoctorTestCase):
         self.assertEqual(result["verdict"], verdict.FAIL)
         self.assertIn("derive", result["fix"])
 
+    def test_stale_design_input_is_named(self) -> None:
+        import gatekit.contract as contract_mod
+
+        self._patch_status(lambda root: verdict.FAIL)
+        original = contract_mod.stale_inputs
+        contract_mod.stale_inputs = lambda root: ["spec/tokens.json"]
+        self.addCleanup(setattr, contract_mod, "stale_inputs", original)
+        result = doctor.axis_contract_freshness(self.root)
+        self.assertEqual(result["verdict"], verdict.FAIL)
+        self.assertIn("spec/tokens.json", result["detail"])
+        self.assertNotIn("05-gate.md changed", result["detail"])
+
     def test_absent_contract_is_unverified(self) -> None:
         self._patch_status(lambda root: verdict.UNVERIFIED)
         result = doctor.axis_contract_freshness(self.root)

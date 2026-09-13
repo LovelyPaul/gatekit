@@ -11,9 +11,10 @@ Three rules keep the result honest:
   that ran out of time told us nothing about the code.
 * **Artifacts must stay inside the project root**, checked after
   ``os.path.realpath`` so a symlink cannot point the evidence somewhere else.
-* **A stale contract short-circuits to ``unverified``.** If ``05-gate.md``
-  changed after derivation, the frozen criteria no longer describe the
-  agreed-upon gate, so running them would answer the wrong question.
+* **A stale contract short-circuits to ``unverified``.** If ``05-gate.md`` or
+  any recorded design input (:data:`INPUT_FILES`) changed after derivation, the
+  frozen criteria no longer describe the agreed-upon gate, so running them would
+  answer the wrong question.
 
 Commands run through ``subprocess.run`` with no shell: ``argv`` is a list and
 stays a list, so a criterion cannot smuggle in shell metacharacters.
@@ -214,6 +215,38 @@ def gate_file(root: pathlib.Path) -> pathlib.Path:
     return paths.spec_dir(root) / "05-gate.md"
 
 
+#: The design files a build is judged against alongside ``05-gate.md``
+#: (ADR-0008 decision 6). A worker builds against these, so a change to one of
+#: them makes the frozen contract describe a design that no longer exists.
+#: Absent files hash to ``""``, which is a real recorded value: creating one
+#: later is as much a change as editing one.
+INPUT_FILES = ("spec/02-screens.md", "spec/02-design.md", "spec/tokens.json")
+
+
+def input_hashes(root: pathlib.Path) -> Dict[str, str]:
+    """Current sha256 of every contract input, ``""`` for the absent ones."""
+    return {
+        rel: approval.sha256_file(pathlib.Path(root) / rel) for rel in INPUT_FILES
+    }
+
+
+def stale_inputs(root: pathlib.Path) -> List[str]:
+    """Input paths whose content differs from what ``derive`` recorded.
+
+    Empty for a fresh contract, for no contract at all, and for one derived
+    before inputs were recorded — those are judged on the gate file alone, so
+    there is nothing here to report.
+    """
+    data = load(root)
+    if data is None:
+        return []
+    recorded = data.get("inputs")
+    if not isinstance(recorded, dict):
+        return []
+    current = input_hashes(root)
+    return [rel for rel in INPUT_FILES if current.get(rel, "") != recorded.get(rel, "")]
+
+
 def _parse_budget(text: str) -> float:
     """Return the declared total budget, or the default when none is declared."""
     fences = parse_fences(text, BUDGET_FENCE_NAME)
@@ -260,6 +293,7 @@ def derive(root: pathlib.Path) -> Dict[str, Any]:
     data = {
         "version": VERSION,
         "source_sha256": approval.sha256_file(source),
+        "inputs": input_hashes(root),
         "total_budget_s": total_budget_s,
         "criteria": criteria,
         "derived_at": _now(),
@@ -278,14 +312,21 @@ def load(root: pathlib.Path) -> Optional[Dict[str, Any]]:
 
 
 def status(root: pathlib.Path) -> str:
-    """``ok`` when fresh, ``fail`` when stale, ``unverified`` when absent."""
+    """``ok`` when fresh, ``fail`` when stale, ``unverified`` when absent.
+
+    Fresh means the gate file **and** every recorded design input still hash to
+    what ``derive`` froze. A contract written before inputs were recorded has no
+    ``inputs`` key and is judged on the gate file alone, exactly as before.
+    """
     data = load(root)
     if data is None:
         return verdict.UNVERIFIED
     current = approval.sha256_file(gate_file(root))
     if not current:
         return verdict.FAIL
-    return verdict.OK if current == data.get("source_sha256") else verdict.FAIL
+    if current != data.get("source_sha256"):
+        return verdict.FAIL
+    return verdict.FAIL if stale_inputs(root) else verdict.OK
 
 
 def _tail(text: str) -> str:
@@ -504,8 +545,15 @@ def run(argv: List[str]) -> int:
         return 0
 
     if args.action == "status":
-        print(status(root))
-        return 0 if status(root) == verdict.OK else 1
+        result = status(root)
+        changed = stale_inputs(root)
+        if changed:
+            # Naming the file saves the user from diffing three of them to find
+            # out why the gate they approved no longer applies.
+            print("%s (changed inputs: %s)" % (result, ", ".join(changed)))
+        else:
+            print(result)
+        return 0 if result == verdict.OK else 1
 
     result = execute(root, total_budget_s=args.budget)
     if args.as_json:

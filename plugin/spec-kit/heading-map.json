@@ -5,6 +5,7 @@
     "00-discovery.md",
     "01-prd.md",
     "02-screens.md",
+    "02-design.md",
     "03-architecture.md",
     "04-tasks.md",
     "05-gate.md",
@@ -37,6 +38,13 @@
       "## 화면 목록",
       "## 화면 흐름",
       "## 화면별 상태",
+      "## 컴포넌트",
+      "## 디자인 토큰",
+      "## 근거 없는 영역"
+    ],
+    "02-design.md": [
+      "## 출처",
+      "## 디자인 패턴",
       "## 컴포넌트",
       "## 디자인 토큰",
       "## 근거 없는 영역"
@@ -97,6 +105,13 @@
       "## Design tokens",
       "## Negative space"
     ],
+    "02-design.md": [
+      "## Sources",
+      "## Design patterns",
+      "## Components",
+      "## Design tokens",
+      "## Not covered"
+    ],
     "03-architecture.md": [
       "## Stack",
       "## Data model",
@@ -128,6 +143,7 @@
     ]
   },
   "absent_ok": [
-    "00-discovery.md"
+    "00-discovery.md",
+    "02-design.md"
   ]
 }

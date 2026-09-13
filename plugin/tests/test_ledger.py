@@ -289,7 +289,7 @@ class TestSetPipeline(unittest.TestCase):
     def test_pipelines_constant_matches_architecture(self) -> None:
         self.assertEqual(
             ledger.PIPELINES,
-            ("discover", "interview", "mockup", "tasks", "gate", "build", "verify"),
+            ("discover", "interview", "mockup", "design", "tasks", "gate", "build", "verify"),
         )
 
     def test_set_pipeline_persists(self) -> None:
@@ -324,3 +324,29 @@ class TestSetPipeline(unittest.TestCase):
     def test_cli_set_pipeline_unknown_is_nonzero(self) -> None:
         code = ledger.run(["set-pipeline", "deploy", "--root", str(self.root), "--session", "s2"])
         self.assertNotEqual(code, 0)
+
+
+class TestDesignPipeline(unittest.TestCase):
+    """ADR-0008: `design` is a pipeline a session can enter at any stage."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(os.path.realpath(self._tmp.name))
+        (self.root / ".gatekit").mkdir()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_design_sits_between_mockup_and_tasks(self) -> None:
+        self.assertEqual(
+            ledger.PIPELINES,
+            ("discover", "interview", "mockup", "design", "tasks", "gate", "build", "verify"),
+        )
+
+    def test_design_can_be_set_as_the_active_pipeline(self) -> None:
+        led = ledger.Ledger.load(self.root, "s-design")
+        self.assertTrue(led.set_pipeline("design"))
+        led.save()
+        self.assertEqual(
+            ledger.Ledger.load(self.root, "s-design").data["active_pipeline"], "design"
+        )

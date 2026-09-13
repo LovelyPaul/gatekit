@@ -35,7 +35,7 @@ Field rules:
 | `id` | Unique across the file. Completion criteria (05) reference it. |
 | `write_scope` | Non-empty list of globs, or the string `"read-only"` for investigation tasks. |
 | `instruction` | Self-contained; executable without reading other documents. |
-| `gates` | At least one. An argv list, run without a shell. |
+| `gates` | At least one. An argv list, run without a shell. Exit 0 is `ok`, exit 3 is `unverified` (it ran but could not judge), any other non-zero is `fail`. |
 | `depends_on` | Only ids that exist in this file. |
 | `round` | Tasks in the same round run in parallel. |
 

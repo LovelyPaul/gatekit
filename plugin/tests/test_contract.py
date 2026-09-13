@@ -544,3 +544,144 @@ class TestExpectValidation(TempProject):
             ("exit", "stdout_contains", "stdout_not_contains", "stdout_regex",
              "stderr_contains", "stderr_not_contains", "stderr_regex"),
         )
+
+
+# ---------------------------------------------------------------------------
+# design inputs (ADR-0008 decision 6)
+# ---------------------------------------------------------------------------
+
+
+class TestInputs(TempProject):
+    """derive records the design inputs; a changed one makes the contract stale."""
+
+    def write_input(self, name: str, text: str) -> None:
+        (self.root / "spec" / name).write_text(text, encoding="utf-8")
+
+    def test_derive_records_all_three_inputs(self) -> None:
+        self.write_gate({"id": "a", "argv": ["true"]})
+        data = contract.derive(self.root)
+        self.assertEqual(
+            sorted(data["inputs"]),
+            ["spec/02-design.md", "spec/02-screens.md", "spec/tokens.json"],
+        )
+
+    def test_absent_input_hashes_to_empty_string(self) -> None:
+        self.write_gate({"id": "a", "argv": ["true"]})
+        data = contract.derive(self.root)
+        self.assertEqual(data["inputs"]["spec/02-design.md"], "")
+
+    def test_present_input_hashes_to_its_content(self) -> None:
+        self.write_input("02-design.md", "# design\n")
+        self.write_gate({"id": "a", "argv": ["true"]})
+        data = contract.derive(self.root)
+        self.assertEqual(
+            data["inputs"]["spec/02-design.md"],
+            approval.sha256_file(self.root / "spec" / "02-design.md"),
+        )
+
+    def test_status_is_ok_when_inputs_are_unchanged(self) -> None:
+        self.write_input("tokens.json", '{"version": 2}\n')
+        self.write_gate({"id": "a", "argv": ["true"]})
+        contract.derive(self.root)
+        self.assertEqual(contract.status(self.root), "ok")
+
+    def test_changed_input_makes_the_contract_stale(self) -> None:
+        self.write_input("02-design.md", "# design\n")
+        self.write_gate({"id": "a", "argv": ["true"]})
+        contract.derive(self.root)
+        self.write_input("02-design.md", "# design changed\n")
+        self.assertEqual(contract.status(self.root), "fail")
+
+    def test_newly_created_input_makes_the_contract_stale(self) -> None:
+        self.write_gate({"id": "a", "argv": ["true"]})
+        contract.derive(self.root)
+        self.write_input("tokens.json", '{"version": 2}\n')
+        self.assertEqual(contract.status(self.root), "fail")
+
+    def test_deleted_input_makes_the_contract_stale(self) -> None:
+        self.write_input("02-screens.md", "# screens\n")
+        self.write_gate({"id": "a", "argv": ["true"]})
+        contract.derive(self.root)
+        (self.root / "spec" / "02-screens.md").unlink()
+        self.assertEqual(contract.status(self.root), "fail")
+
+    def test_a_contract_without_inputs_is_judged_on_the_gate_file_alone(self) -> None:
+        self.write_gate({"id": "a", "argv": ["true"]})
+        contract.derive(self.root)
+        target = self.root / ".gatekit" / "contract.json"
+        data = json.loads(target.read_text(encoding="utf-8"))
+        del data["inputs"]
+        target.write_text(json.dumps(data), encoding="utf-8")
+        self.write_input("02-design.md", "# new design\n")
+        self.assertEqual(contract.status(self.root), "ok")
+
+    def test_stale_inputs_names_only_the_changed_paths(self) -> None:
+        self.write_input("02-design.md", "# design\n")
+        self.write_input("tokens.json", '{"version": 2}\n')
+        self.write_gate({"id": "a", "argv": ["true"]})
+        contract.derive(self.root)
+        self.write_input("tokens.json", '{"version": 2, "color": {}}\n')
+        self.assertEqual(contract.stale_inputs(self.root), ["spec/tokens.json"])
+
+    def test_stale_inputs_is_empty_when_fresh(self) -> None:
+        self.write_gate({"id": "a", "argv": ["true"]})
+        contract.derive(self.root)
+        self.assertEqual(contract.stale_inputs(self.root), [])
+
+    def test_stale_inputs_is_empty_without_a_contract(self) -> None:
+        self.assertEqual(contract.stale_inputs(self.root), [])
+
+    def test_stale_inputs_is_empty_for_a_pre_inputs_contract(self) -> None:
+        self.write_gate({"id": "a", "argv": ["true"]})
+        contract.derive(self.root)
+        target = self.root / ".gatekit" / "contract.json"
+        data = json.loads(target.read_text(encoding="utf-8"))
+        del data["inputs"]
+        target.write_text(json.dumps(data), encoding="utf-8")
+        self.write_input("02-design.md", "# new\n")
+        self.assertEqual(contract.stale_inputs(self.root), [])
+
+    def test_execute_reports_stale_when_an_input_changed(self) -> None:
+        self.write_input("02-design.md", "# design\n")
+        self.write_gate({"id": "a", "argv": ["true"]})
+        contract.derive(self.root)
+        self.write_input("02-design.md", "# other\n")
+        result = contract.execute(self.root)
+        self.assertEqual(result["verdict"], "unverified")
+        self.assertEqual(result["reasons"], [contract.STALE_REASON])
+
+
+class TestStatusOutput(TempProject):
+    """`contract status` names the input that changed, not just the verdict."""
+
+    def test_status_prints_the_changed_input_name(self) -> None:
+        (self.root / "spec" / "02-design.md").write_text("# design\n", encoding="utf-8")
+        self.write_gate({"id": "a", "argv": ["true"]})
+        contract.derive(self.root)
+        (self.root / "spec" / "02-design.md").write_text("# other\n", encoding="utf-8")
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = contract.run(["status", "--root", str(self.root)])
+        self.assertEqual(code, 1)
+        text = out.getvalue()
+        self.assertIn("fail", text)
+        self.assertIn("spec/02-design.md", text)
+
+    def test_fresh_status_prints_only_the_verdict(self) -> None:
+        self.write_gate({"id": "a", "argv": ["true"]})
+        contract.derive(self.root)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = contract.run(["status", "--root", str(self.root)])
+        self.assertEqual(code, 0)
+        self.assertEqual(out.getvalue().strip(), "ok")
+
+    def test_stale_gate_file_alone_still_prints_fail(self) -> None:
+        self.write_gate({"id": "a", "argv": ["true"]})
+        contract.derive(self.root)
+        self.write_gate({"id": "b", "argv": ["true"]})
+        out = io.StringIO()
+        with redirect_stdout(out):
+            code = contract.run(["status", "--root", str(self.root)])
+        self.assertEqual(code, 1)
+        self.assertIn("fail", out.getvalue())
