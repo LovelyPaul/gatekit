@@ -88,6 +88,14 @@ The gate must be a command that exists in this repository. Verify it runs
 before writing it into the file. A gate that always passes is worse than no
 gate, because it manufactures false evidence.
 
+Two runners need glob patterns, not directories: `node --test` loads a bare
+directory as a module and fails with `Cannot find module`, so write
+`tests/rules/*.test.js`; `gates/tokens.py` scans zero files for a bare
+directory and exits 3, so write `src/**`. `jobs start` runs every gate once
+before spawning a worker (ADR-0009) and refuses to start when a gate's
+command itself errors — write the gate so that, with no code yet, it fails
+the way the runner reports "tests failed" (exit 1), not a usage error.
+
 **The token gate.** When `spec/tokens.json` exists, add this gate by default
 to every task whose `write_scope` includes a stylesheet, component, or
 template path — pass the task's own `write_scope` globs as the gate's

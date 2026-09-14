@@ -272,6 +272,14 @@ task gate with the project root as its `cwd`, which is why the fence in
 `04-tasks.md` never needs `--root`; run it by hand from another directory
 without `--root` and it reports `unverified`, not the project's real state.
 
+A task gate must be able to fail before the work exists and must be a
+command that runs as written: `jobs start` executes every gate once before
+spawning any worker (ADR-0009, §10) and refuses a gate whose command itself
+errors. Two runner-specific rules the trial exposed: `node --test` takes glob
+patterns (`tests/rules/*.test.js`), a bare directory is loaded as a module and
+fails with `Cannot find module`; `gates/tokens.py` takes globs too
+(`src/**`), a bare directory scans zero files and exits 3.
+
 ## 6a. Discovery record in `spec/00-discovery.md` (ADR-0005)
 
 The optional first stage for a user who does not yet know what to build.
@@ -367,11 +375,74 @@ every token group as `name: value` lines, and a pointer to
 `spec/02-design.md` and `spec/02-screens.md` for anything the section does
 not carry (ADR-0008). When `tokens.json` is absent the section is omitted
 and the prompt is unchanged from before ADR-0008. `status.json.state` ∈
-`queued|running|gating|passed|failed|timeout|redelegated`. Gates run only after
+`queued|running|gating|passed|failed|timeout|redelegated|stopped|blocked`
+(the last two from ADR-0009, below). Gates run only after
 the worker exits; a worker that exits 0 but fails a gate is `failed`, never
 `passed`. `redelegate <task>` archives the attempt to `attempt-N/` and re-runs
 with the failed gate output appended to the prompt, up to `max_retries`.
 `results --compact` prints one line per task: `id state gates_passed/total`.
+
+ADR-0009 adds four rules to the runner:
+
+- **Preflight.** Unless `start --no-preflight`, every selected task's gates
+  run once *before* any worker is spawned; the result is written to
+  `tasks/<id>/preflight.json` (same shape as `gates.json`). A task whose
+  gates all pass is recorded `passed` with `detail = "gates passed at
+  preflight; no worker spawned"` and gets no worker; if nothing exists yet
+  under its `write_scope` the detail also carries `warn: gate passed before
+  any work existed …` and the line is listed in `job.json.preflight_warnings`
+  (a gate that passes on an empty tree is the signature of one that always
+  passes). `jobs.classify_gate_result(gate, argv)` sorts every failing gate
+  into three kinds. `command_error` — the job is refused with
+  `GatePreflightError` (CLI exit 4) naming the task and gate before any
+  worker runs — only when the exit code is 126 or 127, or a line matching
+  `COMMAND_ERROR_PATTERNS` (`Cannot find module`, `can't open file`, `No such
+  file or directory`, `command not found`, `is a directory`) **also names one
+  of the gate's own arguments** (or, for `command not found`, its program):
+  the interpreter could not run what the fence points at. `suspicious` — the
+  job starts and a warning line is printed and stored in
+  `job.json.preflight_warnings` — for exit ≥ 2 on its own, a pattern line that
+  names nothing from argv (a failing test that mentions a missing fixture),
+  or a usage banner opening stderr. `expected` — silent start — for every
+  other failure, and always for `ok`/`unverified` results. `--dry-run` skips
+  preflight. Refusal is reserved for the named-argument and 126/127 cases;
+  everything ambiguous starts.
+- **Dependency gating.** A task runs only when every `depends_on` id that
+  is part of the same job is `passed`; otherwise it stays `queued` with
+  `detail = "waiting on <id> (<state>)"` (the state is suffixed `, gates
+  unverified` when the dependency's gates could not judge) and, when the job
+  drains, becomes `blocked` (terminal). A blocked task was never run and never
+  judged, so it is **not** in `NOT_DONE_STATES`: a job whose only non-passed
+  tasks are `blocked` reports `unverified`, never `fail`. Dependencies outside
+  the job never block. There is no automatic resume: the operator starts the
+  blocked task with `start --tasks` once its dependency passes.
+- **Re-read on redelegate.** `redelegate` parses the current
+  `spec/04-tasks.md` before archiving the attempt; if the task's fence
+  differs from the job's `task.json` snapshot the snapshot is replaced and
+  the status detail says `task re-read from spec/04-tasks.md (gates changed
+  | instruction changed | write_scope changed)`. A task id no longer in the
+  file is refused with a `ValueError` naming the file. `start` still
+  snapshots; edits during a run do not reach running workers. The
+  redelegate prompt also carries a fixed paragraph telling the worker that
+  a gate command which looks wrong is to be reported, not coded around.
+- **Stop.** `_spawn_worker` records `pid` and `pid_started_at` in
+  `status.json`; `execute_task` clears `pid` the moment the worker is reaped,
+  before the task moves to `gating`. `jobs stop [--job ID]` writes `stop.json`
+  in the job dir (the runner checks it before each task and after each worker
+  returns), and for each task still in `running` — never `gating` — whose
+  recorded pid is alive **and** whose `ps -o etime=` age agrees with
+  `pid_started_at` within `STOP_PID_AGE_TOLERANCE_S`, calls
+  `_terminate_pid` (SIGTERM, `STOP_GRACE_S` seconds, then SIGKILL). A pid
+  that fails either check is listed in the result's `skipped`, never
+  signalled. Every running or queued task is recorded `stopped` and
+  `job.json.stopped_at` is written. `stopped` is terminal and not done.
+
+`status.json.state` therefore ∈ `queued|running|gating|passed|failed|timeout|
+redelegated|stopped|blocked`; `TERMINAL_STATES` and `NOT_DONE_STATES` in
+`jobs.py` are the two sets every consumer uses. `status` reports `fail` when
+any task is in a not-done state (`failed`, `timeout`, `stopped`), `unverified`
+when the rest are not all `passed` (running, queued, or `blocked`), and
+`done` when every task is terminal.
 
 `jobs evaluate [--backend name] [--prompt FILE] [--lang ko|en]` runs one
 read-only worker as the independent evaluator (ADR-0007): job dir
@@ -448,6 +519,18 @@ fake executable created in a temp dir and prepended to `PATH`. Every gate has at
 least three tests: allow, deny/block, internal-error-still-exits-0. Fixtures
 under `plugin/tests/fixtures/` are small text files only.
 
+`jobs.py` (ADR-0009) additionally covers: preflight classification (already
+passing → no worker; command error → `GatePreflightError` and CLI exit 4 with
+the gate named; expected failure → worker spawned; `--no-preflight` and
+`--dry-run` skip it), the early-pass warning on an empty write scope,
+`looks_like_command_error` on each listed signature and on `ok`/`unverified`/
+malformed input, redelegate re-reading a corrected gate and refusing a task
+removed from the file, the redelegate prompt paragraph, `stop` ending a live
+fake worker and marking queued tasks `stopped`, `stop` refusing to signal a
+pid whose age does not match the recorded spawn time, `stopped`/`blocked`
+counting as not done, and dependency gating (blocked on failure, run on pass,
+out-of-job dependency ignored).
+
 ## 14. Module interfaces (exact signatures other modules may import)
 
 ```python
@@ -515,9 +598,16 @@ def parse_fences(text: str, name: str) -> list[dict]                   # all ```
 def run(argv: list[str]) -> int
 
 # jobs.py
-def run(argv: list[str]) -> int                        # start / status / wait / results / redelegate / evaluate / clean
+def run(argv: list[str]) -> int                        # start / status / wait / results / redelegate / stop / evaluate / clean
+def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False, no_preflight=False) -> dict   # raises GatePreflightError (ADR-0009)
+def preflight(root, jdir, tasks: list[dict]) -> dict   # {"passed": [ids], "warnings": [str]}; raises GatePreflightError
+def classify_gate_result(gate: dict, argv=None) -> str  # "command_error" | "suspicious" | "expected" (ADR-0009 decision 1)
+def looks_like_command_error(gate: dict, argv=None) -> bool   # classify_gate_result(...) == "command_error"
+def stop(root, job_id: str | None = None) -> dict      # {"job_id", "stopped", "signalled", "skipped"}
 def evaluate(root: pathlib.Path, backend_name: str | None = None, prompt_path=None, timeout_s=None, lang: str = "en") -> dict
 def load_tasks(root: pathlib.Path) -> list[dict]       # from spec/04-tasks.md via spec.parse_fences
+class GatePreflightError(ValueError)
+TERMINAL_STATES, NOT_DONE_STATES                       # the two state sets every consumer of status.json uses
 
 # workers.py
 def resolve(root: pathlib.Path, name: str | None = None, read_only: bool = False) -> dict   # backend dict incl. name, argv, enabled, unsafe, read_only

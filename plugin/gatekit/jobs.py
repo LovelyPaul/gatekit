@@ -33,9 +33,46 @@ STATES = (
     "failed",
     "timeout",
     "redelegated",
+    "stopped",   # ADR-0009: ended by `jobs stop`
+    "blocked",   # ADR-0009: a dependency did not pass
 )
 
+#: States after which a task will not change again on its own.
+TERMINAL_STATES = ("passed", "failed", "timeout", "redelegated", "stopped", "blocked")
+#: Terminal states that mean "not done" for the job verdict. `blocked` is not
+#: here: a task that never ran was not judged, and the job verdict reports it
+#: as `unverified`, never `fail` (the cardinal rule).
+NOT_DONE_STATES = ("failed", "timeout", "stopped")
+
 GATE_TIMEOUT_S = 60.0
+
+#: ADR-0009 decision 1. A failing gate is a broken *command* only when the
+#: shell or interpreter itself reports that something the gate's argv names
+#: could not be run: the pattern must match AND the matching line must
+#: mention one of the gate's own arguments. A test that merely prints "No such
+#: file" about a fixture does not name the argv and is expected pre-work
+#: failure. Misses are safe: the job starts with a warning.
+COMMAND_ERROR_PATTERNS = (
+    re.compile(r"Cannot find module", re.IGNORECASE),
+    re.compile(r"can't open file", re.IGNORECASE),
+    re.compile(r"No such file or directory", re.IGNORECASE),
+    re.compile(r"command not found", re.IGNORECASE),
+    re.compile(r"\bis a directory\b", re.IGNORECASE),
+    re.compile(r"not recognized as an internal or external command", re.IGNORECASE),
+)
+#: Exit codes the shell reserves for "could not execute": 126 (not executable),
+#: 127 (not found). These are command errors on their own.
+COMMAND_ERROR_EXITS = (126, 127)
+#: Signals that make preflight *suspicious* (job starts, warning printed):
+#: exit ≥ 2 from a runner that documents 1 as "tests failed", a usage banner
+#: at the top of stderr, or a pattern above that does not name an argument.
+SUSPICIOUS_MIN_EXIT = 2
+#: `jobs stop` signals a recorded pid only when the live process's age agrees
+#: with the recorded spawn time within this many seconds (recycled-pid guard).
+STOP_PID_AGE_TOLERANCE_S = 10.0
+#: Seconds `jobs stop` waits after SIGTERM before SIGKILL.
+STOP_GRACE_S = 5.0
+STOP_MARKER = "stop.json"
 #: Exit code by which a task gate reports `unverified`: it ran, but it could not
 #: judge (ADR-0008 decision 5 — the token gate uses it when tokens.json is
 #: absent or the task wrote no file it knows how to scan). 0 is `ok`, every
@@ -399,7 +436,135 @@ def run_gates(root, task: dict) -> dict:
     }
 
 
-def _spawn_worker(root, backend: dict, task: dict, job_id: str, tdir, timeout_s: float) -> dict:
+def _argv_tokens(argv) -> list:
+    """Strings a command-error line would name: each argument and its basename."""
+    tokens = []
+    for arg in (argv or [])[1:] if isinstance(argv, list) else []:
+        s = str(arg).strip()
+        if not s or s.startswith("-"):
+            continue
+        tokens.append(s)
+        base = os.path.basename(s.rstrip("/"))
+        if base and base != s:
+            tokens.append(base)
+    return tokens
+
+
+def classify_gate_result(gate: dict, argv=None) -> str:
+    """ADR-0009 decision 1: `command_error`, `suspicious`, or `expected`.
+
+    `command_error` — refuse the job — only when the failing gate's exit code
+    is one of `COMMAND_ERROR_EXITS`, or a `COMMAND_ERROR_PATTERNS` line also
+    names one of the gate's own arguments (the interpreter could not run what
+    the fence points at), or a `command not found` line names argv[0].
+    `suspicious` — start the job, print a warning — for exit ≥ 2, a pattern
+    that names nothing from argv, or a usage banner opening stderr.
+    `expected` — start the job silently — for everything else, and always for
+    `ok` and `unverified` verdicts or a malformed result.
+    """
+    if not isinstance(gate, dict) or gate.get("verdict") != verdict.FAIL:
+        return "expected"
+    code = gate.get("exit")
+    if isinstance(code, int) and code in COMMAND_ERROR_EXITS:
+        return "command_error"
+    stdout = gate.get("stdout_tail") or ""
+    stderr = gate.get("stderr_tail") or ""
+    tokens = _argv_tokens(argv)
+    program = os.path.basename(str(argv[0])) if isinstance(argv, list) and argv else ""
+    matched_without_name = False
+    for line in (stdout + "\n" + stderr).splitlines():
+        if not any(p.search(line) for p in COMMAND_ERROR_PATTERNS):
+            continue
+        if "command not found" in line.lower():
+            if program and program in line:
+                return "command_error"
+            matched_without_name = True
+            continue
+        if any(tok in line for tok in tokens):
+            return "command_error"
+        matched_without_name = True
+    if matched_without_name:
+        return "suspicious"
+    if isinstance(code, int) and code >= SUSPICIOUS_MIN_EXIT:
+        return "suspicious"
+    first = stderr.lstrip().lower()
+    if first.startswith("usage:"):
+        return "suspicious"
+    return "expected"
+
+
+def looks_like_command_error(gate: dict, argv=None) -> bool:
+    """True only when `classify_gate_result` says `command_error`."""
+    return classify_gate_result(gate, argv) == "command_error"
+
+
+class GatePreflightError(ValueError):
+    """ADR-0009: a task gate is a broken command; the job was not started."""
+
+
+def _scope_has_files(root, task: dict) -> bool:
+    """Does anything already exist under the task's write_scope globs?"""
+    scope = task.get("write_scope")
+    if not isinstance(scope, list):
+        return True  # read-only or malformed: not our call
+    root = pathlib.Path(root)
+    for pattern in scope:
+        try:
+            if any(p.is_file() for p in root.glob(str(pattern))):
+                return True
+        except (OSError, ValueError):
+            continue
+    return False
+
+
+def preflight(root, jdir, tasks: list) -> dict:
+    """ADR-0009 decision 1: run every task's gates once before any worker.
+
+    Writes `tasks/<id>/preflight.json`. Returns
+    `{"passed": [ids], "warnings": [str]}`. Raises `GatePreflightError` when a
+    gate is a broken command, before any worker has been spawned.
+    """
+    passed, warnings, broken = [], [], []
+    for task in tasks:
+        task_id = str(task.get("id"))
+        result = run_gates(root, task)
+        write_json(_task_dir(jdir, task_id) / "preflight.json", result)
+        gates = result.get("gates") or []
+        if result.get("total", 0) > 0 and result.get("verdict") == verdict.OK:
+            detail = "gates passed at preflight; no worker spawned"
+            if not _scope_has_files(root, task):
+                note = ("warn: gate passed before any work existed in the write scope "
+                        "— check that it can fail")
+                warnings.append("%s: %s" % (task_id, note))
+                detail += "; " + note
+            _set_status(jdir, task_id, state="passed", exit=None,
+                        gates_verdict=result["verdict"], gates_passed=result["passed"],
+                        gates_total=result["total"], finished_at=_now(), detail=detail)
+            passed.append(task_id)
+            continue
+        declared = {str(g.get("name") or "gate-%d" % i): g.get("argv")
+                    for i, g in enumerate(task.get("gates") or [])}
+        for gate in gates:
+            kind = classify_gate_result(gate, declared.get(str(gate.get("name"))))
+            if kind == "command_error":
+                tail = _tail((gate.get("stderr_tail") or gate.get("stdout_tail") or ""), 400)
+                broken.append("task %s gate `%s` (%s): %s" % (
+                    task_id, gate.get("name"), gate.get("detail", ""), tail.strip()))
+            elif kind == "suspicious":
+                warnings.append(
+                    "%s: gate `%s` failed at preflight (%s) in a way that may be the "
+                    "command rather than the work; starting anyway — check it if the "
+                    "task fails" % (task_id, gate.get("name"), gate.get("detail", "")))
+    if broken:
+        raise GatePreflightError(
+            "gate preflight refused to start the job — the command itself fails, "
+            "no worker could make it pass:\n" + "\n".join(broken)
+        )
+    return {"passed": passed, "warnings": warnings}
+
+
+def _spawn_worker(root, backend: dict, task: dict, job_id: str, tdir, timeout_s: float,
+                  on_spawn=None) -> dict:
     """Run the worker for one task; returns {"exit", "timed_out"}."""
     # A worker gets exactly the two gatekit variables it needs; nothing a
     # parent worker or evaluator session exported leaks into it.
@@ -424,6 +589,11 @@ def _spawn_worker(root, backend: dict, task: dict, job_id: str, tdir, timeout_s:
             err_f.write(("gatekit: could not spawn worker: %s\n" % exc).encode("utf-8"))
             return {"exit": None, "timed_out": False, "spawn_error": str(exc),
                     "elapsed_s": round(time.time() - started, 3)}
+        if on_spawn is not None:
+            try:
+                on_spawn(proc.pid, started)
+            except Exception:  # recording the pid must never break the run
+                pass
         try:
             proc.communicate(prompt.encode("utf-8"), timeout=timeout_s)
             timed_out = False
@@ -447,7 +617,20 @@ def execute_task(root, jdir, job_id: str, task: dict, backend: dict, timeout_s: 
     tdir = _task_dir(jdir, task_id)
     _set_status(jdir, task_id, state="running", started_at=_now())
 
-    result = _spawn_worker(root, backend, task, job_id, tdir, timeout_s)
+    def record_pid(pid, started):
+        _set_status(jdir, task_id, pid=int(pid), pid_started_at=float(started))
+
+    result = _spawn_worker(root, backend, task, job_id, tdir, timeout_s, on_spawn=record_pid)
+    # The worker has been reaped; its pid may be reused by anything now, so
+    # `jobs stop` must never signal it again.
+    _set_status(jdir, task_id, pid=None)
+
+    if _stop_requested(jdir):
+        # ADR-0009 decision 3: `jobs stop` ended this worker; whatever exit code
+        # the signal produced is not a verdict on the work.
+        return _set_status(jdir, task_id, state="stopped", exit=result.get("exit"),
+                           elapsed_s=result.get("elapsed_s"), finished_at=_now(),
+                           detail="stopped by jobs stop")
 
     if result["timed_out"]:
         return _set_status(
@@ -627,6 +810,10 @@ def _run_wave(root, jdir, job_id, wave, backend, timeout_s, parallel) -> None:
     def worker(task):
         with lock:
             try:
+                if _stop_requested(jdir):
+                    _set_status(jdir, str(task.get("id")), state="stopped",
+                                finished_at=_now(), detail="stopped by jobs stop")
+                    return
                 execute_task(root, jdir, job_id, task, backend, timeout_s)
             except BaseException as exc:  # never let one task kill the job
                 errors.append((task.get("id"), exc))
@@ -648,8 +835,84 @@ def _run_wave(root, jdir, job_id, wave, backend, timeout_s, parallel) -> None:
 # ---------------------------------------------------------------- subcommands
 
 
-def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False) -> dict:
-    """Create a job directory and (unless dry_run) run every selected task."""
+def _stop_requested(jdir) -> bool:
+    return (pathlib.Path(jdir) / STOP_MARKER).is_file()
+
+
+def _task_state(jdir, task_id: str) -> str:
+    st = read_json(_task_dir(jdir, task_id) / "status.json", {}) or {}
+    return str(st.get("state", "queued"))
+
+
+def _split_wave_by_dependencies(jdir, wave: list, job_task_ids: set) -> tuple:
+    """ADR-0009 decision 5: a task runs only when every in-job dependency passed.
+
+    Returns `(runnable, waiting)`; each waiting task's status gains a detail
+    naming the dependency and its state. Dependencies outside the job are not
+    the job's business and never block.
+    """
+    runnable, waiting = [], []
+    for task in wave:
+        blocker = None
+        for dep in task.get("depends_on") or []:
+            dep = str(dep)
+            if dep not in job_task_ids:
+                continue
+            dep_status = read_json(_task_dir(jdir, dep) / "status.json", {}) or {}
+            state = str(dep_status.get("state", "queued"))
+            if state != "passed":
+                shown = state
+                if dep_status.get("gates_verdict") == verdict.UNVERIFIED:
+                    shown = "%s, gates unverified" % state
+                blocker = (dep, shown)
+                break
+        if blocker is None:
+            runnable.append(task)
+        else:
+            _set_status(jdir, str(task.get("id")), state="queued",
+                        detail="waiting on %s (%s)" % blocker)
+            waiting.append(task)
+    return runnable, waiting
+
+
+def _finalise_unrun(jdir, tasks: list, stopped: bool) -> None:
+    """After the waves: tasks still queued are `stopped` or `blocked`."""
+    for task in tasks:
+        task_id = str(task.get("id"))
+        st = read_json(_task_dir(jdir, task_id) / "status.json", {}) or {}
+        if st.get("state", "queued") != "queued":
+            continue
+        if stopped:
+            _set_status(jdir, task_id, state="stopped", finished_at=_now(),
+                        detail="stopped by jobs stop")
+            continue
+        # Re-read the dependency's *final* state: the "waiting on" detail was
+        # frozen mid-run and a cascade (a → b → c) would name b as `queued`
+        # when it actually ended `blocked`.
+        dep = "a dependency"
+        for candidate in task.get("depends_on") or []:
+            dep_status = read_json(_task_dir(jdir, str(candidate)) / "status.json", None)
+            if not dep_status:
+                continue
+            state = str(dep_status.get("state", "queued"))
+            if state != "passed":
+                shown = state
+                if dep_status.get("gates_verdict") == verdict.UNVERIFIED:
+                    shown = "%s, gates unverified" % state
+                dep = "%s (%s)" % (candidate, shown)
+                break
+        _set_status(jdir, task_id, state="blocked", finished_at=_now(),
+                    detail="dependency %s ended before this task could run" % dep)
+
+
+def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False,
+          no_preflight=False) -> dict:
+    """Create a job directory and (unless dry_run) run every selected task.
+
+    ADR-0009: unless `no_preflight`, every task's gates run once before any
+    worker is spawned (see `preflight`), and a task whose in-job dependency
+    did not pass is left `blocked` rather than run.
+    """
     cfg = config.load(root)
     build_cfg = cfg.get("build") or {}
     tasks = load_tasks(root)
@@ -687,6 +950,8 @@ def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False) 
         "task_timeout_s": timeout_s,
         "max_retries": max_retries,
         "dry_run": bool(dry_run),
+        "no_preflight": bool(no_preflight),
+        "preflight_warnings": [],
         "tasks": [str(t.get("id")) for t in tasks],
         "config": {"build": build_cfg},
     }
@@ -705,9 +970,29 @@ def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False) 
     if dry_run:
         return job
 
-    for wave in order_tasks(tasks):
-        _run_wave(root, jdir, job_id, wave, backend, timeout_s, parallel)
+    if not no_preflight:
+        pre = preflight(root, jdir, tasks)  # raises GatePreflightError before any spawn
+        job["preflight_warnings"] = pre["warnings"]
+        job["preflight_passed"] = pre["passed"]
+        write_json(jdir / "job.json", job)
+        already = set(pre["passed"])
+        tasks_to_run = [t for t in tasks if str(t.get("id")) not in already]
+    else:
+        tasks_to_run = list(tasks)
 
+    job_task_ids = {str(t.get("id")) for t in tasks}
+    waiting_all = []
+    for wave in order_tasks(tasks_to_run):
+        if _stop_requested(jdir):
+            break
+        runnable, waiting = _split_wave_by_dependencies(jdir, wave, job_task_ids)
+        waiting_all.extend(waiting)
+        if runnable:
+            _run_wave(root, jdir, job_id, runnable, backend, timeout_s, parallel)
+
+    _finalise_unrun(jdir, tasks_to_run, stopped=_stop_requested(jdir))
+
+    job = read_json(jdir / "job.json", job) or job
     job["finished_at"] = _now()
     write_json(jdir / "job.json", job)
     return job
@@ -736,9 +1021,10 @@ def status(root, job_id: Optional[str] = None) -> dict:
     states = [r["state"] for r in rows]
     if not rows:
         overall = verdict.UNVERIFIED
-    elif any(s in ("failed", "timeout") for s in states):
+    elif any(s in NOT_DONE_STATES for s in states):
         overall = verdict.FAIL
-    elif any(s in ("queued", "running", "gating") for s in states):
+    elif any(s in ("queued", "running", "gating", "blocked") for s in states):
+        # `blocked` never ran and was never judged: unverified, not fail.
         overall = verdict.UNVERIFIED
     else:
         overall = verdict.OK
@@ -748,11 +1034,124 @@ def status(root, job_id: Optional[str] = None) -> dict:
         "backend": (job.get("backend") or {}).get("name"),
         "started_at": job.get("started_at"),
         "finished_at": job.get("finished_at"),
-        "done": all(s in ("passed", "failed", "timeout", "redelegated") for s in states)
-        if states
-        else False,
+        "stopped_at": job.get("stopped_at"),
+        "preflight_warnings": job.get("preflight_warnings") or [],
+        "done": all(s in TERMINAL_STATES for s in states) if states else False,
         "tasks": rows,
     }
+
+
+def _process_age_s(pid: int) -> Optional[float]:
+    """Seconds since `pid` started, via `ps -o etime=`; None when unknown."""
+    try:
+        out = subprocess.run(["ps", "-o", "etime=", "-p", str(pid)],
+                             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             timeout=5).stdout.decode("utf-8", "replace").strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return _parse_etime(out)
+
+
+def _parse_etime(text: str) -> Optional[float]:
+    """Parse `ps -o etime=` output, `[[dd-]hh:]mm:ss`, into seconds; None if odd."""
+    rest = (text or "").strip()
+    if not rest:
+        return None
+    days = 0
+    if "-" in rest:
+        d, rest = rest.split("-", 1)
+        try:
+            days = int(d)
+        except ValueError:
+            return None
+    try:
+        nums = [int(p) for p in rest.split(":")]
+    except ValueError:
+        return None
+    if len(nums) == 3:
+        h, m, s = nums
+    elif len(nums) == 2:
+        h, (m, s) = 0, nums
+    else:
+        return None
+    return float(days * 86400 + h * 3600 + m * 60 + s)
+
+
+def _pid_belongs_to_status(pid: int, pid_started_at: float) -> bool:
+    """True only when a live process of that pid is as old as the recorded spawn."""
+    try:
+        os.kill(pid, 0)
+    except (OSError, ValueError):
+        return False
+    age = _process_age_s(pid)
+    if age is None:
+        return False
+    expected = time.time() - float(pid_started_at)
+    return abs(age - expected) <= STOP_PID_AGE_TOLERANCE_S
+
+
+def _terminate_pid(pid: int, grace_s: Optional[float] = None) -> bool:
+    """SIGTERM, wait up to `grace_s`, then SIGKILL. True when a signal was sent."""
+    import signal
+
+    grace = STOP_GRACE_S if grace_s is None else float(grace_s)
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        return False
+    deadline = time.time() + grace
+    while time.time() < deadline:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return True  # gone
+        time.sleep(0.05)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except OSError:
+        pass
+    return True
+
+
+def stop(root, job_id: Optional[str] = None) -> dict:
+    """ADR-0009 decision 3: end a running job.
+
+    Writes the stop marker so the runner stops taking tasks, signals every
+    recorded worker pid that is still alive *and* was started by this job
+    (age check against `pid_started_at`, so a recycled pid is never touched),
+    then records `stopped` on every task that was running or queued.
+    """
+    job_id = job_id or latest_job_id(root)
+    if not job_id:
+        raise ValueError("no job to stop under .gatekit/jobs/")
+    jdir = job_dir(root, job_id)
+    job = read_json(jdir / "job.json", None)
+    if not job:
+        raise ValueError("job %s has no job.json" % job_id)
+
+    write_json(jdir / STOP_MARKER, {"requested_at": _now()})
+    stopped, signalled, skipped = [], [], []
+    for task_id in job.get("tasks", []):
+        st = read_json(_task_dir(jdir, task_id) / "status.json", {}) or {}
+        state = st.get("state", "queued")
+        if state in TERMINAL_STATES:
+            continue
+        pid = st.get("pid")
+        # Only a task still in `running` owns a live worker; `gating` has
+        # already reaped it and the pid may belong to anyone by now.
+        if state == "running" and isinstance(pid, int):
+            if _pid_belongs_to_status(pid, st.get("pid_started_at") or 0.0) \
+                    and _terminate_pid(pid):
+                signalled.append(task_id)
+            else:
+                skipped.append(task_id)
+        _set_status(jdir, task_id, state="stopped", finished_at=_now(),
+                    detail="stopped by jobs stop")
+        stopped.append(task_id)
+
+    job["stopped_at"] = _now()
+    write_json(jdir / "job.json", job)
+    return {"job_id": job_id, "stopped": stopped, "signalled": signalled, "skipped": skipped}
 
 
 def wait(root, job_id: Optional[str] = None, timeout: float = 0.0) -> dict:
@@ -792,6 +1191,29 @@ def redelegate(root, task_id: str, job_id: Optional[str] = None) -> dict:
             % (task_id, attempt, max_retries)
         )
 
+    # ADR-0009 decision 2: the operator may have fixed the task since the job
+    # started; re-read it from spec/04-tasks.md rather than the snapshot.
+    current = {str(t.get("id")): t for t in load_tasks(root)}
+    if task_id not in current:
+        raise ValueError(
+            "task %r is no longer in spec/04-tasks.md; put it back or start a new job"
+            % task_id
+        )
+    snapshot = read_json(tdir / "task.json", {}) or {}
+    fresh = current[task_id]
+    changed = []
+    if fresh.get("gates") != snapshot.get("gates"):
+        changed.append("gates changed")
+    if fresh.get("instruction") != snapshot.get("instruction"):
+        changed.append("instruction changed")
+    if fresh.get("write_scope") != snapshot.get("write_scope"):
+        changed.append("write_scope changed")
+    reread_note = ""
+    if fresh != snapshot:
+        write_json(tdir / "task.json", fresh)
+        reread_note = "task re-read from spec/04-tasks.md (%s)" % (
+            ", ".join(changed) or "other fields changed")
+
     archive = tdir / ("attempt-%d" % attempt)
     archive.mkdir(parents=True, exist_ok=True)
     for name in ("prompt.md", "output.txt", "stderr.txt", "gates.json", "status.json"):
@@ -825,17 +1247,32 @@ def redelegate(root, task_id: str, job_id: Optional[str] = None) -> dict:
     else:
         extra = "Attempt %d did not pass. No gate output was captured (the worker " \
                 "may have exited non-zero or timed out). Re-do the task." % attempt
+    # ADR-0009 decision 4: name the residual case preflight cannot catch.
+    extra += (
+        "\n\nIf the gate command itself looks wrong — it names a file or directory "
+        "this task was never asked to create, or it fails in a way no code change "
+        "could fix — do not adapt the code so that the wrong command passes. Stop, "
+        "and say in your last message which gate looks wrong and why. A human will "
+        "fix the task file."
+    )
 
     task = read_json(tdir / "task.json", {}) or {}
     (tdir / "prompt.md").write_text(
         build_prompt(task, job_id, extra, root=root), encoding="utf-8"
     )
+    detail = "redelegated after attempt %d" % attempt
+    if reread_note:
+        detail += "; " + reread_note
     _set_status(jdir, task_id, state="queued", attempt=attempt + 1, created_at=_now(),
-                detail="redelegated after attempt %d" % attempt)
+                detail=detail)
 
     backend = workers.resolve(root, (job.get("backend") or {}).get("name"))
     timeout_s = float(job.get("task_timeout_s", 900) or 900)
-    return execute_task(root, jdir, job_id, task, backend, timeout_s)
+    final = execute_task(root, jdir, job_id, task, backend, timeout_s)
+    if reread_note:
+        final = _set_status(jdir, task_id,
+                            detail="%s; %s" % (final.get("detail", ""), reread_note))
+    return final
 
 
 class RetryBudgetExceeded(Exception):
@@ -860,11 +1297,12 @@ def clean(root, all_jobs: bool = False) -> list:
 def _usage() -> str:
     return (
         "usage: python3 -m gatekit jobs <command>\n"
-        "  start [--tasks id,id] [--backend name] [--parallel N] [--dry-run]\n"
+        "  start [--tasks id,id] [--backend name] [--parallel N] [--dry-run] [--no-preflight]\n"
         "  status [--job ID] [--json]\n"
         "  wait [--job ID] [--timeout S]\n"
         "  results [--job ID] [--compact|--json]\n"
         "  redelegate <task_id> [--job ID]\n"
+        "  stop [--job ID]\n"
         "  evaluate [--backend name] [--prompt FILE] [--lang ko|en] [--json]\n"
         "  clean [--all]\n"
     )
@@ -910,13 +1348,24 @@ def run(argv: list) -> int:
                 backend_name=_opt(rest, "--backend"),
                 parallel=_opt(rest, "--parallel"),
                 dry_run="--dry-run" in rest,
+                no_preflight="--no-preflight" in rest,
             )
             payload = status(root, job["job_id"])
             if "--json" in rest:
                 print(json.dumps(payload, indent=2))
             else:
                 _print_table(payload)
+                for line in payload.get("preflight_warnings") or []:
+                    print("  warn: %s" % line)
             return 0 if payload["verdict"] != verdict.FAIL else 1
+
+        if cmd == "stop":
+            result = stop(root, job_id)
+            print("job %s stopped — %d task(s) marked stopped, %d worker(s) signalled%s" % (
+                result["job_id"], len(result["stopped"]), len(result["signalled"]),
+                (", %d pid(s) skipped (not this job's process)" % len(result["skipped"]))
+                if result["skipped"] else ""))
+            return 0
 
         if cmd in ("status", "results"):
             payload = status(root, job_id)
@@ -971,6 +1420,9 @@ def run(argv: list) -> int:
     except RetryBudgetExceeded as exc:
         print("jobs: %s" % exc, file=sys.stderr)
         return 3
+    except GatePreflightError as exc:
+        print("jobs: %s" % exc, file=sys.stderr)
+        return 4
     except ValueError as exc:
         print("jobs: %s" % exc, file=sys.stderr)
         return 2

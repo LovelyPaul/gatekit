@@ -59,7 +59,11 @@ Requirements:
 
 Every criterion must be **runnable in this repository right now**. Run each one
 before writing it in. A criterion you have not executed is a guess, and the
-Stop hook will execute it for real.
+Stop hook will execute it for real. Read the run's output, not only its
+exit code: `node --test <directory>` and `gates/tokens.py <directory>` both
+"run" and both are wrong — the first loads the directory as a module
+(`Cannot find module`), the second scans zero files and exits 3. Use glob
+patterns (`tests/rules/*.test.js`, `src/**`).
 
 ## Step 3 — write the "not counted as done" section
 

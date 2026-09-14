@@ -4,6 +4,35 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.6.0 — 2026-09-14
+
+### Added
+
+- Gate preflight (ADR-0009): `jobs start` runs every task's gates once
+  before spawning a worker. Gates that already pass record the task
+  `passed` with no worker (and a `warn` when nothing exists in the write
+  scope yet); a gate whose command itself errors refuses the job with exit 4
+  and names the task and gate; `--no-preflight` opts out.
+- `jobs stop [--job ID]`: ends this job's own workers (pid plus spawn-time
+  check, so a recycled pid is never signalled), marks running and queued
+  tasks `stopped`, records `stopped_at`.
+- Dependency gating: a task whose in-job `depends_on` did not pass is left
+  `blocked` instead of run. `stopped` and `blocked` are terminal, not done.
+
+### Changed
+
+- `jobs redelegate` re-reads the task from `spec/04-tasks.md` and says so in
+  the status line when the gates, instruction or write scope changed; a task
+  removed from the file is refused. The redelegate prompt tells the worker a
+  gate command that looks wrong is to be reported, not coded around.
+- `tasks.md`, `gate.md`, `build.md`: glob-pattern notes for `node --test` and
+  `gates/tokens.py`, the preflight outcomes, `stop`, and `blocked`.
+
+### Fixed
+
+- A dependent task no longer starts in the same second its dependency is
+  recorded `failed` (seen in the Tetris trial, `docs/retros/`).
+
 ## 0.5.0 — 2026-09-13
 
 ### Added

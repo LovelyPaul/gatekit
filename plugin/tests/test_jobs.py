@@ -545,7 +545,9 @@ class TestWorkerEnvIsolation(JobTestCase):
         cfg = json.loads((self.root / ".gatekit" / "config.json").read_text(encoding="utf-8"))
         cfg["worker"]["backends"]["fake"]["argv"] = [sys.executable, str(probe)]
         (self.root / ".gatekit" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
-        job = jobs.start(self.root)
+        # src/note.txt exists from the first run, so preflight would pass the
+        # gate and spawn nothing; the probe must actually run here (ADR-0009).
+        job = jobs.start(self.root, no_preflight=True)
         status = json.loads((self.task_dir(job["job_id"], "write-note") / "status.json").read_text(encoding="utf-8"))
         self.assertEqual(status["exit"], 0)
 
@@ -802,3 +804,472 @@ class TestGateExitThree(JobTestCase):
         result = jobs.run_gates(self.root, {"gates": [self.gate_exiting(3)]})
         self.assertEqual(result["passed"], 0)
         self.assertEqual(result["total"], 1)
+
+
+# ------------------------------------------------------------ ADR-0009: preflight
+
+
+FAIL_GATE = [sys.executable, "-c", "import sys; sys.exit(1)"]
+PASS_GATE = [sys.executable, "-c", "print('always ok')"]
+
+
+class TestPreflight(JobTestCase):
+    def test_gate_already_passing_skips_the_worker(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        (self.root / "src" / "note.txt").write_text("already there", encoding="utf-8")
+        self.set_env(FAKE_WORKER_OUT="src/note.txt", FAKE_WORKER_BODY="overwritten")
+        job = jobs.start(self.root)
+        tdir = self.task_dir(job["job_id"], "write-note")
+        status = json.loads((tdir / "status.json").read_text())
+        self.assertEqual(status["state"], "passed")
+        self.assertIn("preflight", status["detail"])
+        self.assertFalse((tdir / "output.txt").exists(), "no worker should have run")
+        self.assertEqual((self.root / "src" / "note.txt").read_text(), "already there")
+        self.assertTrue((tdir / "preflight.json").is_file())
+
+    def test_command_error_gate_refuses_to_start(self) -> None:
+        self.write_config()
+        broken = self.simple_task(gates=[{"name": "broken",
+                                          "argv": [sys.executable, "no-such-dir/"]}])
+        self.write_tasks(broken)
+        self.set_env(FAKE_WORKER_OUT="src/note.txt")
+        with self.assertRaises(jobs.GatePreflightError) as ctx:
+            jobs.start(self.root)
+        self.assertIn("broken", str(ctx.exception))
+        self.assertIn("write-note", str(ctx.exception))
+        self.assertFalse((self.root / "src" / "note.txt").exists())
+
+    def test_command_error_cli_exits_nonzero_and_names_the_gate(self) -> None:
+        import contextlib
+        import io
+
+        self.write_config()
+        self.write_tasks(self.simple_task(gates=[{"name": "broken",
+                                                  "argv": [sys.executable, "no-such-dir/"]}]))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code = jobs.run(["start", "--root", str(self.root)])
+        self.assertEqual(code, 4, "GatePreflightError has its own documented exit code")
+        self.assertIn("broken", err.getvalue())
+
+    def test_unverified_gate_at_preflight_is_expected_and_spawns_the_worker(self) -> None:
+        self.write_config()
+        cannot_judge = [sys.executable, "-c", "import sys; sys.exit(3)"]
+        self.write_tasks(self.simple_task(gates=[{"name": "judge", "argv": cannot_judge}]))
+        self.set_env(FAKE_WORKER_OUT="src/note.txt")
+        job = jobs.start(self.root)
+        tdir = self.task_dir(job["job_id"], "write-note")
+        pre = json.loads((tdir / "preflight.json").read_text())
+        self.assertEqual(pre["verdict"], verdict.UNVERIFIED)
+        self.assertEqual(job["preflight_warnings"], [])
+        self.assertTrue((tdir / "output.txt").is_file())
+
+    def test_expected_failure_still_spawns_the_worker(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        self.set_env(FAKE_WORKER_OUT="src/note.txt", FAKE_WORKER_BODY="hello")
+        job = jobs.start(self.root)
+        tdir = self.task_dir(job["job_id"], "write-note")
+        pre = json.loads((tdir / "preflight.json").read_text())
+        self.assertEqual(pre["verdict"], verdict.FAIL)
+        status = json.loads((tdir / "status.json").read_text())
+        self.assertEqual(status["state"], "passed")
+        self.assertTrue((tdir / "output.txt").is_file())
+
+    def test_gate_passing_before_any_work_is_warned(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task(gates=[{"name": "always", "argv": PASS_GATE}]))
+        job = jobs.start(self.root)
+        status = json.loads(
+            (self.task_dir(job["job_id"], "write-note") / "status.json").read_text())
+        self.assertEqual(status["state"], "passed")
+        self.assertIn("warn", status["detail"])
+        self.assertIn("before any work", status["detail"])
+        self.assertTrue(job.get("preflight_warnings"))
+
+    def test_no_preflight_flag_skips_the_step(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        (self.root / "src" / "note.txt").write_text("already there", encoding="utf-8")
+        self.set_env(FAKE_WORKER_OUT="src/note.txt", FAKE_WORKER_BODY="overwritten")
+        job = jobs.start(self.root, no_preflight=True)
+        tdir = self.task_dir(job["job_id"], "write-note")
+        self.assertFalse((tdir / "preflight.json").exists())
+        self.assertTrue((tdir / "output.txt").is_file())
+        saved = json.loads((self.root / ".gatekit" / "jobs" / job["job_id"] / "job.json").read_text())
+        self.assertTrue(saved["no_preflight"])
+
+    def test_suspicious_gate_starts_the_job_with_a_warning(self) -> None:
+        self.write_config()
+        suspicious = [sys.executable, "-c", "import sys; sys.stderr.write('usage: x\\n'); sys.exit(2)"]
+        self.write_tasks(self.simple_task(gates=[{"name": "odd", "argv": suspicious}]))
+        self.set_env(FAKE_WORKER_OUT="src/note.txt")
+        job = jobs.start(self.root)  # must not raise
+        self.assertTrue(any("odd" in w and "starting anyway" in w
+                            for w in job["preflight_warnings"]))
+        self.assertTrue((self.task_dir(job["job_id"], "write-note") / "output.txt").is_file())
+
+    def test_dry_run_does_not_preflight(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task(gates=[{"name": "broken",
+                                                  "argv": [sys.executable, "no-such-dir/"]}]))
+        job = jobs.start(self.root, dry_run=True)  # must not raise
+        self.assertFalse(
+            (self.task_dir(job["job_id"], "write-note") / "preflight.json").exists())
+
+
+class TestLooksLikeCommandError(unittest.TestCase):
+    NODE_ARGV = ["node", "--test", "tetris/tests/rules/"]
+    PY_ARGV = ["python3", "no-such-dir/"]
+
+    def _gate(self, exit_code, stdout="", stderr=""):
+        return {"name": "g", "verdict": verdict.FAIL, "exit": exit_code,
+                "stdout_tail": stdout, "stderr_tail": stderr}
+
+    def test_exit_one_with_plain_test_failure_is_expected(self) -> None:
+        self.assertEqual(jobs.classify_gate_result(self._gate(1, "1 test failed"), self.NODE_ARGV),
+                         "expected")
+
+    def test_missing_module_naming_an_argument_is_a_command_error(self) -> None:
+        gate = self._gate(1, "Error: Cannot find module '/x/tetris/tests/rules'")
+        self.assertTrue(jobs.looks_like_command_error(gate, self.NODE_ARGV))
+
+    def test_interpreter_cannot_open_the_argument_is_a_command_error(self) -> None:
+        gate = self._gate(2, "", "python3: can't open file '/x/no-such-dir/': [Errno 2] No such file or directory")
+        self.assertTrue(jobs.looks_like_command_error(gate, self.PY_ARGV))
+
+    def test_missing_fixture_inside_test_output_is_not_a_command_error(self) -> None:
+        # A real failing test that mentions some other missing file: the
+        # message names nothing from argv, so the job must still start.
+        gate = self._gate(1, "FAIL: open('fixtures/data.json'): No such file or directory")
+        self.assertFalse(jobs.looks_like_command_error(gate, self.NODE_ARGV))
+        self.assertEqual(jobs.classify_gate_result(gate, self.NODE_ARGV), "suspicious")
+
+    def test_exit_two_alone_is_suspicious_not_refused(self) -> None:
+        gate = self._gate(2, "", "2 errors during collection")
+        self.assertFalse(jobs.looks_like_command_error(gate, ["pytest", "tests/"]))
+        self.assertEqual(jobs.classify_gate_result(gate, ["pytest", "tests/"]), "suspicious")
+
+    def test_usage_banner_is_suspicious_not_refused(self) -> None:
+        gate = self._gate(2, "", "usage: foo [-h]")
+        self.assertEqual(jobs.classify_gate_result(gate, ["foo"]), "suspicious")
+
+    def test_usage_inside_test_output_is_expected(self) -> None:
+        gate = self._gate(1, "captured stdout:\nusage: app [--flag]\n1 failed")
+        self.assertEqual(jobs.classify_gate_result(gate, self.NODE_ARGV), "expected")
+
+    def test_shell_not_found_exit_codes_are_command_errors(self) -> None:
+        for code in (126, 127):
+            self.assertTrue(jobs.looks_like_command_error(self._gate(code), ["nope"]))
+
+    def test_command_not_found_naming_the_program_is_a_command_error(self) -> None:
+        gate = self._gate(1, "", "sh: npx: command not found")
+        self.assertTrue(jobs.looks_like_command_error(gate, ["npx", "tsc"]))
+
+    def test_ok_and_unverified_are_never_command_errors(self) -> None:
+        for v in (verdict.OK, verdict.UNVERIFIED):
+            gate = {"name": "g", "verdict": v, "exit": 127, "stdout_tail": "", "stderr_tail": ""}
+            self.assertFalse(jobs.looks_like_command_error(gate, ["nope"]))
+            self.assertEqual(jobs.classify_gate_result(gate, ["nope"]), "expected")
+
+    def test_malformed_gate_dict_is_not_a_command_error(self) -> None:
+        self.assertFalse(jobs.looks_like_command_error({}))
+        self.assertFalse(jobs.looks_like_command_error({"verdict": verdict.FAIL, "exit": None}))
+
+    def test_missing_argv_still_classifies_by_exit_code(self) -> None:
+        self.assertTrue(jobs.looks_like_command_error(self._gate(127), argv=None))
+        self.assertEqual(jobs.classify_gate_result(self._gate(1, "Cannot find module 'x'"), None),
+                         "suspicious")
+
+
+# ------------------------------------------------------------ ADR-0009: re-read
+
+
+class TestRedelegateReread(JobTestCase):
+    def test_redelegate_picks_up_a_corrected_gate(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task(gates=[{"name": "wrong", "argv": FAIL_GATE}]))
+        self.set_env(FAKE_WORKER_OUT="src/note.txt")
+        job = jobs.start(self.root)
+        tdir = self.task_dir(job["job_id"], "write-note")
+        self.assertEqual(json.loads((tdir / "status.json").read_text())["state"], "failed")
+        # The operator fixes the gate in spec/04-tasks.md; the job must see it.
+        self.write_tasks(self.simple_task())
+        status = jobs.redelegate(self.root, "write-note", job["job_id"])
+        self.assertEqual(status["state"], "passed")
+        snapshot = json.loads((tdir / "task.json").read_text())
+        self.assertEqual(snapshot["gates"][0]["name"], "file-exists")
+        self.assertIn("re-read", status["detail"])
+        self.assertIn("gates changed", status["detail"])
+
+    def test_unchanged_task_is_not_reported_as_re_read(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        counter = str(self.root / "attempts.txt")
+        self.set_env(FAKE_WORKER_OUT="src/note.txt", FAKE_WORKER_ATTEMPT_FILE=counter,
+                     FAKE_WORKER_PASS_AT=2)
+        job = jobs.start(self.root)
+        status = jobs.redelegate(self.root, "write-note", job["job_id"])
+        self.assertEqual(status["state"], "passed")
+        self.assertNotIn("re-read", status.get("detail", ""))
+
+    def test_redelegate_refuses_when_task_left_the_file(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root)  # fails: worker writes nothing
+        self.write_tasks(self.simple_task(task_id="other", target="src/other.txt"))
+        with self.assertRaises(ValueError) as ctx:
+            jobs.redelegate(self.root, "write-note", job["job_id"])
+        self.assertIn("04-tasks.md", str(ctx.exception))
+
+    def test_redelegate_prompt_says_the_gate_may_be_wrong(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root)
+        jobs.redelegate(self.root, "write-note", job["job_id"])
+        prompt = (self.task_dir(job["job_id"], "write-note") / "prompt.md").read_text()
+        self.assertIn("gate command itself looks wrong", prompt)
+        self.assertIn("do not adapt the code", prompt)
+
+
+# ---------------------------------------------------------------- ADR-0009: stop
+
+
+class TestStop(JobTestCase):
+    def _start_in_thread(self, **kw):
+        import threading
+
+        holder = {}
+
+        def runner():
+            try:
+                holder["job"] = jobs.start(self.root, **kw)
+            except BaseException as exc:  # surfaced by the test
+                holder["error"] = exc
+
+        thread = threading.Thread(target=runner)
+        thread.start()
+        return thread, holder
+
+    def _wait_for_state(self, job_id_getter, task_id, state, timeout=10.0):
+        import time as _time
+
+        deadline = _time.time() + timeout
+        while _time.time() < deadline:
+            job_id = job_id_getter()
+            if job_id:
+                st = jobs.read_json(self.task_dir(job_id, task_id) / "status.json", {}) or {}
+                if st.get("state") == state:
+                    return st
+            _time.sleep(0.05)
+        self.fail("task %s never reached %s" % (task_id, state))
+
+    def test_stop_ends_the_running_worker_and_marks_queued_tasks_stopped(self) -> None:
+        self.write_config()
+        first = self.simple_task()
+        second = self.simple_task(task_id="second", target="src/second.txt", round=2)
+        self.write_tasks(first, second)
+        self.set_env(FAKE_WORKER_OUT="src/note.txt", FAKE_WORKER_SLEEP=30)
+        thread, holder = self._start_in_thread()
+        latest = lambda: jobs.latest_job_id(self.root)  # noqa: E731
+        running = self._wait_for_state(latest, "write-note", "running")
+        self.assertIsInstance(running.get("pid"), int)
+        job_id = latest()
+        result = jobs.stop(self.root, job_id)
+        thread.join(timeout=15)
+        self.assertFalse(thread.is_alive())
+        self.assertNotIn("error", holder)
+        self.assertIn("write-note", result["stopped"])
+        st1 = json.loads((self.task_dir(job_id, "write-note") / "status.json").read_text())
+        st2 = json.loads((self.task_dir(job_id, "second") / "status.json").read_text())
+        self.assertEqual(st1["state"], "stopped")
+        self.assertEqual(st2["state"], "stopped")
+        self.assertFalse((self.task_dir(job_id, "second") / "output.txt").exists())
+        saved = json.loads((self.root / ".gatekit" / "jobs" / job_id / "job.json").read_text())
+        self.assertIn("stopped_at", saved)
+
+    def test_stop_never_signals_a_pid_it_did_not_start(self) -> None:
+        import subprocess
+
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root, dry_run=True)
+        jdir = self.root / ".gatekit" / "jobs" / job["job_id"]
+        # A sacrificial process that is NOT this job's worker: forge a status
+        # naming its pid with a spawn time no live process of its age can match.
+        victim = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        self.addCleanup(lambda: (victim.kill(), victim.wait()))
+        jobs._set_status(jdir, "write-note", state="running", pid=victim.pid,
+                         pid_started_at=100.0)
+        result = jobs.stop(self.root, job["job_id"])
+        self.assertNotIn("write-note", result["signalled"])
+        self.assertIn("write-note", result["skipped"])
+        self.assertIn("write-note", result["stopped"])  # state still becomes stopped
+        self.assertIsNone(victim.poll(), "the foreign process must still be alive")
+
+    def test_stop_does_not_signal_a_task_already_gating(self) -> None:
+        import subprocess
+
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root, dry_run=True)
+        jdir = self.root / ".gatekit" / "jobs" / job["job_id"]
+        victim = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        self.addCleanup(lambda: (victim.kill(), victim.wait()))
+        # Even with a plausible spawn time, a task in `gating` has reaped its
+        # worker; the recorded pid is nobody's to signal.
+        import time as _time
+        jobs._set_status(jdir, "write-note", state="gating", pid=victim.pid,
+                         pid_started_at=_time.time())
+        result = jobs.stop(self.root, job["job_id"])
+        self.assertNotIn("write-note", result["signalled"])
+        self.assertIsNone(victim.poll())
+
+    def test_terminate_escalates_to_sigkill_when_sigterm_is_ignored(self) -> None:
+        import subprocess
+        import time as _time
+
+        stubborn = subprocess.Popen([sys.executable, "-c",
+                                     "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+                                     "print('armed', flush=True); time.sleep(30)"],
+                                    stdout=subprocess.PIPE)
+        self.addCleanup(lambda: (stubborn.kill(), stubborn.wait()))
+        stubborn.stdout.readline()  # wait until the handler is installed
+        started = _time.time()
+        self.assertTrue(jobs._terminate_pid(stubborn.pid, grace_s=0.3))
+        stubborn.wait(timeout=5)
+        self.assertLess(_time.time() - started, 5.0)
+        self.assertNotEqual(stubborn.returncode, 0)
+
+    def test_stopped_counts_as_not_done_and_fail(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root, dry_run=True)
+        jobs.stop(self.root, job["job_id"])
+        payload = jobs.status(self.root, job["job_id"])
+        self.assertEqual(payload["verdict"], verdict.FAIL)
+        self.assertTrue(payload["done"])
+        self.assertEqual(payload["tasks"][0]["state"], "stopped")
+
+    def test_stop_without_a_job_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            jobs.stop(self.root, None)
+
+    def test_stop_lists_a_dead_pid_as_skipped(self) -> None:
+        import subprocess
+        import time as _time
+
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root, dry_run=True)
+        jdir = self.root / ".gatekit" / "jobs" / job["job_id"]
+        gone = subprocess.Popen([sys.executable, "-c", "pass"])
+        gone.wait()
+        jobs._set_status(jdir, "write-note", state="running", pid=gone.pid,
+                         pid_started_at=_time.time())
+        result = jobs.stop(self.root, job["job_id"])
+        self.assertIn("write-note", result["skipped"])
+        self.assertNotIn("write-note", result["signalled"])
+
+    def test_stop_survives_a_malformed_status_file(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root, dry_run=True)
+        tdir = self.task_dir(job["job_id"], "write-note")
+        (tdir / "status.json").write_text("{not json", encoding="utf-8")
+        result = jobs.stop(self.root, job["job_id"])  # must not raise
+        self.assertIn("write-note", result["stopped"])
+
+    def test_parse_etime_handles_every_ps_shape(self) -> None:
+        self.assertEqual(jobs._parse_etime("03:04"), 184.0)
+        self.assertEqual(jobs._parse_etime("02:03:04"), 7384.0)
+        self.assertEqual(jobs._parse_etime("1-02:03:04"), 93784.0)
+        self.assertEqual(jobs._parse_etime("   00:07 \n"), 7.0)
+        for odd in ("", "x", "1:2:3:4", "a-01:00", "1:xx"):
+            self.assertIsNone(jobs._parse_etime(odd), odd)
+
+
+# ------------------------------------------------- ADR-0009: dependency gating
+
+
+class TestDependencyGating(JobTestCase):
+    def test_dependent_task_is_blocked_when_its_dependency_fails(self) -> None:
+        self.write_config()
+        first = self.simple_task(gates=[{"name": "never", "argv": FAIL_GATE}])
+        second = self.simple_task(task_id="second", target="src/second.txt",
+                                  depends_on=["write-note"], round=2)
+        self.write_tasks(first, second)
+        self.set_env(FAKE_WORKER_OUT="src/second.txt")
+        job = jobs.start(self.root)
+        st1 = json.loads((self.task_dir(job["job_id"], "write-note") / "status.json").read_text())
+        st2 = json.loads((self.task_dir(job["job_id"], "second") / "status.json").read_text())
+        self.assertEqual(st1["state"], "failed")
+        self.assertEqual(st2["state"], "blocked")
+        self.assertIn("write-note", st2["detail"])
+        self.assertFalse((self.task_dir(job["job_id"], "second") / "output.txt").exists())
+        payload = jobs.status(self.root, job["job_id"])
+        self.assertEqual(payload["verdict"], verdict.FAIL)
+        self.assertTrue(payload["done"])
+
+    def test_blocked_alone_makes_the_job_unverified_not_fail(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task(), self.simple_task(task_id="second", target="src/s.txt"))
+        job = jobs.start(self.root, dry_run=True)
+        jdir = self.root / ".gatekit" / "jobs" / job["job_id"]
+        jobs._set_status(jdir, "write-note", state="passed")
+        jobs._set_status(jdir, "second", state="blocked",
+                         detail="dependency x ended before this task could run")
+        payload = jobs.status(self.root, job["job_id"])
+        self.assertEqual(payload["verdict"], verdict.UNVERIFIED)
+        self.assertTrue(payload["done"])
+
+    def test_blocked_detail_names_an_unverified_dependency_as_such(self) -> None:
+        self.write_config()
+        unverified_gate = [sys.executable, "-c", "import sys; sys.exit(3)"]
+        first = self.simple_task(gates=[{"name": "cannot-judge", "argv": unverified_gate}])
+        second = self.simple_task(task_id="second", target="src/second.txt",
+                                  depends_on=["write-note"], round=2)
+        self.write_tasks(first, second)
+        self.set_env(FAKE_WORKER_OUT="src/second.txt")
+        job = jobs.start(self.root)
+        st2 = json.loads((self.task_dir(job["job_id"], "second") / "status.json").read_text())
+        self.assertEqual(st2["state"], "blocked")
+        self.assertIn("gates unverified", st2["detail"])
+
+    def test_cascade_names_the_dependency_final_state(self) -> None:
+        self.write_config()
+        a = self.simple_task(task_id="a", target="src/a.txt",
+                             gates=[{"name": "never", "argv": FAIL_GATE}])
+        b = self.simple_task(task_id="b", target="src/b.txt", depends_on=["a"], round=2)
+        c = self.simple_task(task_id="c", target="src/c.txt", depends_on=["b"], round=3)
+        self.write_tasks(a, b, c)
+        job = jobs.start(self.root)
+        st_b = json.loads((self.task_dir(job["job_id"], "b") / "status.json").read_text())
+        st_c = json.loads((self.task_dir(job["job_id"], "c") / "status.json").read_text())
+        self.assertEqual(st_b["state"], "blocked")
+        self.assertIn("a (failed)", st_b["detail"])
+        self.assertEqual(st_c["state"], "blocked")
+        self.assertIn("b (blocked)", st_c["detail"], "c must name b's final state, not queued")
+
+    def test_dependent_task_runs_when_its_dependency_passes(self) -> None:
+        self.write_config()
+        first = self.simple_task()
+        second = self.simple_task(task_id="second", target="src/note.txt",
+                                  depends_on=["write-note"], round=2)
+        self.write_tasks(first, second)
+        self.set_env(FAKE_WORKER_OUT="src/note.txt")
+        job = jobs.start(self.root)
+        st2 = json.loads((self.task_dir(job["job_id"], "second") / "status.json").read_text())
+        self.assertEqual(st2["state"], "passed")
+
+    def test_dependency_outside_the_job_does_not_block(self) -> None:
+        self.write_config()
+        first = self.simple_task()
+        second = self.simple_task(task_id="second", target="src/second.txt",
+                                  depends_on=["write-note"], round=2)
+        self.write_tasks(first, second)
+        self.set_env(FAKE_WORKER_OUT="src/second.txt")
+        job = jobs.start(self.root, task_ids=["second"])
+        st2 = json.loads((self.task_dir(job["job_id"], "second") / "status.json").read_text())
+        self.assertEqual(st2["state"], "passed")

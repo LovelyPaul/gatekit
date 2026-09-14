@@ -67,7 +67,13 @@ Add `--tasks <ids>` when `$ARGUMENTS` named specific tasks, `--backend <name>`
 when the user asked for one. Read `max_retries` and `parallel` from
 `.gatekit/config.json`; do not pass `--parallel` unless the user asked.
 
-The command prints one row per task. Record the job id.
+The command prints one row per task. Record the job id. It first runs every
+task's gates once, before any worker (ADR-0009): gates that already pass
+record the task `passed` with no worker (a `warn: gate passed before any
+work existed` detail means that gate can pass on an empty tree — tell the
+user); a gate whose *command* errors ends the start with exit 4 and names the
+task and gate — fix it in `spec/04-tasks.md` (usually a glob instead of a
+directory) and start again, never `--no-preflight` to get past it.
 
 ## Step 3 — poll
 
@@ -85,7 +91,12 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs results --compact
 which prints `id state gates_passed/total`, one line per task. Read a task's
 `gates.json` only when you need the specific failing gate's name.
 
-Terminal states are `passed`, `failed`, `timeout` and `redelegated`.
+Terminal states are `passed`, `failed`, `timeout`, `redelegated`, `stopped`
+and `blocked`. A `blocked` task never ran because an in-job dependency did
+not pass: do not redelegate it; fix the dependency, then
+`jobs start --tasks <id>`. To end a job early (a gate turned out wrong), run
+`python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs stop` — it ends this
+job's own workers only. Never kill worker processes by name.
 
 ## Step 4 — redelegate failures
 
@@ -98,6 +109,13 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs redelegate <task_id>
 This archives the attempt under `attempt-N/`, appends the failed gate's output
 to the prompt and re-runs. Exit code 3 means the task is out of retries
 (`build.max_retries`); do not retry past it.
+
+Before redelegating, read the failing gate's output tail in `gates.json`. If
+the gate command itself is wrong (it names a path the task was never asked to
+create, or fails the same way regardless of the code), fix `spec/04-tasks.md`
+first; `redelegate` re-reads the task from it and says `task re-read …
+(gates changed)`. A wrong gate handed back with "fix the cause" teaches the
+worker to make the wrong command pass.
 
 Count consecutive failures per task. **On the third failure of the same task,
 stop redelegating** and switch to diagnosis mode:
