@@ -183,6 +183,8 @@ defaults.
 - `docs/QUICKSTART.md` — the short path from install to a first run.
 - `docs/ARCHITECTURE.md` — the binding contract every module must satisfy.
 - `docs/decisions/` — the architectural decision records.
+- `docs/retros/` — retrospectives from real trial builds (Korean); each
+  lists the tool defects and friction found, with evidence paths.
 
 ## Status
 
