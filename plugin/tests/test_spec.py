@@ -987,3 +987,108 @@ class TestPreviewNotEvidence(unittest.TestCase):
         text = self.screens.read_text(encoding="utf-8")
         text += "\n| S9 | Extra | F1 | ./spec/design/preview-demo.html |\n"
         self.assertTrue(self.findings_for(text))
+
+
+# ------------------- ADR-0013 decision 5: a verification task is not a task
+
+
+class TestVerificationShapedTask(unittest.TestCase):
+    """`e2e-full-flow` on gk-trial2 was task 9 of 9, gated on the whole system.
+    It failed five times and passed on the seventh, once everything else
+    existed — and the same command was already a criterion in 05-gate.md."""
+
+    def setUp(self):
+        import shutil, tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self._tmp.name) / "case"
+        shutil.copytree(FIXTURES / "valid-en", self.root)
+        self.tasks = self.root / "spec" / "04-tasks.md"
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def fence(self, **task) -> str:
+        return "```gatekit-task\n%s\n```\n" % json.dumps(task)
+
+    def findings_for(self, *tasks) -> list:
+        body = "# Tasks\n\n" + "".join(self.fence(**t) for t in tasks)
+        self.tasks.write_text(body, encoding="utf-8")
+        report = spec.validate(self.root)
+        return [f for f in report["findings"]
+                if f["file"] == "04-tasks.md" and "05-gate" in f["message"]]
+
+    def base(self, **kw) -> dict:
+        task = {"id": "t", "title": "t", "instruction": "do it",
+                "write_scope": ["src/**"], "depends_on": [],
+                "gates": [{"name": "g", "argv": ["true"]}], "round": 1}
+        task.update(kw)
+        return task
+
+    def test_test_only_scope_with_two_dependencies_warns(self) -> None:
+        found = self.findings_for(
+            self.base(id="a"), self.base(id="b"),
+            self.base(id="e2e", write_scope=["e2e/**", "tests/seed/**"],
+                      depends_on=["a", "b"], round=2))
+        self.assertTrue(found)
+        self.assertEqual(found[0]["verdict"], "warn")
+        self.assertIn("e2e", found[0]["message"])
+
+    def test_one_dependency_does_not_warn(self) -> None:
+        self.assertEqual(self.findings_for(
+            self.base(id="a"),
+            self.base(id="suite", write_scope=["tests/**"], depends_on=["a"], round=2)), [])
+
+    def test_a_source_path_in_scope_never_warns(self) -> None:
+        self.assertEqual(self.findings_for(
+            self.base(id="a"), self.base(id="b"),
+            self.base(id="feat", write_scope=["src/feat.ts", "tests/feat/**"],
+                      depends_on=["a", "b"], round=2)), [])
+
+    def test_read_only_scope_does_not_warn(self) -> None:
+        self.assertEqual(self.findings_for(
+            self.base(id="a"), self.base(id="b"),
+            self.base(id="audit", write_scope="read-only",
+                      depends_on=["a", "b"], round=2)), [])
+
+    def test_the_warning_is_never_a_fail(self) -> None:
+        """The signature is suggestive, not certain — a legitimate test-only
+        task exists (adding a missing regression suite), so this must not be
+        able to fail a spec on its own."""
+        found = self.findings_for(
+            self.base(id="a"), self.base(id="b", write_scope=["lib/**"]),
+            self.base(id="e2e", write_scope=["e2e/**"], depends_on=["a", "b"], round=2))
+        self.assertTrue(found)
+        self.assertEqual([f["verdict"] for f in found], ["warn"])
+
+    def test_every_test_directory_shape_counts(self) -> None:
+        for scope in (["e2e/**"], ["tests/**"], ["spec/cases/**"],
+                      ["src/__tests__/**"], ["playwright.config.ts", "e2e/**"]):
+            self.assertTrue(
+                self.findings_for(
+                    self.base(id="a"), self.base(id="b"),
+                    self.base(id="v", write_scope=scope, depends_on=["a", "b"], round=2)),
+                msg="expected a warning for %r" % (scope,))
+
+    def test_a_chain_end_is_caught_even_with_one_direct_dependency(self) -> None:
+        """The real `e2e-full-flow` declared one dependency and waited on eight.
+
+        Counting direct dependencies missed it entirely; transitive reach is
+        what "passes only once several tasks are done" actually means.
+        """
+        found = self.findings_for(
+            self.base(id="a"),
+            self.base(id="b", write_scope=["lib/**"], depends_on=["a"], round=2),
+            self.base(id="c", write_scope=["ui/**"], depends_on=["b"], round=3),
+            self.base(id="e2e", write_scope=["e2e/**"], depends_on=["c"], round=4))
+        self.assertTrue(found)
+        self.assertIn("3", found[0]["message"])
+
+    def test_a_test_task_behind_a_single_task_still_does_not_warn(self) -> None:
+        self.assertEqual(self.findings_for(
+            self.base(id="a"),
+            self.base(id="suite", write_scope=["tests/**"], depends_on=["a"], round=2)), [])
+
+    def test_a_dependency_cycle_does_not_hang(self) -> None:
+        self.findings_for(
+            self.base(id="x", write_scope=["e2e/**"], depends_on=["y"]),
+            self.base(id="y", write_scope=["lib/**"], depends_on=["x"]))

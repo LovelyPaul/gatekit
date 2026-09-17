@@ -157,6 +157,7 @@ MESSAGES = {
         "tokens_value": "{group}.{name} 의 값은 문자열이거나 객체여야 합니다.",
         "fence_malformed": "{line}번째 줄의 ```{name} 블록 JSON이 잘못되었습니다: {err}",
         "task_no_fences": "```gatekit-task 블록이 하나도 없습니다.",
+        "task_is_verification": "작업 {id}은(는) 테스트 경로만 쓰면서 작업 {n}개에 의존합니다. 여러 작업이 끝나야 통과하는 검사는 작업이 아니라 spec/05-gate.md의 완료 기준입니다 — 작업으로 두면 마지막 하나가 끝날 때까지 매번 실패합니다 (ADR-0013).",
         "task_missing_id": "{line}번째 줄 작업 블록에 id가 없습니다.",
         "task_duplicate_id": "작업 id가 중복됩니다: {id}",
         "task_scope_empty": "작업 {id}의 write_scope가 비어 있습니다. 글롭 목록이거나 \"read-only\"여야 합니다.",
@@ -208,6 +209,7 @@ MESSAGES = {
         "tokens_value": "{group}.{name} must be a string or an object.",
         "fence_malformed": "Malformed JSON in the ```{name} block at line {line}: {err}",
         "task_no_fences": "No ```gatekit-task blocks found.",
+        "task_is_verification": "Task {id} writes only test paths and depends on {n} tasks. A check that passes only once several tasks are done is a completion criterion in spec/05-gate.md, not a task — left as a task it fails on every attempt until the last one lands (ADR-0013).",
         "task_missing_id": "The task block at line {line} has no id.",
         "task_duplicate_id": "Duplicate task id: {id}",
         "task_scope_empty": "Task {id} has an empty write_scope. Use a list of globs or \"read-only\".",
@@ -491,6 +493,60 @@ def _scope_globs(task: dict) -> List[str]:
     return []
 
 
+#: Directory names that mark a path as test material rather than product code.
+#: A task writing only these produces nothing a user touches, which — combined
+#: with depending on several tasks — is the signature of a verification step
+#: masquerading as a task (ADR-0013 decision 5).
+_TEST_DIR_SEGMENTS = ("tests", "test", "e2e", "spec", "__tests__", "cypress",
+                      "features", "integration")
+#: Config files that belong to a test runner, so a scope holding one plus test
+#: directories is still test-only.
+_TEST_CONFIG_STEMS = ("playwright.config", "vitest.config", "jest.config",
+                      "cypress.config", "karma.conf", "conftest")
+
+
+def _transitive_deps(task_id: str, by_id: Dict[str, dict]) -> set:
+    """Every task *task_id* depends on, directly or through another.
+
+    Direct count is the wrong measure: a check at the end of a chain names one
+    dependency and still needs everything behind it. `e2e-full-flow` on the
+    gk-trial2 run declared exactly one, and waited on all eight.
+    """
+    seen: set = set()
+    stack = [d for d in (by_id.get(task_id, {}).get("depends_on") or [])
+             if isinstance(d, str)]
+    while stack:
+        dep = stack.pop()
+        if dep in seen or dep == task_id or dep not in by_id:
+            continue
+        seen.add(dep)
+        stack.extend(d for d in (by_id[dep].get("depends_on") or [])
+                     if isinstance(d, str))
+    return seen
+
+
+def _writes_only_tests(task: dict) -> bool:
+    """True when every glob in the task's write scope is test material.
+
+    A `read-only` scope is not: it writes nothing at all, which is a different
+    thing (an investigation task) and must not be warned about.
+    """
+    globs = _scope_globs(task)
+    if not globs:
+        return False
+    for glob in globs:
+        parts = [p for p in glob.replace("\\", "/").split("/") if p and p != "."]
+        if not parts:
+            return False
+        stem = parts[-1].split(".")[0]
+        if any(p in _TEST_DIR_SEGMENTS for p in parts):
+            continue
+        if any(stem == s.split(".")[0] for s in _TEST_CONFIG_STEMS):
+            continue
+        return False
+    return True
+
+
 def _not_done_heading(lang: str) -> str:
     """Return the canonical 'not counted as done' heading for *lang* by name.
 
@@ -566,6 +622,17 @@ def _check_tasks(text: str, lang: str) -> List[dict]:
         gates = task.get("gates")
         if not isinstance(gates, list) or not gates:
             findings.append(_finding(name, V.FAIL, _msg(lang, "task_no_gate", id=tid)))
+        # ADR-0013 decision 5: a check that only passes once several other
+        # tasks are done belongs in 05-gate.md. As a task it fails on every
+        # attempt until the last dependency lands — `e2e-full-flow` failed five
+        # times that way, while the same command already sat in the gate file.
+        if _writes_only_tests(task):
+            reach = len(_transitive_deps(tid, {str(x.get("id")): x for _, x in tasks}))
+            if reach >= 2:
+                findings.append(
+                    _finding(name, V.WARN,
+                             _msg(lang, "task_is_verification", id=tid, n=reach))
+                )
 
     # same-round write_scope intersection
     by_round: Dict[Any, List[dict]] = {}
