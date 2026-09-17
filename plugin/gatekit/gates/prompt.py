@@ -149,7 +149,47 @@ def build_context(root, led: "ledger.Ledger") -> str:
     if contract_status != "unverified":
         parts.append(f"contract={contract_status}")
 
+    # ADR-0013 decision 1a: a build under host execution lives in this session,
+    # so a compaction can take the narrative with it. Name the live job and the
+    # next task; spec/PROGRESS.md holds the rest (written by the PreCompact
+    # hook). An unfinished job is the only one worth reporting.
+    build = _live_build(root)
+    if build:
+        parts.append(build)
+
     return " | ".join(parts)
+
+
+def _live_build(root) -> str:
+    """``build=<job> n/m passed, next: <task>`` for an unfinished job, else ""."""
+    try:
+        from gatekit import jobs
+
+        job_id = jobs.latest_job_id(root)
+        if not job_id:
+            return ""
+        jdir = jobs.job_dir(root, job_id)
+        job = jobs.read_json(jdir / "job.json", None)
+        if not isinstance(job, dict) or job.get("finished_at"):
+            return ""
+        task_ids = [str(t) for t in (job.get("tasks") or [])]
+        if not task_ids:
+            return ""
+        passed, next_task = 0, ""
+        for task_id in task_ids:
+            state = str((jobs.read_json(
+                jdir / "tasks" / task_id / "status.json", {}) or {}).get("state", "queued"))
+            if state == "passed":
+                passed += 1
+            elif not next_task:
+                next_task = task_id
+        line = "build=%s %d/%d passed" % (job_id, passed, len(task_ids))
+        if next_task:
+            line += ", next: %s" % next_task
+        return line
+    except Exception:
+        # The context line is a convenience; never let it break the hook.
+        return ""
 
 
 def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:

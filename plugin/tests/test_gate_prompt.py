@@ -363,3 +363,55 @@ class TestQuestionFlagsInContext(unittest.TestCase):
         text = self.context_with(unjustified=9, repeated=9, unrealized=9,
                                  implementation_choice=True)
         self.assertLessEqual(len(text), hookio.MAX_CONTEXT_CHARS)
+
+
+class TestBuildStateInContext(unittest.TestCase):
+    """ADR-0013 decision 1a: the session that comes back after a compaction is
+    told a build is live, so it reads PROGRESS.md instead of guessing."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(os.path.realpath(self._tmp.name))
+        (self.root / ".gatekit").mkdir()
+        self.led = ledger.Ledger.load(self.root, "sess-build")
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def make_job(self, states: dict, finished: bool = False) -> str:
+        from gatekit import jobs
+        job_id = jobs.new_job_id()
+        jdir = jobs.job_dir(self.root, job_id)
+        (jdir / "tasks").mkdir(parents=True)
+        job = {"version": 1, "job_id": job_id, "started_at": jobs._now(),
+               "execution": "host", "tasks": list(states), "backend": {"name": "claude"}}
+        if finished:
+            job["finished_at"] = jobs._now()
+        jobs.write_json(jdir / "job.json", job)
+        for task_id, state in states.items():
+            tdir = jdir / "tasks" / task_id
+            tdir.mkdir(parents=True)
+            jobs.write_json(tdir / "status.json", {"task_id": task_id, "state": state})
+        return job_id
+
+    def test_a_live_build_is_named(self) -> None:
+        self.make_job({"a": "passed", "b": "queued"})
+        text = prompt_gate.build_context(self.root, self.led)
+        self.assertIn("build=", text)
+        self.assertIn("1/2", text)
+
+    def test_the_next_task_is_named(self) -> None:
+        self.make_job({"a": "passed", "b": "queued"})
+        self.assertIn("next: b", prompt_gate.build_context(self.root, self.led))
+
+    def test_a_finished_build_is_not_reported(self) -> None:
+        self.make_job({"a": "passed"}, finished=True)
+        self.assertNotIn("build=", prompt_gate.build_context(self.root, self.led))
+
+    def test_no_job_means_no_field(self) -> None:
+        self.assertNotIn("build=", prompt_gate.build_context(self.root, self.led))
+
+    def test_the_block_stays_within_budget(self) -> None:
+        self.make_job({("task-with-a-long-name-%02d" % i): "queued" for i in range(30)})
+        text = prompt_gate.build_context(self.root, self.led)
+        self.assertLessEqual(len(text), hookio.MAX_CONTEXT_CHARS)
