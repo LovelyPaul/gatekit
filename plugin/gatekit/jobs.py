@@ -1173,6 +1173,56 @@ def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False,
     return _finalise_job(jdir, job)
 
 
+def recheck(root, task_ids=None, job_id: Optional[str] = None) -> dict:
+    """Re-run a task's gates against the working tree. No worker, no new job.
+
+    ADR-0013 decision 3. A gate names test files and commands that do not exist
+    until the work is done, so refining one mid-build is normal — on the
+    gk-trial2 run 28 of 35 worker spawns existed only because a gate moved
+    while the code was already correct. The right response to a moved gate is
+    to run it, which takes seconds; re-deriving the code takes minutes.
+
+    Gates are read from the **current** `spec/04-tasks.md`, not from the job's
+    snapshot, since the point is to pick up the edit. Verdicts are recorded
+    exactly as `execute_task` records them, `unverified` included — a gate that
+    could not judge still does not round to a pass.
+    """
+    job_id = job_id or latest_job_id(root)
+    if not job_id:
+        raise ValueError("no job to recheck under .gatekit/jobs/")
+    jdir = job_dir(root, job_id)
+    job = read_json(jdir / "job.json", None)
+    if not job:
+        raise ValueError("job %s has no job.json" % job_id)
+
+    current = {str(t.get("id")): t for t in load_tasks(root)}
+    wanted = list(task_ids) if task_ids else list(job.get("tasks") or [])
+    rechecked, missing = [], []
+    for task_id in wanted:
+        task = current.get(task_id)
+        if task is None:
+            # The task file no longer describes this task; say so rather than
+            # silently leaving a stale status behind.
+            missing.append(task_id)
+            continue
+        gates = run_gates(root, task)
+        write_json(_task_dir(jdir, task_id) / "gates.json", gates)
+        passed = gates["total"] > 0 and gates["verdict"] == verdict.OK
+        _set_status(
+            jdir,
+            task_id,
+            state="passed" if passed else "failed",
+            gates_verdict=gates["verdict"],
+            gates_passed=gates["passed"],
+            gates_total=gates["total"],
+            finished_at=_now(),
+            detail="recheck: %d/%d gates %s (no worker)"
+            % (gates["passed"], gates["total"], gates["verdict"]),
+        )
+        rechecked.append(task_id)
+    return {"job_id": job_id, "rechecked": rechecked, "missing": missing}
+
+
 def _merge_job_json(jdir, fields: dict, fallback: Optional[dict] = None) -> dict:
     """Re-read `job.json`, apply *fields*, write it back.
 
@@ -1497,6 +1547,9 @@ def _usage() -> str:
         "  status [--job ID] [--json]\n"
         "  wait [--job ID] [--timeout S]\n"
         "  results [--job ID] [--compact|--json]\n"
+        "  recheck [task_id ...] [--task a,b] [--job ID] [--json]\n"
+        "                         re-run gates from the current spec/04-tasks.md;\n"
+        "                         no worker, no new job (ADR-0013)\n"
         "  redelegate <task_id> [--job ID]\n"
         "  stop [--job ID]\n"
         "  evaluate [--backend name] [--prompt FILE] [--lang ko|en] [--json]\n"
@@ -1510,6 +1563,28 @@ def _opt(argv: list, flag: str):
         if i + 1 < len(argv):
             return argv[i + 1]
     return None
+
+
+def _positionals(argv: list) -> list:
+    """Bare arguments, with every ``--flag`` and the value that follows removed.
+
+    ``_opt`` reads an option's value without consuming it, so a naive
+    "everything not starting with --" scan picks up `--root`'s path as if it
+    were a task id.
+    """
+    out, skip = [], False
+    for arg in argv:
+        if skip:
+            skip = False
+            continue
+        if arg.startswith("--"):
+            # Value-taking flags are those `_opt` is asked for; the rest are
+            # bare switches whose next argument is a real positional.
+            skip = arg in ("--root", "--job", "--task", "--tasks", "--backend",
+                           "--parallel", "--timeout", "--prompt", "--lang")
+            continue
+        out.append(arg)
+    return out
 
 
 def _print_table(payload: dict) -> None:
@@ -1563,6 +1638,21 @@ def run(argv: list) -> int:
                 if result["skipped"] else ""))
             return 0
 
+        if cmd == "recheck":
+            names = _positionals(rest)
+            tasks_arg = _opt(rest, "--task")
+            if tasks_arg:
+                names = tasks_arg.split(",")
+            result = recheck(root, task_ids=names or None, job_id=job_id)
+            payload = status(root, result["job_id"])
+            if "--json" in rest:
+                print(json.dumps({**result, "verdict": payload["verdict"]}, indent=2))
+            else:
+                _print_table(payload)
+                if result["missing"]:
+                    print("  warn: not in spec/04-tasks.md: %s" % ", ".join(result["missing"]))
+            return 0 if payload["verdict"] != verdict.FAIL else 1
+
         if cmd in ("status", "results"):
             payload = status(root, job_id)
             if "--json" in rest:
@@ -1583,7 +1673,7 @@ def run(argv: list) -> int:
             return 0 if payload["verdict"] != verdict.FAIL else 1
 
         if cmd == "redelegate":
-            positional = [a for a in rest if not a.startswith("--")]
+            positional = _positionals(rest)
             if not positional:
                 print("jobs redelegate: missing <task_id>", file=sys.stderr)
                 return 2

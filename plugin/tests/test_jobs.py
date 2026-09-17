@@ -1568,3 +1568,146 @@ class TestStopJobJsonRace(JobTestCase):
         saved = jobs.read_json(jdir / "job.json", {})
         self.assertIn("stopped_at", saved)
         self.assertIn("finished_at", saved)
+
+
+# ------------------------------------------- ADR-0013: recheck without a worker
+
+
+class TestGatesRecheck(JobTestCase):
+    """A gate edit must cost a gate run, not a rebuild.
+
+    On gk-trial2 (2026-09-17) 28 of 35 worker spawns existed only because a
+    gate was refined; the code was already correct. Re-running the gate is
+    seconds, re-deriving the code is minutes.
+    """
+
+    def retarget(self, task_id: str, argv: list) -> None:
+        """Rewrite one task's gate in spec/04-tasks.md, as an operator would."""
+        task = self.simple_task(task_id=task_id)
+        task["gates"] = [{"name": "check", "argv": argv}]
+        self.write_tasks(task)
+
+    def test_recheck_marks_a_task_passed_without_spawning(self) -> None:
+        self.write_config()
+        task = self.simple_task()
+        self.write_tasks(task)
+        job = jobs.start(self.root, dry_run=True)
+        (self.root / "src").mkdir(exist_ok=True)
+        (self.root / "src" / "note.txt").write_text("done", encoding="utf-8")
+        result = jobs.recheck(self.root, job_id=job["job_id"])
+        self.assertEqual(result["rechecked"], ["write-note"])
+        st = json.loads((self.task_dir(job["job_id"], "write-note") / "status.json").read_text())
+        self.assertEqual(st["state"], "passed")
+        self.assertIn("recheck", st["detail"])
+        self.assertFalse((self.task_dir(job["job_id"], "write-note") / "output.txt").exists())
+
+    def test_recheck_reads_the_current_task_file_not_the_snapshot(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root, dry_run=True)
+        # The operator narrows the gate to something that passes right now.
+        self.retarget("write-note", [sys.executable, "-c", "import sys; sys.exit(0)"])
+        result = jobs.recheck(self.root, job_id=job["job_id"])
+        st = json.loads((self.task_dir(job["job_id"], "write-note") / "status.json").read_text())
+        self.assertEqual(st["state"], "passed")
+        self.assertIn("write-note", result["rechecked"])
+
+    def test_a_still_failing_gate_leaves_the_task_failed(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root, dry_run=True)
+        jobs.recheck(self.root, job_id=job["job_id"])
+        st = json.loads((self.task_dir(job["job_id"], "write-note") / "status.json").read_text())
+        self.assertEqual(st["state"], "failed")
+
+    def test_an_unverified_gate_does_not_round(self) -> None:
+        self.write_config()
+        task = self.simple_task()
+        task["gates"] = [{"name": "u", "argv": [sys.executable, "-c", "import sys; sys.exit(3)"]}]
+        self.write_tasks(task)
+        job = jobs.start(self.root, dry_run=True)
+        jobs.recheck(self.root, job_id=job["job_id"])
+        st = json.loads((self.task_dir(job["job_id"], "write-note") / "status.json").read_text())
+        self.assertEqual(st["gates_verdict"], verdict.UNVERIFIED)
+        self.assertNotEqual(st["state"], "passed")
+
+    def test_one_task_can_be_named(self) -> None:
+        self.write_config()
+        first = self.simple_task()
+        second = self.simple_task(task_id="second", target="src/second.txt")
+        self.write_tasks(first, second)
+        job = jobs.start(self.root, dry_run=True)
+        (self.root / "src").mkdir(exist_ok=True)
+        (self.root / "src" / "note.txt").write_text("x", encoding="utf-8")
+        (self.root / "src" / "second.txt").write_text("x", encoding="utf-8")
+        result = jobs.recheck(self.root, task_ids=["write-note"], job_id=job["job_id"])
+        self.assertEqual(result["rechecked"], ["write-note"])
+        st2 = json.loads((self.task_dir(job["job_id"], "second") / "status.json").read_text())
+        self.assertNotEqual(st2["state"], "passed")
+
+    def test_recheck_writes_gates_json(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root, dry_run=True)
+        (self.root / "src").mkdir(exist_ok=True)
+        (self.root / "src" / "note.txt").write_text("x", encoding="utf-8")
+        jobs.recheck(self.root, job_id=job["job_id"])
+        gates = json.loads((self.task_dir(job["job_id"], "write-note") / "gates.json").read_text())
+        self.assertEqual(gates["verdict"], verdict.OK)
+
+    def test_a_task_removed_from_the_file_is_reported_not_crashed(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root, dry_run=True)
+        self.write_tasks(self.simple_task(task_id="renamed", target="src/other.txt"))
+        result = jobs.recheck(self.root, job_id=job["job_id"])
+        self.assertIn("write-note", result["missing"])
+
+    def test_no_job_is_a_clear_error(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        with self.assertRaises(ValueError):
+            jobs.recheck(self.root)
+
+    def test_recheck_never_touches_a_passed_task_state_wrongly(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root, dry_run=True)
+        (self.root / "src").mkdir(exist_ok=True)
+        (self.root / "src" / "note.txt").write_text("x", encoding="utf-8")
+        jobs.recheck(self.root, job_id=job["job_id"])
+        first = json.loads((self.task_dir(job["job_id"], "write-note") / "status.json").read_text())
+        jobs.recheck(self.root, job_id=job["job_id"])
+        second = json.loads((self.task_dir(job["job_id"], "write-note") / "status.json").read_text())
+        self.assertEqual(first["state"], second["state"])
+        self.assertEqual(second["state"], "passed")
+
+    def test_cli_recheck_exits_zero_on_pass(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        jobs.start(self.root, dry_run=True)
+        (self.root / "src").mkdir(exist_ok=True)
+        (self.root / "src" / "note.txt").write_text("x", encoding="utf-8")
+        code = jobs.run(["recheck", "--root", str(self.root)])
+        self.assertEqual(code, 0)
+
+    def test_cli_recheck_exits_one_on_fail(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        jobs.start(self.root, dry_run=True)
+        self.assertEqual(jobs.run(["recheck", "--root", str(self.root)]), 1)
+
+    def test_cli_recheck_accepts_a_task_name(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        jobs.start(self.root, dry_run=True)
+        (self.root / "src").mkdir(exist_ok=True)
+        (self.root / "src" / "note.txt").write_text("x", encoding="utf-8")
+        self.assertEqual(
+            jobs.run(["recheck", "write-note", "--root", str(self.root)]), 0
+        )
+
+    def test_cli_recheck_without_a_job_exits_two(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        self.assertEqual(jobs.run(["recheck", "--root", str(self.root)]), 2)
