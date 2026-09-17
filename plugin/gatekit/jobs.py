@@ -46,6 +46,22 @@ NOT_DONE_STATES = ("failed", "timeout", "stopped")
 
 GATE_TIMEOUT_S = 60.0
 
+#: ADR-0013 decision 1. Who implements a task.
+#:
+#: ``host``   — the session running `/gatekit:build` writes the code itself.
+#:              A worker is a *cold* session of the same model; spawning one
+#:              per task pays a fresh project discovery each time and buys a
+#:              second opinion from the model that is already here.
+#: ``worker`` — spawn the configured backend per task, as before. Correct when
+#:              the model must differ (adversarial verification, a Codex host
+#:              delegating to Claude) or when a round is wide enough that real
+#:              parallelism beats the spawn cost.
+EXECUTION_MODES = ("host", "worker")
+DEFAULT_EXECUTION = "host"
+#: A round with at least this many independent tasks is worth spawning for even
+#: under `host`: they run at once instead of one after another.
+HOST_PARALLEL_HANDOFF = 3
+
 #: ADR-0009 decision 1. A failing gate is a broken *command* only when the
 #: shell or interpreter itself reports that something the gate's argv names
 #: could not be run: the pattern must match AND the matching line must
@@ -1107,6 +1123,10 @@ def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False,
             "no tasks found; expected ```gatekit-task fences in spec/04-tasks.md"
         )
 
+    mode = execution_mode(cfg)
+    if backend_name:
+        # Naming a backend is an explicit request for that model to do the work.
+        mode = "worker"
     backend = workers.resolve(root, backend_name)
     parallel = int(parallel or build_cfg.get("parallel", 3) or 1)
     timeout_s = float(build_cfg.get("task_timeout_s", 900) or 900)
@@ -1130,6 +1150,7 @@ def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False,
         "max_retries": max_retries,
         "dry_run": bool(dry_run),
         "no_preflight": bool(no_preflight),
+        "execution": mode,
         "preflight_warnings": [],
         "tasks": [str(t.get("id")) for t in tasks],
         "config": {"build": build_cfg},
@@ -1159,6 +1180,27 @@ def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False,
     else:
         tasks_to_run = list(tasks)
 
+    if mode == "host":
+        # ADR-0013 decision 1: hand the ordered plan back and stop. The session
+        # that called this already knows the project; it implements each task
+        # and calls `complete_task`, which runs the same gates a worker's exit
+        # would have triggered. A wide round is still worth spawning for, and
+        # the plan marks those rounds so the caller can hand them off.
+        plan = []
+        for index, wave in enumerate(order_tasks(tasks_to_run), start=1):
+            for task in wave:
+                plan.append({
+                    "id": str(task.get("id")),
+                    "round": index,
+                    "parallel_candidate": len(wave) >= HOST_PARALLEL_HANDOFF,
+                })
+            for task in wave:
+                _set_status(jdir, str(task.get("id")), state="queued",
+                            detail="awaiting the host session (build.execution=host)")
+        job["plan"] = plan
+        write_json(jdir / "job.json", job)
+        return job
+
     job_task_ids = {str(t.get("id")) for t in tasks}
     waiting_all = []
     for wave in order_tasks(tasks_to_run):
@@ -1171,6 +1213,56 @@ def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False,
 
     _finalise_unrun(jdir, tasks_to_run, stopped=_stop_requested(jdir))
     return _finalise_job(jdir, job)
+
+
+def execution_mode(cfg: dict) -> str:
+    """``build.execution`` — ``host`` or ``worker`` (ADR-0013 decision 1).
+
+    An unset value means ``host``. An unrecognised one also means ``host``
+    rather than an error: the field decides who types, and a typo must not
+    stop a build.
+    """
+    value = str(((cfg.get("build") or {}).get("execution") or DEFAULT_EXECUTION)).strip()
+    return value if value in EXECUTION_MODES else DEFAULT_EXECUTION
+
+
+def complete_task(root, task_id: str, job_id: Optional[str] = None) -> dict:
+    """Run a host-implemented task's gates and record the verdict.
+
+    The counterpart of `execute_task` for `build.execution = "host"`: the
+    session wrote the code itself, so there is no worker exit code to weigh —
+    the gates alone decide, exactly as they do when a worker exits 0. Same
+    `gates.json`, same `status.json`, same words.
+    """
+    job_id = job_id or latest_job_id(root)
+    if not job_id:
+        raise ValueError("no job under .gatekit/jobs/; run `jobs start` first")
+    jdir = job_dir(root, job_id)
+    job = read_json(jdir / "job.json", None)
+    if not job:
+        raise ValueError("job %s has no job.json" % job_id)
+    if task_id not in (job.get("tasks") or []):
+        raise ValueError("task %r is not in job %s" % (task_id, job_id))
+
+    task = read_json(_task_dir(jdir, task_id) / "task.json", None)
+    if not task:
+        raise ValueError("task %r has no task.json in job %s" % (task_id, job_id))
+
+    gates = run_gates(root, task)
+    write_json(_task_dir(jdir, task_id) / "gates.json", gates)
+    passed = gates["total"] > 0 and gates["verdict"] == verdict.OK
+    return _set_status(
+        jdir,
+        task_id,
+        state="passed" if passed else "failed",
+        exit=0,
+        gates_verdict=gates["verdict"],
+        gates_passed=gates["passed"],
+        gates_total=gates["total"],
+        finished_at=_now(),
+        detail="implemented by the host session; %d/%d gates %s"
+        % (gates["passed"], gates["total"], gates["verdict"]),
+    )
 
 
 def recheck(root, task_ids=None, job_id: Optional[str] = None) -> dict:
@@ -1547,6 +1639,9 @@ def _usage() -> str:
         "  status [--job ID] [--json]\n"
         "  wait [--job ID] [--timeout S]\n"
         "  results [--job ID] [--compact|--json]\n"
+        "  complete <task_id> [--job ID]\n"
+        "                         run a host-implemented task's gates and record\n"
+        "                         the verdict (build.execution=host, ADR-0013)\n"
         "  recheck [task_id ...] [--task a,b] [--job ID] [--json]\n"
         "                         re-run gates from the current spec/04-tasks.md;\n"
         "                         no worker, no new job (ADR-0013)\n"
@@ -1637,6 +1732,15 @@ def run(argv: list) -> int:
                 (", %d pid(s) skipped (not this job's process)" % len(result["skipped"]))
                 if result["skipped"] else ""))
             return 0
+
+        if cmd == "complete":
+            names = _positionals(rest)
+            if not names:
+                print("jobs complete: missing <task_id>", file=sys.stderr)
+                return 2
+            st = complete_task(root, names[0], job_id)
+            print("%s %s — %s" % (st.get("task_id"), st.get("state"), st.get("detail", "")))
+            return 0 if st.get("state") == "passed" else 1
 
         if cmd == "recheck":
             names = _positionals(rest)

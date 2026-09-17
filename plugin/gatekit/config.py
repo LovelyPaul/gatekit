@@ -52,7 +52,12 @@ DEFAULTS: Dict[str, Any] = {
             },
         },
     },
-    "build": {"max_retries": 2, "parallel": 3, "task_timeout_s": 900},
+    # ADR-0013: `execution` names who implements a task — "host" (the
+    # session running the build) or "worker" (a spawned backend). The
+    # default stays "worker" so a project written before the ADR keeps its
+    # behaviour; `/gatekit:setup` writes "host" into new projects.
+    "build": {"max_retries": 2, "parallel": 3, "task_timeout_s": 900,
+              "execution": "worker"},
     "questions": {"interview_max_calls": 2, "items_per_call": 4},
     # Who grades in /gatekit:verify: "agent" spawns a read-only subagent of
     # the host; a backend name runs that CLI with its read_only_argv, so the

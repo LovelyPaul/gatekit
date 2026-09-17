@@ -9,10 +9,14 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 
 Input: `$ARGUMENTS` — optional comma-separated task ids. Empty means every task.
 
-**You do not write source code in this command.** Workers do. While a job runs,
-the main session reads status and routes failures; it never edits files under a
-task's `write_scope` itself. If you catch yourself about to fix the code
-directly, redelegate instead.
+**Who writes the code depends on `build.execution` (ADR-0013).** Under `host`
+**you do**, task by task, in this session — a worker is a cold session of the
+same model, paying a fresh project discovery per task to buy a second opinion
+from the model already here. Under `worker` workers do, and you never edit a
+task's files yourself. Either way **the gates decide, never your own report.**
+Hand a task to a worker only when the model must differ (Codex for
+verification, a Codex host delegating to Claude) or a round holds three or
+more independent tasks.
 
 ## Step 0 — load policy and language
 
@@ -33,29 +37,28 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" spec validate
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" approve check spec/05-gate.md
 ```
 
-- `spec validate` must not print `fail`. If it does, show the findings and stop.
-  Route the user to the pipeline that owns the failing file.
-- `approve check` must print `ok`. `fail` means the gate file changed after it
-  was approved; `unverified` means it was never approved. In either case **stop**
-  and tell the user to run `/gatekit:gate`. Never approve on their behalf, and
-  never edit `spec/05-gate.md` to make a hash match. A stale contract can now
-  also come from a changed design input (`02-screens.md`, `02-design.md`, or
-  `tokens.json`); the fix is the same: `/gatekit:tasks` then `/gatekit:gate`.
+- `spec validate` must not print `fail`. If it does, show the findings and
+  stop; route the user to the pipeline that owns the failing file.
+- `approve check` must print `ok`. `fail` means the gate file changed after
+  approval, `unverified` that it was never approved — either way **stop** and
+  send the user to `/gatekit:gate`. Never approve for them, and never edit
+  `spec/05-gate.md` to make a hash match. A changed design input
+  (`02-screens.md`, `02-design.md`, `tokens.json`) stales it the same way; the
+  fix is `/gatekit:tasks` then `/gatekit:gate`.
 
-Then confirm a worker is actually available:
+**Only under `execution: worker`**, confirm a worker can actually answer —
+under `host` there is nothing to probe:
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers check "$(python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers list --json | python3 -c 'import json,sys; print(json.load(sys.stdin)["default"])')" --probe
 ```
 
-`--probe` sends one trivial prompt through the backend's read-only argv. It
-takes a few seconds and is the only check that catches a CLI that exists but
-cannot answer here: not logged in, or run inside a sandbox that hides its
-credentials. `fail` means exactly that — stop, show the detail, and do not
-start the job; the fix is to log in, or (under a sandboxed host such as
-Codex) to run this command and `jobs start` with the host's escalated
-permissions so the worker CLI can reach its credentials and network.
-`unverified` (the probe timed out) is not a blocker; say so once and continue.
+`--probe` sends one trivial prompt through the backend's read-only argv — the
+only check that catches a CLI that exists but cannot answer here (not logged
+in, or sandboxed away from its credentials). `fail`: stop and show the detail;
+the fix is to log in, or under a sandboxed host to run with escalated
+permissions. `unverified` (timed out) is not a blocker; say so once and
+continue.
 
 ## Step 2 — start the job
 
@@ -75,6 +78,13 @@ user); a gate whose *command* errors ends the start with exit 4 and names the
 task and gate — fix it in `spec/04-tasks.md` (usually a glob instead of a
 directory) and start again, never `--no-preflight` to get past it.
 
+**Under `execution: host`** the job's `plan` comes back and nothing spawns.
+Work it in round order (within a round, any order; `parallel_candidate` marks
+one wide enough to hand to workers). Read each task's `prompt.md` — write
+scope, gates, design, screens — implement it, then record the verdict with
+`jobs complete <task_id>`, which runs its gates and writes the same
+`status.json` a worker's exit would. Never mark a task done yourself.
+
 ## Step 3 — poll
 
 ```
@@ -82,7 +92,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs status
 ```
 
 **Never read `output.txt` or `stderr.txt` into context.** They hold whole worker
-transcripts and will swamp the session. Use the status table and:
+transcripts and will swamp the session. (Under `host` they do not exist.) Use
+the status table and:
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs results --compact
@@ -92,63 +103,52 @@ which prints `id state gates_passed/total`, one line per task. Read a task's
 `gates.json` only when you need the specific failing gate's name.
 
 Terminal states are `passed`, `failed`, `timeout`, `redelegated`, `stopped`
-and `blocked`. A `blocked` task never ran because an in-job dependency did
-not pass: do not redelegate it; fix the dependency, then
-`jobs start --tasks <id>`. To end a job early (a gate turned out wrong), run
-`python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs stop` — it ends this
-job's own workers only. Never kill worker processes by name.
+and `blocked`. A `blocked` task never ran because an in-job dependency did not
+pass: fix the dependency, then `jobs start --tasks <id>`. To end a job early,
+`jobs stop` — it ends this job's own workers only; never kill them by name.
 
-## Step 4 — redelegate failures
+## Step 4 — route failures
 
-For every task in `failed` or `timeout`:
+For every `failed` or `timeout` task, read the failing gate's output tail in
+`gates.json` and decide **whether the code or the gate is wrong**. A gate names
+files and commands that do not exist until the work is done, so narrowing one
+mid-build is normal, not a mistake.
 
-```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs redelegate <task_id>
-```
+**Gate wrong** — too broad, names a path the task never had to create, or fails
+the same way regardless of the code: fix `spec/04-tasks.md`, then
+`jobs recheck <task_id>`, which runs the new gate against existing code in
+seconds with no worker and no new job. **Never redelegate or start a job for a
+gate edit** — on the trial behind ADR-0013 that was 28 of 35 spawns.
 
-This archives the attempt under `attempt-N/`, appends the failed gate's output
-to the prompt and re-runs. Exit code 3 means the task is out of retries
-(`build.max_retries`); do not retry past it.
+**Code wrong** — under `host`, fix it yourself and `jobs complete <task_id>`
+again. Under `worker`, `jobs redelegate <task_id>`: it archives the attempt
+under `attempt-N/`, appends the gate output to the prompt and re-runs; exit 3
+means out of retries (`build.max_retries`) and you do not retry past it.
 
-Before redelegating, read the failing gate's output tail in `gates.json`. If
-the gate command itself is wrong (it names a path the task was never asked to
-create, or fails the same way regardless of the code), fix `spec/04-tasks.md`
-first; `redelegate` re-reads the task from it and says `task re-read …
-(gates changed)`. A wrong gate handed back with "fix the cause" teaches the
-worker to make the wrong command pass.
-
-Count consecutive failures per task. **On the third failure of the same task,
-stop redelegating** and switch to diagnosis mode:
-
-1. Read `spec/RECOVERY.md`.
-2. Read that task's `gates.json` for the failing gate name and its output tail.
-3. Write the diagnosis into `spec/RECOVERY.md` under a heading naming the task:
-   what gate fails, what the output says, and the two most likely causes.
-4. **Stop the pipeline.** Report to the user that the task is blocked, show the
-   failing gate, and say what you would need to unblock it. Do not fix the code
-   yourself and do not start another job.
+Count consecutive failures per task, **across jobs as well as within one** —
+`max_retries` resets on a new `jobs start`, so only your count binds. **On the
+third failure of the same task, stop** and switch to diagnosis: read
+`spec/RECOVERY.md` and that task's `gates.json`, write the diagnosis there
+under a heading naming the task (what gate fails, what the output says, the
+two most likely causes), then **stop the pipeline** — report the task blocked
+and what you would need to unblock it. Do not start another job.
 
 ## Step 5 — update progress
 
 When every task is terminal, update `spec/PROGRESS.md` in `output_lang`.
 
 If the file does not exist, copy
-`${CLAUDE_PLUGIN_ROOT}/spec-kit/templates/<output_lang>/PROGRESS.md` first and
-fill it in. **Keep the template's headings exactly** — `spec validate` requires
-them and rejects a heading from the other language. Add your content under the
-existing headings; never invent a replacement heading:
-
-- current status: the job id, its backend, and whether the build is done,
-- milestones: one line per task — id, final state, gates passed of total,
-- failed attempts: every redelegated task with the gate that failed and what
-  changed on the retry,
-- tasks left blocked, with the failing gate named,
-- the timestamp.
+`${CLAUDE_PLUGIN_ROOT}/spec-kit/templates/<output_lang>/PROGRESS.md` first.
+**Keep the template's headings exactly** — `spec validate` rejects a heading
+from the other language. Under them record: the job id, its execution mode and
+backend, and whether the build is done; one line per task (id, final state,
+gates passed of total); every redelegated task with the gate that failed and
+what changed; tasks left blocked with the failing gate named; the timestamp.
 
 Then run `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" spec validate` and fix
-any PROGRESS.md finding before reporting. Report the same table in chat. State
-verdicts as they are. A `timeout` is not a
-pass, and a task whose gates never ran is `unverified`, not done.
+any PROGRESS.md finding before reporting. Report the same table in chat, with
+verdicts as they are: a `timeout` is not a pass, and a task whose gates never
+ran is `unverified`, not done.
 
 ## Step 6 — hand off
 

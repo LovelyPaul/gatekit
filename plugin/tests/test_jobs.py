@@ -17,7 +17,7 @@ import unittest
 # `plugin/tests` on sys.path, so `plugin/` has to be added explicitly.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gatekit import jobs, verdict
+from gatekit import config, jobs, verdict
 
 FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures" / "jobs"
 FAKE_WORKER = FIXTURES / "fake_worker.py"
@@ -1711,3 +1711,163 @@ class TestGatesRecheck(JobTestCase):
         self.write_config()
         self.write_tasks(self.simple_task())
         self.assertEqual(jobs.run(["recheck", "--root", str(self.root)]), 2)
+
+
+# ------------------------------------ ADR-0013 decision 1: host execution
+
+
+class TestHostExecution(JobTestCase):
+    """The session that already knows the project implements the task.
+
+    A worker is `claude -p …` — a cold Claude session. On gk-trial2 Claude
+    spawned Claude 35 times, paying the cold start each time while a session
+    that knew the repo waited. Host execution keeps every gate, verdict and
+    scope rule and only moves who holds the editor.
+    """
+
+    def host_config(self) -> None:
+        cfg = {"build": {"execution": "host", "max_retries": 2, "parallel": 3,
+                         "task_timeout_s": 60},
+               "worker": {"default": "fake", "backends": {"fake": {
+                   "argv": [sys.executable, str(FAKE_WORKER)], "enabled": True}}}}
+        (self.root / ".gatekit" / "config.json").write_text(
+            json.dumps(cfg), encoding="utf-8")
+
+    def test_host_mode_prepares_the_job_without_spawning(self) -> None:
+        self.host_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root)
+        tdir = self.task_dir(job["job_id"], "write-note")
+        self.assertTrue((tdir / "task.json").is_file())
+        self.assertTrue((tdir / "prompt.md").is_file())
+        self.assertFalse((tdir / "output.txt").exists())
+
+    def test_host_mode_leaves_tasks_awaiting_the_host(self) -> None:
+        self.host_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root)
+        st = json.loads((self.task_dir(job["job_id"], "write-note") / "status.json").read_text())
+        self.assertEqual(st["state"], "queued")
+        self.assertIn("host", st["detail"])
+
+    def test_the_job_records_its_execution_mode(self) -> None:
+        self.host_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root)
+        saved = json.loads((self.root / ".gatekit" / "jobs" / job["job_id"] / "job.json").read_text())
+        self.assertEqual(saved["execution"], "host")
+
+    def test_start_returns_the_ordered_plan(self) -> None:
+        self.host_config()
+        first = self.simple_task()
+        second = self.simple_task(task_id="second", target="src/second.txt",
+                                  round=2, depends_on=["write-note"])
+        self.write_tasks(first, second)
+        job = jobs.start(self.root)
+        self.assertEqual([r["id"] for r in job["plan"]], ["write-note", "second"])
+        self.assertEqual(job["plan"][0]["round"], 1)
+
+    def test_a_host_task_passes_through_the_same_gates(self) -> None:
+        self.host_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root)
+        (self.root / "src").mkdir(exist_ok=True)
+        (self.root / "src" / "note.txt").write_text("done", encoding="utf-8")
+        st = jobs.complete_task(self.root, "write-note", job_id=job["job_id"])
+        self.assertEqual(st["state"], "passed")
+        self.assertEqual(st["gates_passed"], 1)
+
+    def test_a_host_task_that_fails_its_gate_is_failed(self) -> None:
+        self.host_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root)
+        st = jobs.complete_task(self.root, "write-note", job_id=job["job_id"])
+        self.assertEqual(st["state"], "failed")
+
+    def test_unverified_does_not_round_in_host_mode(self) -> None:
+        self.host_config()
+        task = self.simple_task()
+        task["gates"] = [{"name": "u", "argv": [sys.executable, "-c", "import sys; sys.exit(3)"]}]
+        self.write_tasks(task)
+        job = jobs.start(self.root)
+        st = jobs.complete_task(self.root, "write-note", job_id=job["job_id"])
+        self.assertEqual(st["gates_verdict"], verdict.UNVERIFIED)
+        self.assertNotEqual(st["state"], "passed")
+
+    def test_completing_an_unknown_task_is_refused(self) -> None:
+        self.host_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root)
+        with self.assertRaises(ValueError):
+            jobs.complete_task(self.root, "nope", job_id=job["job_id"])
+
+    def test_worker_mode_is_unchanged(self) -> None:
+        self.write_config()   # no execution key -> worker
+        self.write_tasks(self.simple_task())
+        self.set_env(FAKE_WORKER_OUT="src/note.txt")
+        job = jobs.start(self.root)
+        st = json.loads((self.task_dir(job["job_id"], "write-note") / "status.json").read_text())
+        self.assertEqual(st["state"], "passed")
+        self.assertTrue((self.task_dir(job["job_id"], "write-note") / "output.txt").is_file())
+
+    def test_explicit_worker_execution_still_spawns(self) -> None:
+        cfg = {"build": {"execution": "worker", "parallel": 1, "task_timeout_s": 60},
+               "worker": {"default": "fake", "backends": {"fake": {
+                   "argv": [sys.executable, str(FAKE_WORKER)], "enabled": True}}}}
+        (self.root / ".gatekit" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+        self.write_tasks(self.simple_task())
+        self.set_env(FAKE_WORKER_OUT="src/note.txt")
+        job = jobs.start(self.root)
+        self.assertTrue((self.task_dir(job["job_id"], "write-note") / "output.txt").is_file())
+
+    def test_host_mode_still_runs_preflight(self) -> None:
+        self.host_config()
+        self.write_tasks(self.simple_task())
+        (self.root / "src").mkdir(exist_ok=True)
+        (self.root / "src" / "note.txt").write_text("already", encoding="utf-8")
+        job = jobs.start(self.root)
+        st = json.loads((self.task_dir(job["job_id"], "write-note") / "status.json").read_text())
+        self.assertEqual(st["state"], "passed")
+        self.assertIn("preflight", st["detail"])
+
+    def test_an_existing_config_without_the_key_keeps_spawning(self) -> None:
+        """A project written before ADR-0013 must not change behaviour silently.
+
+        `config.DEFAULTS` carries execution=worker, so a config file that
+        predates the key merges to `worker`. Only a project whose owner writes
+        `execution: host` — or a fresh project once the default flips — runs
+        in-session.
+        """
+        self.write_config()   # no execution key, as every pre-0.8 project has
+        cfg = config.load(self.root)
+        self.assertEqual(jobs.execution_mode(cfg), "worker")
+
+    def test_a_bare_dict_defaults_to_host(self) -> None:
+        self.assertEqual(jobs.execution_mode({}), "host")
+
+    def test_an_unknown_mode_falls_back_to_host(self) -> None:
+        self.assertEqual(jobs.execution_mode({"build": {"execution": "nope"}}), "host")
+
+    def test_cli_complete_records_the_verdict(self) -> None:
+        self.host_config()
+        self.write_tasks(self.simple_task())
+        jobs.start(self.root)
+        (self.root / "src").mkdir(exist_ok=True)
+        (self.root / "src" / "note.txt").write_text("x", encoding="utf-8")
+        self.assertEqual(
+            jobs.run(["complete", "write-note", "--root", str(self.root)]), 0
+        )
+
+    def test_cli_complete_exits_one_when_gates_fail(self) -> None:
+        self.host_config()
+        self.write_tasks(self.simple_task())
+        jobs.start(self.root)
+        self.assertEqual(
+            jobs.run(["complete", "write-note", "--root", str(self.root)]), 1
+        )
+
+    def test_cli_complete_without_a_task_exits_two(self) -> None:
+        self.host_config()
+        self.write_tasks(self.simple_task())
+        jobs.start(self.root)
+        self.assertEqual(jobs.run(["complete", "--root", str(self.root)]), 2)

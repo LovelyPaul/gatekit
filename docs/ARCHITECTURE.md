@@ -410,6 +410,31 @@ the worker exits; a worker that exits 0 but fails a gate is `failed`, never
 with the failed gate output appended to the prompt, up to `max_retries`.
 `results --compact` prints one line per task: `id state gates_passed/total`.
 
+**ADR-0013 — who implements a task.** `build.execution` is `host` or `worker`
+(`jobs.execution_mode`; an unset or unrecognised value means `host`, but
+`config.DEFAULTS` carries `worker` so a project written before the ADR keeps
+its behaviour). Under `worker`, `start` runs as described above. Under `host`,
+`start` prepares the job dir, runs preflight, writes `job.json.execution` and
+`job.json.plan` — one `{id, round, parallel_candidate}` row per task, in wave
+order, `parallel_candidate` true when its round holds ≥ `HOST_PARALLEL_HANDOFF`
+(3) tasks — marks every task `queued` with detail `awaiting the host session`,
+and **spawns nothing**. The calling session implements each task and calls
+`jobs.complete_task(root, task_id)`, which runs that task's gates and writes
+the same `gates.json` and `status.json` `execute_task` would; there is no
+worker exit code to weigh, so the gates alone decide. Passing `--backend`
+forces `worker`: naming a model is a request for that model. A worker is a
+cold session of the same model, so spawning one per task buys a second opinion
+from the model already present; reserve it for a differing model (adversarial
+verification, a Codex host delegating to Claude) or a genuinely wide round.
+
+`jobs.recheck(root, task_ids=None, job_id=None) -> {"job_id", "rechecked",
+"missing"}` re-reads **the current** `spec/04-tasks.md`, runs the named tasks'
+gates against the working tree, and records the same files with detail
+`recheck: … (no worker)`. It is the answer to a gate that moved mid-build,
+which is the normal case rather than a mistake: a gate names files and commands
+that do not exist until the work is done. Tasks no longer in the file are
+returned in `missing`, never silently skipped.
+
 ADR-0009 adds four rules to the runner:
 
 - **Preflight.** Unless `start --no-preflight`, every selected task's gates
@@ -559,6 +584,15 @@ pid whose age does not match the recorded spawn time, `stopped`/`blocked`
 counting as not done, and dependency gating (blocked on failure, run on pass,
 out-of-job dependency ignored).
 
+ADR-0013 adds: host execution preparing a job and spawning nothing while
+recording `execution` and `plan`; `complete_task` writing the same status and
+gates files worker execution does, with `unverified` not rounding; an unknown
+task id refused; `--backend` forcing worker mode; a config without
+`build.execution` still spawning; `recheck` passing a task whose gate was
+narrowed, leaving a still-failing one `failed`, reading the current task file
+rather than the job snapshot, naming tasks missing from it, and being
+idempotent; and `_positionals` not mistaking an option's value for a task id.
+
 ADR-0012 adds, in `gates/question.py`: a justified over-budget call consuming
 its line and raising nothing; an unjustified one raising `unjustified`; the
 line single-use across two calls; calls within budget needing none; a blank or
@@ -649,7 +683,7 @@ def parse_fences(text: str, name: str) -> list[dict]                   # all ```
 def run(argv: list[str]) -> int
 
 # jobs.py
-def run(argv: list[str]) -> int                        # start / status / wait / results / redelegate / stop / evaluate / clean
+def run(argv: list[str]) -> int                        # start / status / wait / results / complete / recheck / redelegate / stop / evaluate / clean
 def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False, no_preflight=False) -> dict   # raises GatePreflightError (ADR-0009)
 def preflight(root, jdir, tasks: list[dict]) -> dict   # {"passed": [ids], "warnings": [str]}; raises GatePreflightError
 def classify_gate_result(gate: dict, argv=None) -> str  # "command_error" | "suspicious" | "expected" (ADR-0009 decision 1)
@@ -658,6 +692,9 @@ def stop(root, job_id: str | None = None) -> dict      # {"job_id", "stopped", "
 def evaluate(root: pathlib.Path, backend_name: str | None = None, prompt_path=None, timeout_s=None, lang: str = "en") -> dict
 def load_tasks(root: pathlib.Path) -> list[dict]       # from spec/04-tasks.md via spec.parse_fences
 def parse_screens(text: str) -> dict                   # {"S2": {"name","layout","states"}} from 02-screens.md (ADR-0011)
+def execution_mode(cfg: dict) -> str                   # "host" | "worker" (ADR-0013)
+def complete_task(root, task_id: str, job_id: str | None = None) -> dict   # host-implemented task -> gates -> status.json
+def recheck(root, task_ids=None, job_id: str | None = None) -> dict        # {"job_id","rechecked","missing"}; gates only, no worker
 class GatePreflightError(ValueError)
 TERMINAL_STATES, NOT_DONE_STATES                       # the two state sets every consumer of status.json uses
 
