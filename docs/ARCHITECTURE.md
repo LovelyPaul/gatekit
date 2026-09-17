@@ -436,6 +436,8 @@ which is the normal case rather than a mistake: a gate names files and commands
 that do not exist until the work is done. Tasks no longer in the file are
 returned in `missing`, never silently skipped.
 
+**ADR-0013 decision 4 — the shape is approved before it is written.** `jobs.shape(root)` reports `{tasks, rounds, waves, serial, unevidenced, rounds_if_pruned}` from `spec/04-tasks.md`, and `/gatekit:tasks` shows it — rounds as prominently as the count — before writing the file. A `depends_on` is evidenced when the depending task's title or instruction names the dependency's id or a leaf from its write scope, matched on identifier boundaries so a short id is not found inside a word and a shared ancestor like `src` never counts. `rounds_if_pruned` recomputes depth from the evidenced links alone, ignoring the declared `round`, since that field is a consequence of the links. Advisory only: deciding whether an instruction *needs* a dependency requires understanding both, so nothing refuses. On gk-trial2 this reports 9 tasks / 7 rounds with three unevidenced links and 3 rounds without them.
+
 **ADR-0013 decision 5 — a verification task is not a task.** `spec.validate` warns when a task's `write_scope` holds only test material (a path segment in `_TEST_DIR_SEGMENTS`, or a test-runner config stem) **and** its transitive dependency reach is ≥ 2. A check that passes only once several tasks are done is a completion criterion in `05-gate.md`: as a task it fails on every attempt until the last dependency lands. Reach is transitive because a chain end names one dependency and waits on all of them — the real `e2e-full-flow` declared one and waited on seven. A `warn`, never a `fail`: a legitimate test-only task exists.
 
 ADR-0009 adds four rules to the runner:
@@ -594,7 +596,7 @@ task id refused; `--backend` forcing worker mode; a config without
 `build.execution` still spawning; `recheck` passing a task whose gate was
 narrowed, leaving a still-failing one `failed`, reading the current task file
 rather than the job snapshot, naming tasks missing from it, and being
-idempotent; and `_positionals` not mistaking an option's value for a task id. A task warned as verification-shaped when it writes only test paths and its **transitive** dependency reach is two or more, and not warned on one direct dependency, a source path in scope, a `read-only` scope, or a cycle; the finding staying a `warn`. The PreCompact hook: recording every task's state, naming the job, creating PROGRESS.md when absent, leaving human content intact, replacing its own block on a second compaction, writing nothing with no job, surviving a corrupt status file and an unwritable spec dir, exiting 0 as a subprocess, and leaving `spec validate` findings unchanged.
+idempotent; and `_positionals` not mistaking an option's value for a task id. `shape` counting tasks and rounds, sharing a round between independent tasks, flagging a dependency with no evidence in the instruction while sparing one named there or named by id, and reporting the pruned round total; a task warned as verification-shaped when it writes only test paths and its **transitive** dependency reach is two or more, and not warned on one direct dependency, a source path in scope, a `read-only` scope, or a cycle; the finding staying a `warn`. The PreCompact hook: recording every task's state, naming the job, creating PROGRESS.md when absent, leaving human content intact, replacing its own block on a second compaction, writing nothing with no job, surviving a corrupt status file and an unwritable spec dir, exiting 0 as a subprocess, and leaving `spec validate` findings unchanged.
 
 ADR-0012 adds, in `gates/question.py`: a justified over-budget call consuming
 its line and raising nothing; an unjustified one raising `unjustified`; the
@@ -698,6 +700,7 @@ def parse_screens(text: str) -> dict                   # {"S2": {"name","layout"
 def execution_mode(cfg: dict) -> str                   # "host" | "worker" (ADR-0013)
 def complete_task(root, task_id: str, job_id: str | None = None) -> dict   # host-implemented task -> gates -> status.json
 def recheck(root, task_ids=None, job_id: str | None = None) -> dict        # {"job_id","rechecked","missing"}; gates only, no worker
+def shape(root, task_ids=None) -> dict                 # {tasks, rounds, waves, serial, unevidenced, rounds_if_pruned} (ADR-0013)
 class GatePreflightError(ValueError)
 TERMINAL_STATES, NOT_DONE_STATES                       # the two state sets every consumer of status.json uses
 

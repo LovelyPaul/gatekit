@@ -1871,3 +1871,90 @@ class TestHostExecution(JobTestCase):
         self.write_tasks(self.simple_task())
         jobs.start(self.root)
         self.assertEqual(jobs.run(["complete", "--root", str(self.root)]), 2)
+
+
+# ------------------------------- ADR-0013 decision 4: show the shape first
+
+
+class TestTaskShape(JobTestCase):
+    """`/gatekit:tasks` must show rounds as prominently as the count.
+
+    On gk-trial2 nine tasks — a reasonable number — were spread over seven
+    rounds, five of them holding one task. The count alone would have looked
+    fine; rounds are what cost the time.
+    """
+
+    def shape_for(self, *tasks) -> dict:
+        self.write_tasks(*tasks)
+        return jobs.shape(self.root)
+
+    def test_it_counts_tasks_and_rounds(self) -> None:
+        shape = self.shape_for(
+            self.simple_task(task_id="a", target="src/a.txt"),
+            self.simple_task(task_id="b", target="src/b.txt", depends_on=["a"], round=2))
+        self.assertEqual(shape["tasks"], 2)
+        self.assertEqual(shape["rounds"], 2)
+
+    def test_independent_tasks_share_a_round(self) -> None:
+        shape = self.shape_for(
+            self.simple_task(task_id="a", target="src/a.txt"),
+            self.simple_task(task_id="b", target="src/b.txt"),
+            self.simple_task(task_id="c", target="src/c.txt"))
+        self.assertEqual(shape["rounds"], 1)
+        self.assertEqual(len(shape["waves"][0]), 3)
+
+    def test_it_flags_dependencies_with_no_file_evidence(self) -> None:
+        a = self.simple_task(task_id="schema-setup", target="src/alpha.ts")
+        b = self.simple_task(task_id="ui-shell", target="src/beta.ts",
+                             depends_on=["schema-setup"], round=2)
+        b["instruction"] = "Write the shell. It stands on its own."
+        shape = self.shape_for(a, b)
+        self.assertEqual(shape["unevidenced"], [["ui-shell", "schema-setup"]])
+
+    def test_a_dependency_named_in_the_instruction_is_evidenced(self) -> None:
+        a = self.simple_task(task_id="a", target="src/alpha.ts")
+        b = self.simple_task(task_id="b", target="src/beta.ts",
+                             depends_on=["a"], round=2)
+        b["instruction"] = "Import the helper from src/alpha.ts and extend it."
+        shape = self.shape_for(a, b)
+        self.assertEqual(shape["unevidenced"], [])
+
+    def test_it_reports_the_rounds_without_unevidenced_dependencies(self) -> None:
+        """The number that matters: what the plan costs once the links nobody
+        can justify are dropped. On gk-trial2 that was seven rounds to three."""
+        a = self.simple_task(task_id="schema-setup", target="src/alpha.ts")
+        b = self.simple_task(task_id="ui-shell", target="src/beta.ts",
+                             depends_on=["schema-setup"], round=2)
+        b["instruction"] = "Write the shell. It stands on its own."
+        c = self.simple_task(task_id="digest-view", target="src/gamma.ts",
+                             depends_on=["ui-shell"], round=3)
+        c["instruction"] = "Write the digest view. It stands on its own."
+        shape = self.shape_for(a, b, c)
+        self.assertEqual(shape["rounds"], 3)
+        self.assertEqual(shape["rounds_if_pruned"], 1)
+
+    def test_a_task_naming_the_dependency_id_counts_as_evidence(self) -> None:
+        a = self.simple_task(task_id="core-rules", target="src/rules.ts")
+        b = self.simple_task(task_id="b", target="src/b.ts",
+                             depends_on=["core-rules"], round=2)
+        b["instruction"] = "Build on what core-rules produced."
+        self.assertEqual(self.shape_for(a, b)["unevidenced"], [])
+
+    def test_the_critical_path_uses_the_widest_round(self) -> None:
+        shape = self.shape_for(
+            self.simple_task(task_id="a", target="src/a.txt"),
+            self.simple_task(task_id="b", target="src/b.txt"),
+            self.simple_task(task_id="c", target="src/c.txt", depends_on=["a"], round=2))
+        self.assertEqual(shape["rounds"], 2)
+        self.assertEqual(shape["serial"], 3)
+
+    def test_no_tasks_is_a_clear_error(self) -> None:
+        (self.root / "spec" / "04-tasks.md").write_text("# Tasks\n", encoding="utf-8")
+        with self.assertRaises(ValueError):
+            jobs.shape(self.root)
+
+    def test_cli_shape_prints_rounds(self) -> None:
+        self.write_tasks(
+            self.simple_task(task_id="a", target="src/a.txt"),
+            self.simple_task(task_id="b", target="src/b.txt", depends_on=["a"], round=2))
+        self.assertEqual(jobs.run(["shape", "--root", str(self.root)]), 0)

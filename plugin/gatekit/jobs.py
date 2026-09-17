@@ -1215,6 +1215,121 @@ def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False,
     return _finalise_job(jdir, job)
 
 
+def _dependency_evidence(task: dict, dependency: dict) -> bool:
+    """True when *task*'s own words refer to something *dependency* writes.
+
+    ADR-0013 decision 4. A `depends_on` is justified by need, not by reading
+    order: "X comes earlier in the feature list" is not a dependency. Evidence
+    is the dependency's id, or the basename of a path in its write scope,
+    appearing in this task's title or instruction.
+
+    This is authoring guidance, so the test errs toward *finding* evidence: a
+    reported dependency is a prompt to look, never a refusal.
+    """
+    text = "%s %s" % (task.get("title", ""), task.get("instruction", ""))
+    needles = [str(dependency.get("id", "")).strip()]
+    scope = dependency.get("write_scope")
+    globs = [scope] if isinstance(scope, str) else list(scope or [])
+    for glob in globs:
+        if not isinstance(glob, str):
+            continue
+        # Only the leaf names a dependency actually owns count. A shared
+        # ancestor like `src` is not evidence of anything — every task in the
+        # project sits under it.
+        parts = [p for p in glob.replace("\\", "/").split("/") if p]
+        leaf = ""
+        for part in reversed(parts):
+            if part not in ("**", "*") and not part.startswith("*"):
+                leaf = part
+                break
+        if leaf and len(parts) > 1:
+            needles.append(leaf)
+        elif leaf and len(parts) == 1:
+            needles.append(leaf)   # a top-level file, e.g. package.json
+    for needle in needles:
+        if not needle:
+            continue
+        # Bounded match: a short id like `a` or a name like `db` must not be
+        # found inside an unrelated word. `\b` is wrong for identifiers holding
+        # `.` or `-`, so the boundary is "not an identifier character".
+        if re.search(r"(?<![0-9A-Za-z_.\-])%s(?![0-9A-Za-z_.\-])" % re.escape(needle),
+                     text):
+            return True
+    return False
+
+
+def _dependency_depth(task_id: str, by_id: dict, unevidenced_pairs=(), _seen=()) -> int:
+    """Longest chain of *evidenced* dependencies behind *task_id*.
+
+    A cycle stops the walk rather than recursing; the shape report is advisory
+    and must not hang on a malformed task file.
+    """
+    if task_id in _seen or task_id not in by_id:
+        return 0
+    depths = [
+        1 + _dependency_depth(str(dep), by_id, unevidenced_pairs, _seen + (task_id,))
+        for dep in (by_id[task_id].get("depends_on") or [])
+        if str(dep) in by_id and (task_id, str(dep)) not in unevidenced_pairs
+    ]
+    return max(depths) if depths else 0
+
+
+def shape(root, task_ids=None) -> dict:
+    """How the task file would run: counts, waves, and unevidenced links.
+
+    `/gatekit:tasks` shows this before writing `spec/04-tasks.md`, because
+    rounds are what cost time and nothing today makes them visible. On the
+    gk-trial2 run nine tasks — a reasonable count — were spread over seven
+    rounds, five holding a single task, and every pair at the same dependency
+    depth had disjoint write scopes: the serialisation was declared, not
+    required.
+    """
+    tasks = load_tasks(root)
+    if task_ids:
+        wanted = {t.strip() for t in task_ids if t.strip()}
+        tasks = [t for t in tasks if str(t.get("id")) in wanted]
+    if not tasks:
+        raise ValueError(
+            "no tasks found; expected ```gatekit-task fences in spec/04-tasks.md"
+        )
+
+    by_id = {str(t.get("id")): t for t in tasks}
+    waves = [[str(t.get("id")) for t in wave] for wave in order_tasks(tasks)]
+
+    unevidenced = []
+    for task_id, task in by_id.items():
+        for dep in task.get("depends_on") or []:
+            dependency = by_id.get(str(dep))
+            if dependency and not _dependency_evidence(task, dependency):
+                unevidenced.append([task_id, str(dep)])
+    unevidenced.sort()
+
+    # What the plan would look like with only the evidenced links kept. The
+    # declared `round` is dropped here on purpose: it is a consequence of the
+    # dependencies the author wrote, so keeping it would hide the very saving
+    # this number exists to show.
+    pruned = []
+    for task in tasks:
+        copy = dict(task)
+        copy["depends_on"] = [
+            d for d in (task.get("depends_on") or [])
+            if [str(task.get("id")), str(d)] not in unevidenced
+        ]
+        copy["round"] = 1 + _dependency_depth(
+            str(task.get("id")), by_id, unevidenced_pairs=set(map(tuple, unevidenced))
+        )
+        pruned.append(copy)
+
+    return {
+        "tasks": len(tasks),
+        "rounds": len(waves),
+        "waves": waves,
+        "serial": len(tasks),
+        "unevidenced": unevidenced,
+        "rounds_if_pruned": len(order_tasks(pruned)),
+    }
+
+
 def execution_mode(cfg: dict) -> str:
     """``build.execution`` — ``host`` or ``worker`` (ADR-0013 decision 1).
 
@@ -1731,6 +1846,24 @@ def run(argv: list) -> int:
                 result["job_id"], len(result["stopped"]), len(result["signalled"]),
                 (", %d pid(s) skipped (not this job's process)" % len(result["skipped"]))
                 if result["skipped"] else ""))
+            return 0
+
+        if cmd == "shape":
+            info = shape(root, (_opt(rest, "--tasks") or "").split(",") or None
+                         if _opt(rest, "--tasks") else None)
+            if "--json" in rest:
+                print(json.dumps(info, indent=2, ensure_ascii=False))
+            else:
+                print("tasks %d · rounds %d  (serial %d)" % (
+                    info["tasks"], info["rounds"], info["serial"]))
+                for index, wave in enumerate(info["waves"], start=1):
+                    print("  round %d (%d): %s" % (index, len(wave), ", ".join(wave)))
+                if info["unevidenced"]:
+                    print("  %d dependency link(s) with no evidence in the "
+                          "instruction; dropping them gives %d round(s):" % (
+                              len(info["unevidenced"]), info["rounds_if_pruned"]))
+                    for task_id, dep in info["unevidenced"]:
+                        print("    %s -> %s" % (task_id, dep))
             return 0
 
         if cmd == "complete":

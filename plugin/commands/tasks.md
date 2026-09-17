@@ -71,9 +71,15 @@ Rules that `spec validate` enforces:
 
 Assign rounds by dependency: a task goes in the first round where all its
 dependencies are already done and no sibling in that round shares its files.
-When two tasks want the same file, either sequence them into different rounds
-or re-cut them so their file boundaries differ. Never widen a scope to make a
+When two tasks want the same file, sequence them into different rounds or
+re-cut them so their boundaries differ — never widen a scope to make a
 collision disappear.
+
+**Declare a `depends_on` only when this task's instruction refers to something
+that task writes.** "It comes earlier in the feature list" is not a dependency.
+Rounds, not the task count, are what cost time — nine tasks in one round take
+the slowest, in nine rounds they take the sum — and on the ADR-0013 trial six
+of ten links were unevidenced, turning three rounds into seven.
 
 ## Step 4 — write gates
 
@@ -84,9 +90,9 @@ fails when the task is not done.
 "gates": [{"name": "test", "argv": ["python3", "-m", "unittest", "discover"]}]
 ```
 
-The gate must be a command that exists in this repository. Verify it runs
-before writing it into the file. A gate that always passes is worse than no
-gate, because it manufactures false evidence.
+The gate must be a command that exists in this repository, and you verify it
+runs before writing it in. A gate that always passes is worse than no gate: it
+manufactures false evidence.
 
 Two runners need glob patterns, not directories: `node --test` loads a bare
 directory as a module and fails with `Cannot find module`, so write
@@ -118,14 +124,17 @@ never round it to a pass. Do not add it to a task whose write scope has no
 such path (e.g. pure backend logic, `"read-only"` tasks) — the ADR keeps the
 scan narrow so a `fail` from it stays trustworthy.
 
-## Step 5 — write spec/04-tasks.md
+## Step 5 — show the shape, then write spec/04-tasks.md
 
-Fill the template. Headings verbatim from the heading map. Each task is one
-` ```gatekit-task ` fence containing a single JSON object. The instruction
-field must be self-contained: a worker reads only that string and its scope,
-with no access to this conversation.
+Write the fences to a scratch copy, run `jobs shape`, and present its counts,
+rounds, and unevidenced links with the round total dropping them would save. One
+`AskUserQuestion` — write as shown, merge tasks, or loosen dependencies — skipped
+after a stop signal.
 
-Fill the execution-order table so a human can see the rounds at a glance.
+Then fill the template, headings verbatim from the heading map. Each task is one
+` ```gatekit-task ` fence holding a single JSON object, and the instruction must
+be self-contained — a worker reads only that string and its scope. Fill the
+execution-order table so a human can see the rounds at a glance.
 
 ## Step 6 — validate
 
@@ -143,10 +152,9 @@ command resolves it.
 
 In `output_lang`:
 
-1. The file path written.
-2. Task count and round count, on their own line.
-3. The `spec validate` verdict, quoted from the run.
-4. Any feature from 01 with no covering task.
-5. Next command: `/gatekit:gate`.
+1. The file path written, with task count and round count on their own line.
+2. The `spec validate` verdict, quoted from the run.
+3. Any feature from 01 with no covering task.
+4. Next command: `/gatekit:gate`.
 
 Do not run any task. This command only plans them.
