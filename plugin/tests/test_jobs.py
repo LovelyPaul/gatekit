@@ -757,6 +757,13 @@ class TestDesignSection(JobTestCase):
         prompt = jobs.build_prompt(self.simple_task(), "job-1", "gate output", root=self.root)
         self.assertLess(prompt.index("## Design"), prompt.index("## Previous attempt failed"))
 
+    def test_screens_block_is_absent_without_a_screen_spec(self) -> None:
+        self.write_tokens(self.v2(color={"primary": "#3366ff"}))
+        prompt = jobs.build_prompt(
+            self.simple_task(instruction="Build the S1 view."), "job-1", root=self.root
+        )
+        self.assertNotIn("## Screens", prompt)
+
     def test_start_threads_the_root_into_the_written_prompt(self) -> None:
         self.write_config()
         self.write_tokens(self.v2(color={"primary": "#3366ff"}))
@@ -765,6 +772,146 @@ class TestDesignSection(JobTestCase):
         job = jobs.start(self.root, dry_run=True)
         written = (self.task_dir(job["job_id"], "write-note") / "prompt.md").read_text(encoding="utf-8")
         self.assertIn("color.primary: #3366ff", written)
+
+
+# ------------------------------------------------- screens in the prompt
+
+
+SCREENS_MD = """# Tetris — screen spec
+
+## Screen list
+
+| Screen ID | Name | Feature | Evidence |
+|---|---|---|---|
+| S1 | Start | F3 | designed |
+| S2 | Play | F1 | designed |
+
+## Per-screen states
+
+### S1 — Start
+
+Layout: title at the top, three mode chips below, primary button under them.
+
+| State | What is on screen | Evidence |
+|---|---|---|
+| normal | mode chips, start button, top-ten list | designed |
+| empty | "no scores yet" line in place of the list | designed |
+
+### S2 — Play
+
+Layout: hold box on the left, score in the middle, next three on the right.
+
+| State | What is on screen | Evidence |
+|---|---|---|
+| normal | board, active piece, ghost, touch controls | designed |
+| empty | board empty, hold box dotted | designed |
+"""
+
+
+class TestScreensSection(JobTestCase):
+    """ADR-0011 decision 3: the screen spec is pushed, not pointed at."""
+
+    def write_tokens(self, data: dict) -> None:
+        (self.root / "spec" / "tokens.json").write_text(
+            json.dumps(data, ensure_ascii=False), encoding="utf-8"
+        )
+
+    def write_screens(self, text: str = SCREENS_MD) -> None:
+        (self.root / "spec" / "02-screens.md").write_text(text, encoding="utf-8")
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.write_tokens({"version": 2, "source": [], "patterns": [],
+                           "color": {"primary": "#3366ff"}})
+
+    def test_task_naming_a_screen_gets_that_screen_block(self) -> None:
+        self.write_screens()
+        prompt = jobs.build_prompt(
+            self.simple_task(instruction="Build the S2 play view."), "job-1", root=self.root
+        )
+        self.assertIn("## Screens", prompt)
+        self.assertIn("S2", prompt)
+        self.assertIn("hold box on the left", prompt)
+
+    def test_the_block_carries_the_state_rows(self) -> None:
+        self.write_screens()
+        prompt = jobs.build_prompt(
+            self.simple_task(instruction="Build the S2 play view."), "job-1", root=self.root
+        )
+        self.assertIn("board, active piece, ghost, touch controls", prompt)
+        self.assertIn("board empty, hold box dotted", prompt)
+
+    def test_a_task_naming_no_screen_gets_no_block(self) -> None:
+        self.write_screens()
+        prompt = jobs.build_prompt(
+            self.simple_task(instruction="Write a pure module, no UI."), "job-1", root=self.root
+        )
+        self.assertNotIn("## Screens", prompt)
+
+    def test_only_the_named_screen_is_carried(self) -> None:
+        self.write_screens()
+        prompt = jobs.build_prompt(
+            self.simple_task(instruction="Build the S2 play view."), "job-1", root=self.root
+        )
+        block = prompt.split("## Screens")[1]
+        self.assertIn("hold box on the left", block)
+        self.assertNotIn("three mode chips", block)
+
+    def test_a_task_naming_several_screens_carries_each(self) -> None:
+        self.write_screens()
+        prompt = jobs.build_prompt(
+            self.simple_task(instruction="Build S1 and S2."), "job-1", root=self.root
+        )
+        self.assertIn("three mode chips", prompt)
+        self.assertIn("hold box on the left", prompt)
+
+    def test_screen_ids_respect_word_boundaries(self) -> None:
+        self.write_screens()
+        prompt = jobs.build_prompt(
+            self.simple_task(instruction="Nothing to do with S12 or S20."),
+            "job-1", root=self.root,
+        )
+        self.assertNotIn("## Screens", prompt)
+
+    def test_canonical_spelling_matches(self) -> None:
+        self.write_screens()
+        prompt = jobs.build_prompt(
+            self.simple_task(instruction="Build the S02 play view."), "job-1", root=self.root
+        )
+        self.assertIn("hold box on the left", prompt)
+
+    def test_screens_block_follows_the_design_section(self) -> None:
+        self.write_screens()
+        prompt = jobs.build_prompt(
+            self.simple_task(instruction="Build the S2 play view."), "job-1", root=self.root
+        )
+        self.assertLess(prompt.index("## Design"), prompt.index("## Screens"))
+        self.assertLess(prompt.index("## Screens"), prompt.index("## Reporting"))
+
+    def test_unreadable_screen_spec_leaves_the_prompt_usable(self) -> None:
+        (self.root / "spec" / "02-screens.md").write_text("", encoding="utf-8")
+        prompt = jobs.build_prompt(
+            self.simple_task(instruction="Build the S2 play view."), "job-1", root=self.root
+        )
+        self.assertNotIn("## Screens", prompt)
+        self.assertIn("## Design", prompt)
+
+    def test_a_screen_named_but_absent_from_the_spec_is_skipped(self) -> None:
+        self.write_screens()
+        prompt = jobs.build_prompt(
+            self.simple_task(instruction="Build the S7 view."), "job-1", root=self.root
+        )
+        self.assertNotIn("## Screens", prompt)
+
+    def test_screens_reach_the_worker_through_start(self) -> None:
+        self.write_screens()
+        task = self.simple_task(instruction="Build the S2 play view.")
+        self.write_tasks(task)
+        job = jobs.start(self.root, dry_run=True)
+        written = (self.task_dir(job["job_id"], "write-note") / "prompt.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("hold box on the left", written)
 
 
 # ----------------------------------------------------- exit 3 is unverified
@@ -1273,3 +1420,118 @@ class TestDependencyGating(JobTestCase):
         job = jobs.start(self.root, task_ids=["second"])
         st2 = json.loads((self.task_dir(job["job_id"], "second") / "status.json").read_text())
         self.assertEqual(st2["state"], "passed")
+
+
+class TestScreensParserRobustness(JobTestCase):
+    """Review findings on ADR-0011 decision 3: silent wrong output is the
+    worst failure for a feature whose only job is spec-to-worker fidelity."""
+
+    def write_tokens(self) -> None:
+        (self.root / "spec" / "tokens.json").write_text(
+            json.dumps({"version": 2, "source": [], "patterns": [],
+                        "color": {"primary": "#3366ff"}}), encoding="utf-8"
+        )
+
+    def write_screens(self, text: str) -> None:
+        (self.root / "spec" / "02-screens.md").write_text(text, encoding="utf-8")
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.write_tokens()
+
+    def test_a_fence_does_not_amputate_the_following_state_rows(self) -> None:
+        self.write_screens(
+            "### S1 — Start\n\n"
+            "Layout: title top, chips below.\n\n"
+            "```\n"
+            "### S9 — a heading drawn inside a diagram\n"
+            "| S1 | -> | S2 |\n"
+            "```\n\n"
+            "| State | What |\n|---|---|\n"
+            "| normal | chips and start button |\n"
+        )
+        screens = jobs.parse_screens(
+            (self.root / "spec" / "02-screens.md").read_text(encoding="utf-8")
+        )
+        self.assertEqual(list(screens), ["S1"])
+        prompt = jobs.build_prompt(
+            self.simple_task(instruction="Build S1."), "job-1", root=self.root
+        )
+        self.assertIn("chips and start button", prompt)
+
+    def test_a_heading_inside_a_fence_makes_no_screen(self) -> None:
+        self.write_screens(
+            "### S1 — Start\n\nLayout: a.\n\n```\n### S9 — drawn\n```\n"
+        )
+        self.assertEqual(
+            list(jobs.parse_screens(
+                (self.root / "spec" / "02-screens.md").read_text(encoding="utf-8"))),
+            ["S1"],
+        )
+
+    def test_a_tilde_fence_is_handled_too(self) -> None:
+        self.write_screens(
+            "### S1 — Start\n\nLayout: a.\n\n~~~\n### S9 — drawn\n~~~\n\n"
+            "| State | What |\n|---|---|\n| normal | real row |\n"
+        )
+        screens = jobs.parse_screens(
+            (self.root / "spec" / "02-screens.md").read_text(encoding="utf-8"))
+        self.assertEqual(list(screens), ["S1"])
+        self.assertIn(["normal", "real row"], screens["S1"]["states"][1:])
+
+    def test_an_escaped_pipe_keeps_the_whole_description(self) -> None:
+        self.write_screens(
+            "### S1 — Start\n\nLayout: a.\n\n"
+            "| State | What |\n|---|---|\n"
+            "| normal | press A \\| B to choose |\n"
+        )
+        prompt = jobs.build_prompt(
+            self.simple_task(instruction="Build S1."), "job-1", root=self.root
+        )
+        self.assertIn("press A | B to choose", prompt)
+
+    def test_a_very_long_layout_is_truncated(self) -> None:
+        self.write_screens(
+            "### S1 — Start\n\nLayout: " + ("x" * 50_000) + "\n\n"
+            "| State | What |\n|---|---|\n| normal | ok |\n"
+        )
+        prompt = jobs.build_prompt(
+            self.simple_task(instruction="Build S1."), "job-1", root=self.root
+        )
+        self.assertLess(len(prompt), 20_000)
+        self.assertIn("…", prompt)
+
+    def test_many_screens_stay_within_the_block_budget(self) -> None:
+        body = ""
+        for n in range(1, 13):
+            body += "### S%d — Screen %d\n\nLayout: %s\n\n" % (n, n, "y" * 3000)
+            body += "| State | What |\n|---|---|\n| normal | %s |\n\n" % ("z" * 3000)
+        self.write_screens(body)
+        names = " ".join("S%d" % n for n in range(1, 13))
+        prompt = jobs.build_prompt(
+            self.simple_task(instruction="Build " + names), "job-1", root=self.root
+        )
+        block = prompt.split("## Screens")[1].split("## Reporting")[0]
+        self.assertLess(len(block), jobs.SCREENS_BLOCK_MAX_CHARS + 2000)
+
+    def test_screens_block_needs_no_tokens_file(self) -> None:
+        (self.root / "spec" / "tokens.json").unlink()
+        self.write_screens(
+            "### S1 — Start\n\nLayout: title on top.\n\n"
+            "| State | What |\n|---|---|\n| normal | ok |\n"
+        )
+        prompt = jobs.build_prompt(
+            self.simple_task(instruction="Build S1."), "job-1", root=self.root
+        )
+        self.assertIn("## Screens", prompt)
+        self.assertIn("title on top", prompt)
+
+    def test_word_boundaries_reject_an_embedded_id(self) -> None:
+        self.write_screens(
+            "### S1 — Start\n\nLayout: a.\n\n| State | What |\n|---|---|\n| normal | ok |\n"
+        )
+        prompt = jobs.build_prompt(
+            self.simple_task(instruction="Touch PS1TUTE and XS1 only."),
+            "job-1", root=self.root,
+        )
+        self.assertNotIn("## Screens", prompt)

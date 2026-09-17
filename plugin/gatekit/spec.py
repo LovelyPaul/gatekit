@@ -146,6 +146,7 @@ MESSAGES = {
         "ledger_orphan_inline": "본문 가정 {num}번에 대응하는 원장 행이 없습니다.",
         "ledger_orphan_row": "원장 {num}번 행에 대응하는 본문 가정 표기가 없습니다.",
         "ledger_superseded": "본문이 아직 대체된 가정 A{num}을(를) 가리키고 있습니다. 이를 대체한 A{successor}을(를) 참조하도록 고치세요.",
+        "preview_as_evidence": "근거 칸이 미리보기 파일({path})을 인용하고 있습니다. 미리보기는 이 명세에서 그린 것이므로 명세의 근거가 될 수 없습니다 (ADR-0011).",
         "tokens_unparsable": "spec/tokens.json 을 JSON 객체로 읽을 수 없습니다: {err}",
         "tokens_source": "source 는 {expect} 여야 합니다.",
         "tokens_patterns": "patterns 는 행 객체의 리스트여야 합니다.",
@@ -196,6 +197,7 @@ MESSAGES = {
         "ledger_orphan_inline": "Inline assumption {num} has no matching ledger row.",
         "ledger_orphan_row": "Ledger row {num} has no matching inline assumption marker.",
         "ledger_superseded": "The text still points at superseded assumption A{num}. Reference A{successor}, which supersedes it.",
+        "preview_as_evidence": "An evidence cell cites a preview file ({path}). A preview is drawn from this spec, so it cannot be evidence for it (ADR-0011).",
         "tokens_unparsable": "spec/tokens.json could not be read as a JSON object: {err}",
         "tokens_source": "source must be {expect}.",
         "tokens_patterns": "patterns must be a list of row objects.",
@@ -342,6 +344,63 @@ def _supersessions(section: str) -> Dict[int, int]:
             if superseded != successor:
                 out[superseded] = successor
     return out
+
+
+#: ADR-0011 decision 4. A preview is a *local* `preview-<name>.html` this tool
+#: drew. Matched on the basename so `spec/design/preview-x.html` and a bare
+#: `preview-x.html` are both caught, while `apple-preview.html` — a captured
+#: source, not a drawing — is not.
+_PREVIEW_PATH_RE = re.compile(
+    r"(?<![\w.-])(?:[\w./-]*/)?(preview-[\w.-]*\.html)(?![\w])", re.IGNORECASE
+)
+#: A cell naming a remote page cites something *observed*, which is exactly the
+#: evidence this spec is supposed to carry — even when the vendor happens to
+#: call their page `preview-something.html`. Only local paths are drawings.
+_REMOTE_URL_RE = re.compile(r"\b(?:https?|ftp)://\S+", re.IGNORECASE)
+#: Fenced blocks are pictures of markdown, not markdown: a row shown inside one
+#: is documentation of the rule, not a citation subject to it.
+_FENCE_LINE_RE = re.compile(r"^\s*(?:`{3,}|~{3,})")
+
+
+def _check_preview_citations(name: str, text: str, lang: str) -> List[dict]:
+    """A preview file must never be cited as evidence in this spec.
+
+    The preview is drawn *from* this spec; citing it back would let the spec
+    corroborate itself, turning something designed into something observed.
+    Only table rows outside fenced blocks are checked — prose that mentions the
+    preview ("the owner looked at it") is not a citation, and neither is a
+    fenced example showing what a bad row looks like. A remote URL is spared
+    whatever it is named: fetching a live page is observation.
+    """
+    findings: List[dict] = []
+    seen = set()
+    fence = None
+    for line in (text or "").splitlines():
+        marker = _FENCE_LINE_RE.match(line)
+        if marker:
+            mark = marker.group(0).strip()[0]
+            if fence is None:
+                fence = mark
+            elif mark == fence:
+                fence = None
+            continue
+        if fence is not None:
+            continue
+        stripped = line.strip()
+        if not stripped.startswith("|"):
+            continue
+        # Drop remote URLs before matching: a vendor page called
+        # `preview-widget.html` is an observed source, not our drawing.
+        scannable = _REMOTE_URL_RE.sub(" ", stripped)
+        for match in _PREVIEW_PATH_RE.finditer(scannable):
+            path = match.group(1)
+            if path in seen:
+                continue
+            seen.add(path)
+            findings.append(
+                _finding(name, V.FAIL, _msg(lang, "preview_as_evidence", path=path))
+            )
+    return findings
 
 
 def _check_ledger(text: str, lang: str) -> List[dict]:
@@ -969,6 +1028,12 @@ def validate(root: pathlib.Path, lang: Optional[str] = None) -> dict:
         if text is None:
             continue
         findings.extend(_check_headings(name, text, lang))
+
+    # ADR-0011 decision 4: the two files whose tables carry design evidence.
+    for name in ("02-screens.md", "02-design.md"):
+        text = contents.get(name)
+        if text is not None:
+            findings.extend(_check_preview_citations(name, text, lang))
 
     discovery = contents.get("00-discovery.md")
     if discovery is not None:

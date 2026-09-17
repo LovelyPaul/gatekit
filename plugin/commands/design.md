@@ -52,7 +52,9 @@ design files are still written as usual.
 
 Pick the branch that matches `$ARGUMENTS`. Extract; do not imagine. Every
 extracted row cites the source it came from — a frame name, a file path, a
-selector, or a preset name.
+selector, or a preset name. **Refuse a `spec/design/preview-*.html` path**: a
+preview is drawn from the spec, so reading it back in would let the spec
+corroborate itself (ADR-0011). Say so and ask for a real source.
 
 | Input | How to read it |
 |---|---|

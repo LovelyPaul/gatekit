@@ -112,24 +112,48 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" spec validate --json
 On `fail`, rewrite the offending file from the template rather than patching.
 Never deliver a failing file. Missing 03, 04, 05 are expected `warn` here.
 
-## Step 7 — ask only about gaps
+## Step 7 — one question: the preview, or the gap
 
-At most **one** `AskUserQuestion` call, four options, in `output_lang`. Use it
-for the single gap where guessing wrong would cost the most, usually an error
-or empty state with a real branch behind it.
+**One** `AskUserQuestion` call, skipped after a stop signal ("알아서 해줘").
 
-Skip it after a stop signal.
+**`$ARGUMENTS` empty** — the screens were designed, not observed — spend it on
+the preview (ADR-0011): see a preview of the screens, or go straight on. On a
+yes, run Step 7a. **A design source was read** — the screens were observed, so
+a drawing adds nothing: spend the call on the single gap where guessing wrong
+costs most, usually an error or empty state with a real branch behind it.
+
+## Step 7a — draw, show, correct (only on a yes in Step 7)
+
+Write `spec/design/preview-<project>.html` — one section per `S<n>`, built
+from `spec/02-screens.md` (layout, components, the four states) and
+`spec/tokens.json` (every value) — and publish it so the user can open it.
+
+- **First visible element is the banner**, in `output_lang`: an approximate
+  pattern only, the real build may differ, drawn from the spec rather than
+  observed. This is the responsibility boundary, not politeness — the user is
+  looking at the *screen spec*, not the product.
+- **Static.** A screen's four states are four panels to read, not to click.
+- **Tokens only.** Every value comes from `tokens.json` by name; one the
+  tokens do not carry is **not invented** but drawn as a labelled placeholder
+  naming what is missing. One file, no external requests, no build step.
+
+Then loop until the user is done: show it → they say what to change → **edit
+`spec/02-screens.md`**, never only the HTML, since that file is what reaches
+the workers → redraw and show again. Nothing is recorded as approved and no
+assumption closes; the corrections are the point and they travel in the spec.
+Re-run `spec validate` after any edit, and **never cite the preview in an
+evidence cell** — it is drawn from this spec, so it cannot be evidence for it
+(ADR-0011).
 
 ## Step 8 — report
 
 In `output_lang`:
 
-1. Files written, with paths.
+1. Files written, with paths (the preview too, if one was drawn).
 2. Screens and states extracted, as counts on their own line.
 3. The `spec validate` verdict quoted from the run.
-4. The negative-space list.
-5. The new assumption rows by number.
-6. Next command: `/gatekit:interview` if 01 is still a draft, otherwise
+4. The negative-space list, then the new assumption rows by number.
+5. Next command: `/gatekit:interview` if 01 is still a draft, else
    `/gatekit:tasks`.
 
 State what the mockup showed and what you filled in. Never present a designed

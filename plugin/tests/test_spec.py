@@ -910,3 +910,80 @@ class LedgerSupersessionTests(unittest.TestCase):
 
     def test_english_supersedes_still_requires_a_row_number(self):
         self.assertEqual(spec._supersessions("| A4 | x | low | supersedes nothing |"), {})
+
+
+# ------------------------------------- ADR-0011: a preview is never evidence
+
+
+class TestPreviewNotEvidence(unittest.TestCase):
+    """ADR-0011 decision 4: a drawing made from the spec cannot support it."""
+
+    def setUp(self):
+        import shutil, tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self._tmp.name) / "case"
+        shutil.copytree(FIXTURES / "valid-en", self.root)
+        self.screens = self.root / "spec" / "02-screens.md"
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def findings_for(self, text: str) -> list:
+        self.screens.write_text(text, encoding="utf-8")
+        report = spec.validate(self.root)
+        return [f for f in report["findings"] if "preview" in f["message"].lower()]
+
+    def test_clean_screen_spec_has_no_preview_finding(self):
+        self.assertEqual(self.findings_for(self.screens.read_text(encoding="utf-8")), [])
+
+    def test_citing_a_preview_file_fails(self):
+        text = self.screens.read_text(encoding="utf-8")
+        text += "\n| S9 | Extra | F1 | spec/design/preview-demo.html S9 |\n"
+        findings = self.findings_for(text)
+        self.assertTrue(findings)
+        self.assertEqual(findings[0]["verdict"], "fail")
+
+    def test_the_finding_names_the_file_it_was_found_in(self):
+        text = self.screens.read_text(encoding="utf-8")
+        text += "\n| S9 | Extra | F1 | spec/design/preview-demo.html S9 |\n"
+        self.assertEqual(self.findings_for(text)[0]["file"], "02-screens.md")
+
+    def test_a_bare_preview_filename_is_caught_too(self):
+        text = self.screens.read_text(encoding="utf-8")
+        text += "\n| S9 | Extra | F1 | preview-tetris.html |\n"
+        self.assertTrue(self.findings_for(text))
+
+    def test_prose_mentioning_the_preview_is_not_a_citation(self):
+        text = self.screens.read_text(encoding="utf-8")
+        text += "\nThe owner looked at spec/design/preview-demo.html before the build.\n"
+        self.assertEqual(self.findings_for(text), [])
+
+    def test_an_unrelated_html_path_is_not_a_preview(self):
+        text = self.screens.read_text(encoding="utf-8")
+        text += "\n| S9 | Extra | F1 | spec/design/apple-preview.html |\n"
+        self.assertEqual(self.findings_for(text), [])
+
+    def test_the_check_also_covers_the_design_file(self):
+        (self.root / "spec" / "02-design.md").write_text(
+            "# Design\n\n| P1 | Rule | all | spec/design/preview-demo.html |\n",
+            encoding="utf-8",
+        )
+        report = spec.validate(self.root)
+        hits = [f for f in report["findings"]
+                if "preview" in f["message"].lower() and f["file"] == "02-design.md"]
+        self.assertTrue(hits)
+
+    def test_an_external_url_is_not_a_preview(self):
+        text = self.screens.read_text(encoding="utf-8")
+        text += "\n| S9 | Extra | F1 | https://example.com/preview-widget.html |\n"
+        self.assertEqual(self.findings_for(text), [])
+
+    def test_a_row_inside_a_fence_is_not_a_citation(self):
+        text = self.screens.read_text(encoding="utf-8")
+        text += "\n```\n| S9 | Extra | F1 | spec/design/preview-demo.html |\n```\n"
+        self.assertEqual(self.findings_for(text), [])
+
+    def test_a_local_preview_path_is_still_caught(self):
+        text = self.screens.read_text(encoding="utf-8")
+        text += "\n| S9 | Extra | F1 | ./spec/design/preview-demo.html |\n"
+        self.assertTrue(self.findings_for(text))

@@ -268,6 +268,179 @@ def _design_lines(task: dict, tokens: dict) -> list:
     return lines
 
 
+#: A per-screen heading in `spec/02-screens.md`: `### S2 — 플레이` / `### S2 - Play`.
+_SCREEN_HEADING_RE = re.compile(r"^###\s+(?P<id>[Ss]\d+)\b\s*[—\-–:]?\s*(?P<name>.*)$")
+#: A fenced block opens and closes with three or more backticks or tildes. A
+#: screen spec draws flow diagrams in these, and their contents are pictures of
+#: markdown, not markdown: a `### S9` inside one names no screen and a `|` line
+#: inside one is not a state row.
+_FENCE_RE = re.compile(r"^\s*(?P<mark>`{3,}|~{3,})")
+#: Longest a single copied layout paragraph or state row may be before it is
+#: cut. Spec prose has no natural bound, unlike the `name: value` token lines
+#: beside it, and an unbounded paragraph would become an unusable worker stdin.
+SCREEN_TEXT_MAX_CHARS = 1200
+#: Longest the whole `## Screens` block may be. A task naming a dozen screens
+#: must not crowd out its own instruction.
+SCREENS_BLOCK_MAX_CHARS = 8000
+
+
+def _clip(text: str, limit: int = SCREEN_TEXT_MAX_CHARS) -> str:
+    """*text*, cut to *limit* with an ellipsis so the cut is visible."""
+    text = (text or "").strip()
+    return text if len(text) <= limit else text[:limit].rstrip() + " …"
+
+
+def _split_row(line: str) -> list:
+    """Table cells, honouring ``\\|`` as a literal pipe inside a cell.
+
+    A naive ``split("|")`` truncates any state description containing an
+    escaped pipe ("press A \\| B"), which is silent data loss in the one place
+    this feature exists to be faithful.
+    """
+    cells, current, index = [], [], 0
+    while index < len(line):
+        char = line[index]
+        if char == "\\" and index + 1 < len(line) and line[index + 1] == "|":
+            current.append("|")
+            index += 2
+            continue
+        if char == "|":
+            cells.append("".join(current))
+            current = []
+            index += 1
+            continue
+        current.append(char)
+        index += 1
+    cells.append("".join(current))
+    # A well-formed row opens and closes with a pipe, so drop the empty ends.
+    if cells and not cells[0].strip():
+        cells.pop(0)
+    if cells and not cells[-1].strip():
+        cells.pop()
+    return [c.strip() for c in cells]
+
+
+def parse_screens(text: str) -> dict:
+    """``{canonical id: {"name", "layout", "states"}}`` from `02-screens.md`.
+
+    ADR-0011 decision 3. The per-screen sections of the screen spec are
+    regular: a `### S<n> — <name>` heading, a prose layout line, then a state
+    table. Only those three things are taken; the screen list and flow tables
+    at the top of the file repeat what the sections already say.
+
+    Parsing is forgiving by design — a file that does not match returns the
+    screens it could read and nothing else. A missing block is a prompt that
+    reads as it did before this ADR, never a failed job.
+    """
+    from gatekit import design as design_mod
+
+    screens: dict = {}
+    current = None
+    fence = None  # the marker that opened the block we are inside, or None
+    for line in (text or "").splitlines():
+        marker = _FENCE_RE.match(line)
+        if marker:
+            mark = marker.group("mark")
+            if fence is None:
+                fence = mark[0]
+                continue
+            if mark[0] == fence:  # a closing fence of the same kind
+                fence = None
+                continue
+        if fence is not None:
+            # Inside a fence every line is a picture of markdown, not markdown:
+            # a `### S9` names no screen and a `|` line is not a state row.
+            continue
+        heading = _SCREEN_HEADING_RE.match(line)
+        if heading:
+            try:
+                screen_id = design_mod.normalize_id(heading.group("id"))
+            except (ValueError, IndexError):
+                current = None
+                continue
+            current = {"name": heading.group("name").strip(), "layout": "", "states": []}
+            screens[screen_id] = current
+            continue
+        if current is None:
+            continue
+        if line.startswith("## "):  # left the per-screen sections entirely
+            current = None
+            continue
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("|"):
+            cells = _split_row(stripped)
+            # separator rows (|---|---|) carry no content
+            if cells and not all(set(c) <= set("-: ") for c in cells):
+                current["states"].append(cells)
+            continue
+        if not current["layout"] and not stripped.startswith(">"):
+            current["layout"] = stripped
+    return screens
+
+
+def _screen_lines(task: dict, screens: dict) -> list:
+    """The ``## Screens`` body: the screens this task names, or ``[]``.
+
+    Matched by the same `S<n>` scan `_pattern_applies` uses, so a task that
+    names no screen carries no block and a task that names several carries
+    each. A named screen the spec does not describe is skipped rather than
+    reported: the task file and the screen spec disagreeing is a spec problem,
+    not something to raise inside a worker's brief.
+
+    Copied prose is bounded twice — per paragraph and per block — because spec
+    text, unlike the `name: value` token lines beside it, has no natural limit
+    and an unbounded paragraph would become an unusable worker stdin.
+    """
+    from gatekit import design as design_mod
+
+    task_text = "\n".join([str(task.get("title", "")), str(task.get("instruction", ""))])
+    wanted = [s for s in design_mod.referenced_ids(task_text) if s in screens]
+    lines, budget = [], SCREENS_BLOCK_MAX_CHARS
+    for screen_id in wanted:
+        if budget <= 0:
+            lines.append(
+                "(%d more screen(s) omitted for length — read spec/02-screens.md)"
+                % (len(wanted) - len([l for l in lines if l.startswith("### ")]))
+            )
+            break
+        screen = screens[screen_id]
+        heading = "### %s" % screen_id
+        if screen.get("name"):
+            heading += " — %s" % _clip(screen["name"], 200)
+        lines.append(heading)
+        if screen.get("layout"):
+            layout = _clip(screen["layout"])
+            lines.extend(["", layout])
+            budget -= len(layout)
+        states = screen.get("states") or []
+        if len(states) > 1:  # a header row plus at least one state
+            lines.append("")
+            for row in states[1:]:
+                row_text = _clip(": ".join(row[:2]))
+                lines.append("- %s" % row_text)
+                budget -= len(row_text)
+        lines.append("")
+    return lines
+
+
+def _screens_for(task: dict, root) -> list:
+    """`_screen_lines` for the project's screen spec; ``[]`` when unreadable."""
+    try:
+        text = (pathlib.Path(str(root)) / "spec" / "02-screens.md").read_text(
+            encoding="utf-8", errors="replace"
+        )
+    except OSError:
+        return []
+    try:
+        return _screen_lines(task, parse_screens(text))
+    except Exception:
+        # A malformed screen spec must never cost a job; the brief simply
+        # reads as it did before ADR-0011.
+        return []
+
+
 def build_prompt(task: dict, job_id: str, extra: str = "", root=None) -> str:
     """The self-contained brief handed to the worker on stdin.
 
@@ -320,6 +493,12 @@ def build_prompt(task: dict, job_id: str, extra: str = "", root=None) -> str:
         tokens = design_mod.load_tokens(root)
         if has_design(tokens):
             parts += ["## Design", ""] + _design_lines(task, tokens) + [""]
+        # ADR-0011 decision 3: the screen spec is pushed into the brief, not
+        # pointed at, so a correction the owner made at preview time reaches
+        # the worker as text.
+        screen_lines = _screens_for(task, root)
+        if screen_lines:
+            parts += ["## Screens", ""] + screen_lines
 
     parts += [
         "## Reporting",
