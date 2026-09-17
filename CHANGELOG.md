@@ -4,6 +4,50 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.7.0 — 2026-09-17
+
+### Added
+
+- Design preview (ADR-0011): when `/gatekit:mockup` had no design source to
+  read, it offers to draw `spec/design/preview-<project>.html` from the screen
+  spec and `tokens.json` — static, tokens-only, opening with a banner saying
+  the screens were drawn rather than observed. Corrections are applied to
+  `spec/02-screens.md` and the preview redrawn from it; nothing is recorded as
+  approved and no assumption closes.
+- The worker brief now carries a `## Screens` block (ADR-0011) built by code
+  from `spec/02-screens.md` — the layout line and state rows for each `S<n>` a
+  task names, matched the same way the `P<n>` design patterns already were.
+  Previously only tokens and patterns were pushed and layout was a pointer, so
+  a correction made at preview time reached a worker only if it opened the
+  file. Copied prose is clipped per paragraph and per block.
+- Question signals beyond the raw count (ADR-0012). Past the two free
+  interview calls a command must write `ledger.questions.justification` — one
+  line naming what it would write differently depending on the answer — which
+  the call consumes; a call without one records `unjustified`. A justified
+  call followed by no write records `unrealized`; a question that fingerprints
+  onto an earlier one records `repeated`; a call whose options are all code
+  tokens records `implementation_choice`. All informational, none block.
+
+### Changed
+
+- `spec validate` fails when an evidence cell in `02-screens.md` or
+  `02-design.md` cites a `preview-*.html` file, and `/gatekit:design` refuses
+  one as input: a drawing made from the spec cannot be evidence for it.
+  Remote URLs and rows inside fenced blocks are spared.
+- The prompt injection reports the new question signals when any is non-zero:
+  `questions=6/2 (2 unjustified, 1 repeat)`.
+- `policy/questioning.md` states the budget as a threshold rather than a
+  ceiling, and its over-questioning guard gains one condition: a question that
+  asks the user to arbitrate a choice the command was better placed to make.
+
+### Deferred
+
+- Build visibility (ADR-0010) is drafted and parked. Elapsed time, `--watch`
+  and a file-activity hint are designed but unimplemented: the evidence is one
+  abnormal build, so the ranking inside it is inference. One finding stands
+  regardless — `output.txt` cannot be tailed for progress, because the default
+  backend emits a single JSON object only at exit.
+
 ## 0.6.0 — 2026-09-14
 
 ### Added
