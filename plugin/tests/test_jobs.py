@@ -1958,3 +1958,203 @@ class TestTaskShape(JobTestCase):
             self.simple_task(task_id="a", target="src/a.txt"),
             self.simple_task(task_id="b", target="src/b.txt", depends_on=["a"], round=2))
         self.assertEqual(jobs.run(["shape", "--root", str(self.root)]), 0)
+
+
+# ------------------- ADR-0014: attempts are counted per task, not per job
+
+
+class TestAttemptLedger(JobTestCase):
+    """On gk-trial2 one task failed eight times and the budget never fired:
+    `start` writes attempt=1, so every new job reset the counter. The count
+    now lives with the task."""
+
+    def ledger(self) -> dict:
+        return jobs.read_json(self.root / ".gatekit" / "attempts.json", {}) or {}
+
+    def failures(self, task_id: str) -> int:
+        return int(((self.ledger().get("tasks") or {}).get(task_id) or {})
+                   .get("failures", 0))
+
+    def test_a_failure_is_recorded(self) -> None:
+        jobs.record_attempt(self.root, "t", "failed", job_id="j1", gate="g")
+        self.assertEqual(self.failures("t"), 1)
+
+    def test_failures_accumulate_across_jobs(self) -> None:
+        for job in ("j1", "j2", "j3"):
+            jobs.record_attempt(self.root, "t", "failed", job_id=job)
+        self.assertEqual(self.failures("t"), 3)
+
+    def test_a_pass_clears_the_count(self) -> None:
+        jobs.record_attempt(self.root, "t", "failed", job_id="j1")
+        jobs.record_attempt(self.root, "t", "passed", job_id="j2")
+        self.assertEqual(self.failures("t"), 0)
+
+    def test_blocked_and_stopped_do_not_count(self) -> None:
+        jobs.record_attempt(self.root, "t", "failed", job_id="j1")
+        jobs.record_attempt(self.root, "t", "blocked", job_id="j2")
+        jobs.record_attempt(self.root, "t", "stopped", job_id="j3")
+        self.assertEqual(self.failures("t"), 1)
+
+    def test_a_timeout_counts_as_a_failure(self) -> None:
+        jobs.record_attempt(self.root, "t", "timeout", job_id="j1")
+        self.assertEqual(self.failures("t"), 1)
+
+    def test_tasks_are_counted_separately(self) -> None:
+        jobs.record_attempt(self.root, "a", "failed", job_id="j1")
+        jobs.record_attempt(self.root, "b", "failed", job_id="j1")
+        jobs.record_attempt(self.root, "a", "failed", job_id="j2")
+        self.assertEqual((self.failures("a"), self.failures("b")), (2, 1))
+
+    def test_the_entry_remembers_where_it_failed(self) -> None:
+        jobs.record_attempt(self.root, "t", "failed", job_id="j9", gate="e2e")
+        entry = (self.ledger().get("tasks") or {}).get("t") or {}
+        self.assertEqual(entry.get("last_job"), "j9")
+        self.assertEqual(entry.get("last_gate"), "e2e")
+
+    def test_a_corrupt_file_behaves_as_empty(self) -> None:
+        (self.root / ".gatekit" / "attempts.json").write_text("{nope", encoding="utf-8")
+        self.assertEqual(jobs.consecutive_failures(self.root, "t"), 0)
+        jobs.record_attempt(self.root, "t", "failed", job_id="j1")
+        self.assertEqual(self.failures("t"), 1)
+
+    def test_force_retry_clears_one_task_only(self) -> None:
+        jobs.record_attempt(self.root, "a", "failed", job_id="j1")
+        jobs.record_attempt(self.root, "b", "failed", job_id="j1")
+        jobs.clear_attempts(self.root, "a")
+        self.assertEqual((self.failures("a"), self.failures("b")), (0, 1))
+
+
+class TestBudgetBindsAcrossJobs(JobTestCase):
+    def exhaust(self, task_id: str = "write-note") -> None:
+        for job in ("j1", "j2"):
+            jobs.record_attempt(self.root, task_id, "failed", job_id=job, gate="g")
+
+    def test_start_refuses_a_task_at_the_limit(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        self.exhaust()
+        with self.assertRaises(jobs.RetryBudgetExceeded):
+            jobs.start(self.root)
+
+    def test_the_refusal_names_the_task_and_the_count(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        self.exhaust()
+        try:
+            jobs.start(self.root)
+            self.fail("expected a refusal")
+        except jobs.RetryBudgetExceeded as exc:
+            self.assertIn("write-note", str(exc))
+            self.assertIn("2", str(exc))
+
+    def test_start_runs_a_task_below_the_limit(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        jobs.record_attempt(self.root, "write-note", "failed", job_id="j1")
+        job = jobs.start(self.root, dry_run=True)
+        self.assertIn("write-note", job["tasks"])
+
+    def test_force_retry_lets_start_proceed(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        self.exhaust()
+        jobs.clear_attempts(self.root, "write-note")
+        job = jobs.start(self.root, dry_run=True)
+        self.assertIn("write-note", job["tasks"])
+
+    def test_a_passing_task_frees_the_budget_again(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        self.exhaust()
+        jobs.record_attempt(self.root, "write-note", "passed", job_id="j3")
+        job = jobs.start(self.root, dry_run=True)
+        self.assertIn("write-note", job["tasks"])
+
+    def test_cli_start_exits_three_when_refused(self) -> None:
+        """Exit 3 is already "out of retries" for `redelegate`; a refusal at
+        `start` for the same reason uses the same code rather than inventing
+        one, so a script sees one signal for one condition."""
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        self.exhaust()
+        self.assertEqual(jobs.run(["start", "--root", str(self.root)]), 3)
+
+    def test_cli_force_retry_clears_and_starts(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        self.exhaust()
+        self.set_env(FAKE_WORKER_OUT="src/note.txt")
+        code = jobs.run(["start", "--force-retry", "write-note",
+                         "--root", str(self.root)])
+        self.assertEqual(code, 0)
+
+
+class TestAttemptWiring(JobTestCase):
+    """The counter must see the same events the status file does."""
+
+    def failures(self, task_id: str) -> int:
+        return jobs.consecutive_failures(self.root, task_id)
+
+    def test_a_worker_failure_is_counted(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())   # gate fails: no file written
+        self.set_env(FAKE_WORKER_OUT="")
+        jobs.start(self.root)
+        self.assertEqual(self.failures("write-note"), 1)
+
+    def test_a_worker_pass_clears_it(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        jobs.record_attempt(self.root, "write-note", "failed", job_id="old")
+        self.set_env(FAKE_WORKER_OUT="src/note.txt")
+        jobs.start(self.root)
+        self.assertEqual(self.failures("write-note"), 0)
+
+    def test_complete_task_counts_as_an_attempt(self) -> None:
+        cfg = {"build": {"execution": "host", "parallel": 1, "task_timeout_s": 60},
+               "worker": {"default": "fake", "backends": {"fake": {
+                   "argv": [sys.executable, str(FAKE_WORKER)], "enabled": True}}}}
+        (self.root / ".gatekit" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root)
+        jobs.complete_task(self.root, "write-note", job_id=job["job_id"])
+        self.assertEqual(self.failures("write-note"), 1)
+
+    def test_recheck_does_not_count_as_an_attempt(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root, dry_run=True)
+        jobs.recheck(self.root, job_id=job["job_id"])
+        self.assertEqual(self.failures("write-note"), 0)
+
+
+class TestStatusShowsCarriedCount(JobTestCase):
+    def test_status_reports_consecutive_failures(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        jobs.record_attempt(self.root, "write-note", "failed", job_id="old1")
+        job = jobs.start(self.root, dry_run=True)
+        payload = jobs.status(self.root, job["job_id"])
+        row = payload["tasks"][0]
+        self.assertEqual(row["consecutive_failures"], 1)
+
+    def test_table_shows_the_count_when_it_exceeds_the_in_job_attempt(self) -> None:
+        import contextlib, io
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        jobs.record_attempt(self.root, "write-note", "failed", job_id="old1")
+        job = jobs.start(self.root, dry_run=True)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            jobs.run(["status", "--job", job["job_id"], "--root", str(self.root)])
+        self.assertIn("1 consecutive", out.getvalue())
+
+    def test_table_says_nothing_when_the_count_is_not_ahead(self) -> None:
+        import contextlib, io
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root, dry_run=True)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            jobs.run(["status", "--job", job["job_id"], "--root", str(self.root)])
+        self.assertNotIn("consecutive", out.getvalue())

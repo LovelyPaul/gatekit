@@ -4,6 +4,43 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.9.0 — 2026-09-17
+
+ADR-0013's first open question, closed the same day it was raised.
+`build.max_retries` was meant to stop a task that keeps failing, but
+`status.json.attempt` resets on every `jobs start`. Replaying the real
+`gk-trial2` job history: one task (`e2e-full-flow`) failed **eight times**
+across ten jobs, climbing to attempt 3 and resetting three separate times,
+and the budget never fired once.
+
+### Added
+
+- `.gatekit/attempts.json` counts consecutive failures **per task**, across
+  jobs. `passed` resets a task's count to zero; `blocked`/`stopped` leave it
+  alone, since neither judges the work. Both `jobs start` and
+  `jobs redelegate` now refuse a task at the limit (exit 3), where before
+  only `redelegate` checked, and starting a fresh job was exactly how the
+  budget was escaped.
+- `jobs start --force-retry <task_id>[,<task_id>...]` clears one or more
+  tasks' counts once the cause is actually fixed.
+- `jobs status` reports each task's carried failure count, and the table
+  prints `(n consecutive)` whenever it is nonzero — a task at "attempt 1" in
+  a fresh job that has already failed elsewhere no longer reads as untried.
+
+### Changed
+
+- `execute_task` and `jobs complete` (host execution, ADR-0013) both feed the
+  new counter — a host-implemented attempt counts exactly as a worker's does.
+  `jobs recheck` does not: re-running a gate against existing code is not an
+  attempt at the work.
+- `build.md` states the budget as code-enforced across jobs rather than an
+  operator's own count, and documents `--force-retry`.
+
+Verified by replaying `gk-trial2`'s actual job history through the new
+counter: `jobs start` now refuses before the run's **third** consecutive
+`e2e-full-flow` failure — the real run's other seven attempts, and roughly
+two hours, never happen.
+
 ## 0.8.0 — 2026-09-17
 
 Measured on a real project (`gk-trial2`, a Next.js + Prisma + Playwright

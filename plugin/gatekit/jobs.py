@@ -855,6 +855,9 @@ def execute_task(root, jdir, job_id: str, task: dict, backend: dict, timeout_s: 
     else:
         detail = "worker exited 0 and %d/%d gates ok" % (gates["passed"], gates["total"])
 
+    # ADR-0014: the count follows the task across jobs.
+    record_attempt(root, task_id, state, job_id=job_id,
+                   gate=_first_failing_gate(gates))
     return _set_status(
         jdir,
         task_id,
@@ -1123,6 +1126,25 @@ def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False,
             "no tasks found; expected ```gatekit-task fences in spec/04-tasks.md"
         )
 
+    # ADR-0014: the budget binds here too. Starting a fresh job was how it was
+    # escaped on gk-trial2 — the counter lived in status.json, which `start`
+    # resets — so refusing only in `redelegate` closes half the door.
+    retry_limit = int(build_cfg.get("max_retries", 2) or 0)
+    exhausted = [
+        str(t.get("id")) for t in tasks
+        if consecutive_failures(root, str(t.get("id"))) >= retry_limit > 0
+    ]
+    if exhausted:
+        raise RetryBudgetExceeded(
+            "task(s) %s already failed %d consecutive time(s) across jobs "
+            "(max_retries=%d). Read spec/RECOVERY.md and the failing gate's "
+            "output, then re-run with --force-retry <task_id> once the cause "
+            "is addressed." % (
+                ", ".join(exhausted),
+                max(consecutive_failures(root, t) for t in exhausted),
+                retry_limit)
+        )
+
     mode = execution_mode(cfg)
     if backend_name:
         # Naming a backend is an explicit request for that model to do the work.
@@ -1213,6 +1235,94 @@ def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False,
 
     _finalise_unrun(jdir, tasks_to_run, stopped=_stop_requested(jdir))
     return _finalise_job(jdir, job)
+
+
+# --------------------------------------------------- attempts (ADR-0014)
+
+#: Per-task consecutive-failure counts, beside config.json. The count lives
+#: with the **task** because that is what an operator retries: `status.json`
+#: resets to `attempt=1` on every `jobs start`, so a task that failed eight
+#: times across ten jobs never reached `max_retries` even once (gk-trial2).
+ATTEMPTS_FILE = "attempts.json"
+#: States that count as a judged failure of the work. `blocked` and `stopped`
+#: are neither — one never ran, the other was ended by the operator.
+ATTEMPT_FAILURE_STATES = ("failed", "timeout")
+
+
+def _first_failing_gate(gates: dict) -> str:
+    """Name of the first gate that did not pass, for the ledger's record."""
+    for gate in (gates or {}).get("gates") or []:
+        if isinstance(gate, dict) and gate.get("verdict") != verdict.OK:
+            return str(gate.get("name", ""))
+    return ""
+
+
+def _attempts_path(root):
+    return paths.state_dir(root) / ATTEMPTS_FILE
+
+
+def read_attempts(root) -> dict:
+    """The attempt ledger; an absent or corrupt file reads as empty."""
+    data = read_json(_attempts_path(root), None)
+    if not isinstance(data, dict):
+        return {"version": 1, "tasks": {}}
+    tasks = data.get("tasks")
+    if not isinstance(tasks, dict):
+        data["tasks"] = {}
+    return data
+
+
+def consecutive_failures(root, task_id: str) -> int:
+    entry = (read_attempts(root).get("tasks") or {}).get(str(task_id))
+    if not isinstance(entry, dict):
+        return 0
+    try:
+        return int(entry.get("failures", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def record_attempt(root, task_id: str, state: str, job_id: str = "",
+                   gate: str = "") -> int:
+    """Fold one terminal outcome into the task's count; returns the new total.
+
+    A `passed` clears the entry: the run converged, and what matters is whether
+    a task is *currently* looping. Anything that is not a judgement of the work
+    leaves the count alone.
+    """
+    task_id = str(task_id)
+    data = read_attempts(root)
+    tasks = data.setdefault("tasks", {})
+    entry = tasks.get(task_id)
+    if not isinstance(entry, dict):
+        entry = {"failures": 0}
+
+    if state == "passed":
+        entry = {"failures": 0}
+    elif state in ATTEMPT_FAILURE_STATES:
+        try:
+            entry["failures"] = int(entry.get("failures", 0) or 0) + 1
+        except (TypeError, ValueError):
+            entry["failures"] = 1
+        entry["last_job"] = str(job_id)
+        entry["last_gate"] = str(gate)
+    else:
+        return consecutive_failures(root, task_id)
+
+    entry["updated_at"] = _now()
+    tasks[task_id] = entry
+    data["version"] = 1
+    write_json(_attempts_path(root), data)
+    return int(entry.get("failures", 0) or 0)
+
+
+def clear_attempts(root, task_id: str) -> None:
+    """Forget one task's failures — `--force-retry`, the operator saying they
+    changed something. Per task, never global."""
+    data = read_attempts(root)
+    if str(task_id) in (data.get("tasks") or {}):
+        del data["tasks"][str(task_id)]
+        write_json(_attempts_path(root), data)
 
 
 def _dependency_evidence(task: dict, dependency: dict) -> bool:
@@ -1366,6 +1476,9 @@ def complete_task(root, task_id: str, job_id: Optional[str] = None) -> dict:
     gates = run_gates(root, task)
     write_json(_task_dir(jdir, task_id) / "gates.json", gates)
     passed = gates["total"] > 0 and gates["verdict"] == verdict.OK
+    # A host attempt is an attempt: it must count exactly as a worker's does.
+    record_attempt(root, task_id, "passed" if passed else "failed",
+                   job_id=job_id, gate=_first_failing_gate(gates))
     return _set_status(
         jdir,
         task_id,
@@ -1462,11 +1575,15 @@ def status(root, job_id: Optional[str] = None) -> dict:
     rows = []
     for task_id in job.get("tasks", []):
         st = read_json(_task_dir(jdir, task_id) / "status.json", {}) or {}
+        # ADR-0014: the count carried across jobs, so a task on its first
+        # attempt in *this* job but its sixth overall does not look fresh.
+        carried = consecutive_failures(root, task_id)
         rows.append(
             {
                 "id": task_id,
                 "state": st.get("state", "queued"),
                 "attempt": st.get("attempt", 1),
+                "consecutive_failures": carried,
                 "gates_passed": st.get("gates_passed", 0),
                 "gates_total": st.get("gates_total", 0),
                 "detail": st.get("detail", ""),
@@ -1638,10 +1755,17 @@ def redelegate(root, task_id: str, job_id: Optional[str] = None) -> dict:
     st = read_json(tdir / "status.json", {}) or {}
     attempt = int(st.get("attempt", 1) or 1)
     max_retries = int(job.get("max_retries", 2) or 0)
-    if attempt > max_retries:
+    # ADR-0014: whichever is further along — this job's attempts or the count
+    # carried across jobs. The in-job number alone was resettable by starting
+    # another job, which is how a task failed eight times under a budget of 2.
+    carried = consecutive_failures(root, task_id)
+    if max_retries > 0 and (attempt > max_retries or carried > max_retries):
         raise RetryBudgetExceeded(
-            "task %r already used %d attempt(s); max_retries=%d"
-            % (task_id, attempt, max_retries)
+            "task %r has failed %d consecutive time(s) across jobs "
+            "(attempt %d in this job; max_retries=%d). Read spec/RECOVERY.md "
+            "and the failing gate's output; once the cause is addressed, "
+            "`jobs start --force-retry %s`."
+            % (task_id, max(carried, attempt - 1), attempt, max_retries, task_id)
         )
 
     # ADR-0009 decision 2: the operator may have fixed the task since the job
@@ -1791,7 +1915,8 @@ def _positionals(argv: list) -> list:
             # Value-taking flags are those `_opt` is asked for; the rest are
             # bare switches whose next argument is a real positional.
             skip = arg in ("--root", "--job", "--task", "--tasks", "--backend",
-                           "--parallel", "--timeout", "--prompt", "--lang")
+                           "--parallel", "--timeout", "--prompt", "--lang",
+                           "--force-retry")
             continue
         out.append(arg)
     return out
@@ -1801,9 +1926,17 @@ def _print_table(payload: dict) -> None:
     print("job %s  backend=%s  verdict=%s" % (
         payload.get("job_id"), payload.get("backend"), payload.get("verdict")))
     for row in payload.get("tasks", []):
-        print("  %-24s %-12s %d/%d  %s" % (
+        # ADR-0014: a carried count beyond this job's own attempt is the case
+        # that used to be invisible — a task freshly "attempt 1" here that has
+        # actually failed several times across other jobs.
+        # Any carried failure is worth a flag: even "attempt 1" in this job
+        # can be a task's third loss elsewhere, and that is exactly the case
+        # that was invisible before ADR-0014.
+        carried = row.get("consecutive_failures", 0)
+        suffix = " (%d consecutive)" % carried if carried > 0 else ""
+        print("  %-24s %-12s %d/%d  %s%s" % (
             row["id"], row["state"], row["gates_passed"], row["gates_total"],
-            row.get("detail", "")))
+            row.get("detail", ""), suffix))
 
 
 def _print_compact(payload: dict) -> None:
@@ -1822,6 +1955,11 @@ def run(argv: list) -> int:
 
     try:
         if cmd == "start":
+            forced = _opt(rest, "--force-retry")
+            if forced:
+                for task_id in forced.split(","):
+                    if task_id.strip():
+                        clear_attempts(root, task_id.strip())
             tasks_arg = _opt(rest, "--tasks")
             job = start(
                 root,

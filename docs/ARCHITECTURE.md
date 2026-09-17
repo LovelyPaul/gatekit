@@ -95,6 +95,7 @@ gatekit/
     ├── contract.json           # derived from 05-gate.md by `gatekit contract derive`
     ├── runs/<session_id>.json  # ignored. ledger (§4)
     ├── runs/hook-errors.log    # ignored
+    ├── attempts.json           # committed. per-task consecutive-failure counts (ADR-0014)
     └── jobs/<job_id>/          # ignored. see §10
 ```
 
@@ -411,6 +412,28 @@ the worker exits; a worker that exits 0 but fails a gate is `failed`, never
 with the failed gate output appended to the prompt, up to `max_retries`.
 `results --compact` prints one line per task: `id state gates_passed/total`.
 
+**ADR-0014 — attempts are counted per task, not per job.** `status.json.attempt`
+resets to 1 on every `jobs start`, so on gk-trial2 one task failed eight times
+across ten jobs and `max_retries` never fired even once — the counter climbed
+to 3 and restarted three separate times. `.gatekit/attempts.json` now holds
+`{"tasks": {id: {"failures", "last_job", "last_gate", "updated_at"}}}`.
+`jobs.record_attempt(root, task_id, state, job_id, gate)` folds one terminal
+outcome in: `passed` resets to 0, `failed`/`timeout` increment, `blocked` and
+`stopped` are untouched (neither is a judgement of the work). `execute_task`
+and `complete_task` both call it — a host attempt counts exactly as a worker's
+does — and `recheck` does not, since re-running a gate against existing code is
+not an attempt at the work. Both `start` (refusing to include an exhausted
+task, `consecutive_failures(root, id) >= max_retries`) and `redelegate`
+(refusing when the carried count would put the task past the budget,
+`carried > max_retries`, alongside the existing in-job `attempt > max_retries`
+check) now raise `RetryBudgetExceeded`, CLI exit 3. `jobs start --force-retry
+<id>[,<id>...]` clears one or more tasks' entries first. `status()` rows carry
+`consecutive_failures`, and the table prints `(n consecutive)` whenever it is
+non-zero, so a task at "attempt 1" in a fresh job that has already failed
+elsewhere does not read as untried. Replaying gk-trial2's actual job history
+through this counter, `start` refuses before the run's third consecutive
+`e2e-full-flow` failure — the real run's other seven attempts never happen.
+
 **ADR-0013 — who implements a task.** `build.execution` is `host` or `worker`
 (`jobs.execution_mode`; an unset or unrecognised value means `host`, but
 `config.DEFAULTS` carries `worker` so a project written before the ADR keeps
@@ -596,7 +619,7 @@ task id refused; `--backend` forcing worker mode; a config without
 `build.execution` still spawning; `recheck` passing a task whose gate was
 narrowed, leaving a still-failing one `failed`, reading the current task file
 rather than the job snapshot, naming tasks missing from it, and being
-idempotent; and `_positionals` not mistaking an option's value for a task id. `shape` counting tasks and rounds, sharing a round between independent tasks, flagging a dependency with no evidence in the instruction while sparing one named there or named by id, and reporting the pruned round total; a task warned as verification-shaped when it writes only test paths and its **transitive** dependency reach is two or more, and not warned on one direct dependency, a source path in scope, a `read-only` scope, or a cycle; the finding staying a `warn`. The PreCompact hook: recording every task's state, naming the job, creating PROGRESS.md when absent, leaving human content intact, replacing its own block on a second compaction, writing nothing with no job, surviving a corrupt status file and an unwritable spec dir, exiting 0 as a subprocess, and leaving `spec validate` findings unchanged.
+idempotent; and `_positionals` not mistaking an option's value for a task id. `shape` counting tasks and rounds, sharing a round between independent tasks, flagging a dependency with no evidence in the instruction while sparing one named there or named by id, and reporting the pruned round total; a task warned as verification-shaped when it writes only test paths and its **transitive** dependency reach is two or more, and not warned on one direct dependency, a source path in scope, a `read-only` scope, or a cycle; the finding staying a `warn`. The PreCompact hook: recording every task's state, naming the job, creating PROGRESS.md when absent, leaving human content intact, replacing its own block on a second compaction, writing nothing with no job, surviving a corrupt status file and an unwritable spec dir, exiting 0 as a subprocess, and leaving `spec validate` findings unchanged. ADR-0014: a failure incrementing the attempt ledger and a pass clearing it; `blocked`/`stopped` leaving it alone; `redelegate` and `start` both refusing at the budget with exit 3; `--force-retry` clearing exactly one task; `recheck` not counting while `complete_task` does; a corrupt or missing `attempts.json` reading as empty; the status row and table showing the carried count.
 
 ADR-0012 adds, in `gates/question.py`: a justified over-budget call consuming
 its line and raising nothing; an unjustified one raising `unjustified`; the
@@ -701,6 +724,9 @@ def execution_mode(cfg: dict) -> str                   # "host" | "worker" (ADR-
 def complete_task(root, task_id: str, job_id: str | None = None) -> dict   # host-implemented task -> gates -> status.json
 def recheck(root, task_ids=None, job_id: str | None = None) -> dict        # {"job_id","rechecked","missing"}; gates only, no worker
 def shape(root, task_ids=None) -> dict                 # {tasks, rounds, waves, serial, unevidenced, rounds_if_pruned} (ADR-0013)
+def record_attempt(root, task_id: str, state: str, job_id="", gate="") -> int   # ADR-0014
+def consecutive_failures(root, task_id: str) -> int    # ADR-0014
+def clear_attempts(root, task_id: str) -> None         # --force-retry, ADR-0014
 class GatePreflightError(ValueError)
 TERMINAL_STATES, NOT_DONE_STATES                       # the two state sets every consumer of status.json uses
 

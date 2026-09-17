@@ -125,13 +125,13 @@ again. Under `worker`, `jobs redelegate <task_id>`: it archives the attempt
 under `attempt-N/`, appends the gate output to the prompt and re-runs; exit 3
 means out of retries (`build.max_retries`) and you do not retry past it.
 
-Count consecutive failures per task, **across jobs as well as within one** —
-`max_retries` resets on a new `jobs start`, so only your count binds. **On the
-third failure of the same task, stop** and switch to diagnosis: read
-`spec/RECOVERY.md` and that task's `gates.json`, write the diagnosis there
-under a heading naming the task (what gate fails, what the output says, the
-two most likely causes), then **stop the pipeline** — report the task blocked
-and what you would need to unblock it. Do not start another job.
+Consecutive failures bind across jobs by code (ADR-0014): `redelegate` and
+`start` both refuse a task at `max_retries`, exit 3, naming the jobs it failed
+in. On refusal, diagnose: read `spec/RECOVERY.md` and the task's `gates.json`,
+write the diagnosis there under a heading naming the task (what gate fails,
+what the output says, likely causes), then **stop the pipeline**. Once the
+cause is fixed, `jobs start --force-retry <task_id>` clears its count — never
+to route around a diagnosis you have not done.
 
 ## Step 5 — update progress
 
