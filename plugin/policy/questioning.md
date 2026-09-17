@@ -30,15 +30,31 @@ own, external constraints, and what "done" means to them.
 
 ## AskUserQuestion budget
 
-- At most **2** calls per interview. The question gate counts them.
+- **2** calls per interview are free. The question gate counts them.
 - At most **4** options per question.
 - Each option needs a label and a description in the detected output language.
 - Never list `AskUserQuestion` in a command's `allowed-tools`. Doing so
   auto-approves it and the picker never renders for the user.
 
-If you are about to exceed the budget, stop and write the remaining unknowns
-into the assumption ledger instead. An assumption on paper is worth more than a
-third round of questions.
+Past the two free calls, before each call, write one line into
+`ledger.questions.justification` saying **what you would write differently
+depending on the answer**. If you cannot write that line, the question is not
+worth asking — draft the assumption instead. The line is single-use: it is
+consumed by the call it justifies.
+
+**The line is the test, not the number.** A question inside the budget that
+fails it is still waste; a question outside it that passes is still worth
+asking. The gate records what the count cannot see (ADR-0012):
+
+| Signal | What it means |
+|---|---|
+| `unjustified` | an over-budget call with no line — nobody could say its purpose |
+| `repeated` / `repeat_of` | this question fingerprints onto an earlier one |
+| `unrealized` | a justified call after which nothing was written |
+| `implementation_choice` | every option read as code — see the guard below |
+
+None of them blocks. They are the trace that tells an over-budget interview
+that kept earning its questions apart from one that just kept asking.
 
 ## Assumption ledger
 
@@ -71,4 +87,9 @@ You are over-questioning if any of these is true. Stop and draft.
 - You have already asked about this topic in this session.
 - The question is a preference the user has no strong stake in.
 - Either possible answer leads you to write the same thing.
-- You have asked two `AskUserQuestion` calls already.
+- You have asked two `AskUserQuestion` calls and cannot justify a third.
+- **The question asks the user to arbitrate a choice you are better placed to
+  make.** Decide, act, and show them the result to correct. "Which of these
+  three implementations?" spends their attention on your judgement. The
+  giveaway is that every option is a mechanism — a file, a function, a command
+  — rather than an outcome they care about.

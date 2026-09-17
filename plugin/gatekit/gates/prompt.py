@@ -120,11 +120,28 @@ def build_context(root, led: "ledger.Ledger") -> str:
     max_calls = questions.get("max_calls", 2)
     pipeline = led.data.get("active_pipeline") or "none"
 
+    # ADR-0012: the raw count is the weakest of the question signals, so the
+    # ones that mean something ride alongside it when they are non-zero.
+    flags = []
+    for key, word in (("unjustified", "unjustified"), ("repeated", "repeat"),
+                      ("unrealized", "unrealized")):
+        try:
+            count = int(questions.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if count:
+            flags.append(f"{count} {word}")
+    if questions.get("implementation_choice"):
+        flags.append("impl-choice")
+    question_line = f"questions={asked}/{max_calls}"
+    if flags:
+        question_line += " (" + ", ".join(flags) + ")"
+
     parts: List[str] = [
         f"gatekit: output_lang={led.output_lang} (reply in this language;"
         " never translate identifiers)",
         f"pipeline={pipeline}",
-        f"questions={asked}/{max_calls}",
+        question_line,
         _gate_state(root),
     ]
 

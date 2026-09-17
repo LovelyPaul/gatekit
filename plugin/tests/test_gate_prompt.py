@@ -324,3 +324,42 @@ class TestHeadingSkillForm(PromptProject):
     def test_heading_with_dollar_form_sets_pipeline(self) -> None:
         prompt_gate.handle(self.event("---\nname: build\n---\n\n# $gatekit-build\n"))
         self.assertEqual(self.led().data["active_pipeline"], "build")
+
+
+class TestQuestionFlagsInContext(unittest.TestCase):
+    """ADR-0012 decision 5: the signals that mean something ride along."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(os.path.realpath(self._tmp.name))
+        (self.root / ".gatekit").mkdir()
+        self.led = ledger.Ledger.load(self.root, "sess-flags")
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def context_with(self, **fields) -> str:
+        self.led.data["questions"] = dict({"asked": 6, "max_calls": 2}, **fields)
+        return prompt_gate.build_context(self.root, self.led)
+
+    def test_a_clean_session_prints_only_the_count(self) -> None:
+        self.assertIn("questions=6/2 |", self.context_with())
+
+    def test_unjustified_is_reported(self) -> None:
+        self.assertIn("questions=6/2 (2 unjustified)", self.context_with(unjustified=2))
+
+    def test_several_flags_are_joined(self) -> None:
+        text = self.context_with(unjustified=2, repeated=1)
+        self.assertIn("2 unjustified", text)
+        self.assertIn("1 repeat", text)
+
+    def test_implementation_choice_is_named(self) -> None:
+        self.assertIn("impl-choice", self.context_with(implementation_choice=True))
+
+    def test_a_malformed_count_does_not_break_the_line(self) -> None:
+        self.assertIn("questions=6/2", self.context_with(unjustified="lots"))
+
+    def test_the_block_stays_within_the_budget(self) -> None:
+        text = self.context_with(unjustified=9, repeated=9, unrealized=9,
+                                 implementation_choice=True)
+        self.assertLessEqual(len(text), hookio.MAX_CONTEXT_CHARS)
