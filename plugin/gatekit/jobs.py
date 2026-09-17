@@ -1170,11 +1170,29 @@ def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False,
             _run_wave(root, jdir, job_id, runnable, backend, timeout_s, parallel)
 
     _finalise_unrun(jdir, tasks_to_run, stopped=_stop_requested(jdir))
+    return _finalise_job(jdir, job)
 
-    job = read_json(jdir / "job.json", job) or job
-    job["finished_at"] = _now()
+
+def _merge_job_json(jdir, fields: dict, fallback: Optional[dict] = None) -> dict:
+    """Re-read `job.json`, apply *fields*, write it back.
+
+    `jobs stop` and the draining runner both finish a job, and either may hold
+    a copy read before the other wrote. Re-reading immediately before the
+    write keeps `stopped_at` and `finished_at` from erasing each other; the
+    write itself is atomic, so the surviving loser is a lost field, never a
+    corrupt file.
+    """
+    job = read_json(jdir / "job.json", None)
+    if not isinstance(job, dict):
+        job = dict(fallback or {})
+    job.update(fields)
     write_json(jdir / "job.json", job)
     return job
+
+
+def _finalise_job(jdir, job: dict) -> dict:
+    """Stamp `finished_at` without disturbing a concurrent `stopped_at`."""
+    return _merge_job_json(jdir, {"finished_at": _now()}, job)
 
 
 def status(root, job_id: Optional[str] = None) -> dict:
@@ -1328,8 +1346,7 @@ def stop(root, job_id: Optional[str] = None) -> dict:
                     detail="stopped by jobs stop")
         stopped.append(task_id)
 
-    job["stopped_at"] = _now()
-    write_json(jdir / "job.json", job)
+    _merge_job_json(jdir, {"stopped_at": _now()}, job)
     return {"job_id": job_id, "stopped": stopped, "signalled": signalled, "skipped": skipped}
 
 

@@ -1535,3 +1535,36 @@ class TestScreensParserRobustness(JobTestCase):
             "job-1", root=self.root,
         )
         self.assertNotIn("## Screens", prompt)
+
+
+class TestStopJobJsonRace(JobTestCase):
+    """`stop` and the draining runner both write job.json; neither may erase
+    the other's field. Surfaced by CI on Python 3.9, where the runner drains
+    while `stop` still holds its copy (the 0.7.0 release run)."""
+
+    def test_stop_does_not_erase_a_concurrent_finished_at(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root, dry_run=True)
+        jdir = self.root / ".gatekit" / "jobs" / job["job_id"]
+        # The runner finished and wrote finished_at after `stop` read job.json.
+        stale = jobs.read_json(jdir / "job.json", {})
+        current = dict(stale)
+        current["finished_at"] = "2026-09-17T09:00:00Z"
+        jobs.write_json(jdir / "job.json", current)
+        jobs.stop(self.root, job["job_id"])
+        saved = jobs.read_json(jdir / "job.json", {})
+        self.assertIn("stopped_at", saved)
+        self.assertEqual(saved.get("finished_at"), "2026-09-17T09:00:00Z")
+
+    def test_a_drain_after_stop_keeps_stopped_at(self) -> None:
+        self.write_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root, dry_run=True)
+        jdir = self.root / ".gatekit" / "jobs" / job["job_id"]
+        jobs.stop(self.root, job["job_id"])
+        # A runner holding a pre-stop copy finalises now.
+        jobs._finalise_job(jdir, dict(job))
+        saved = jobs.read_json(jdir / "job.json", {})
+        self.assertIn("stopped_at", saved)
+        self.assertIn("finished_at", saved)
