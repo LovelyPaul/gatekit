@@ -45,11 +45,16 @@ Read who grades — the `evaluator` field of:
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers list --json
 ```
 
-It is `agent` unless the user ran `workers set-evaluator <backend>`.
+Unless the user set one explicitly, this resolves to an enabled backend whose
+name differs from the host, so the grader is not the model that wrote the code
+(ADR-0013). When no such backend exists it falls back to `agent` and the JSON
+carries `evaluator_warning` — **report that warning to the user**: it means the
+producer is grading itself, which is what this command exists to prevent. The
+fix is `/gatekit:setup codex`.
 
-**If the evaluator is a backend name** (set with `workers set-evaluator
-<name>`), the grader is a separate CLI, possibly a different model, running
-with that backend's `read_only_argv`. Write the bullet list below (from "You
+**If the evaluator is a backend name**, the grader is a separate CLI, a
+different model, running with that backend's `read_only_argv`. Write the
+bullet list below (from "You
 are the evaluator" onward, in `output_lang`, leaving out the one bullet that
 starts "Record the result under" — a CLI evaluator cannot write) to
 `.gatekit/evaluator-prompt.md`, then run:

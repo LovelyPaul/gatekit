@@ -58,11 +58,44 @@ def default_name(root) -> str:
     return name if isinstance(name, str) and name else "claude"
 
 
-def evaluator_name(root) -> str:
-    """``verify.evaluator``: ``"agent"`` or a backend name."""
+def evaluator_choice(root, host: Optional[str] = None) -> tuple:
+    """``(evaluator_name, why_not_another_model)`` (ADR-0013 decision 2).
+
+    An explicit ``verify.evaluator`` always wins — including ``"agent"``, which
+    a user may choose deliberately. When it is unset the evaluator resolves to
+    an **enabled backend whose name differs from the host** and which has a
+    ``read_only_argv``, so grading is done by a model that did not write the
+    code. With no such backend it falls back to ``"agent"`` and returns the
+    reason, which callers print: on the gk-trial2 run the field was left unset,
+    so Claude graded Claude, which is the failure ADR-0007 exists to prevent
+    reached by leaving a default alone.
+    """
     cfg = config.load(root)
     value = (cfg.get("verify") or {}).get("evaluator")
-    return value if isinstance(value, str) and value else "agent"
+    if isinstance(value, str) and value.strip():
+        return value.strip(), ""
+
+    host_name = (host or default_name(root) or "").strip().lower()
+    backends = ((cfg.get("worker") or {}).get("backends") or {})
+    for name in sorted(backends):
+        entry = backends.get(name) or {}
+        if not isinstance(entry, dict) or not entry.get("enabled"):
+            continue
+        if name.strip().lower() == host_name:
+            continue
+        if not entry.get("read_only_argv"):
+            continue  # cannot be sandboxed read-only, so cannot grade
+        return name, ""
+    return "agent", (
+        "no enabled backend differs from the host (%s), so the grader is the "
+        "same model that wrote the code; enable one with `/gatekit:setup codex`"
+        % (host_name or "unknown")
+    )
+
+
+def evaluator_name(root, host: Optional[str] = None) -> str:
+    """``verify.evaluator``: ``"agent"`` or a backend name."""
+    return evaluator_choice(root, host)[0]
 
 
 def resolve(root, name: Optional[str] = None, read_only: bool = False) -> dict:
@@ -285,7 +318,9 @@ def run(argv: list) -> int:
                 }
             )
         if as_json:
-            print(json.dumps({"default": default, "evaluator": evaluator_name(root), "backends": rows}, indent=2))
+            ev, why = evaluator_choice(root)
+            print(json.dumps({"default": default, "evaluator": ev,
+                              "evaluator_warning": why, "backends": rows}, indent=2))
         else:
             for row in rows:
                 mark = "*" if row["default"] else " "
@@ -293,7 +328,11 @@ def run(argv: list) -> int:
                 if row["unsafe"]:
                     state += ", unsafe"
                 print("%s %-10s [%s] %s" % (mark, row["name"], state, " ".join(row["argv"])))
-            print("evaluator: %s" % evaluator_name(root))
+            ev, why = evaluator_choice(root)
+            print("evaluator: %s" % ev)
+            if why:
+                # ADR-0013: never let a same-model grader pass unremarked.
+                print("  warn: %s" % why)
         return 0
 
     if cmd == "check":

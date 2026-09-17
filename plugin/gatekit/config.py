@@ -62,7 +62,11 @@ DEFAULTS: Dict[str, Any] = {
     # Who grades in /gatekit:verify: "agent" spawns a read-only subagent of
     # the host; a backend name runs that CLI with its read_only_argv, so the
     # grader can be a different model from the one that built the code.
-    "verify": {"evaluator": "agent"},
+    # Unset by design (ADR-0013): an absent evaluator resolves at call time
+    # to an enabled backend whose name differs from the host, so the grader
+    # is not the model that wrote the code. A user who wants the host's own
+    # subagent writes "agent" here explicitly and that always wins.
+    "verify": {"evaluator": ""},
 }
 
 

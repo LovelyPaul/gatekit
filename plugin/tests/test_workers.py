@@ -184,9 +184,16 @@ class TestReadOnlyArgv(unittest.TestCase):
         self.assertNotIn("acceptEdits", claude)
         self.assertNotIn("workspace-write", codex)
 
-    def test_default_evaluator_is_agent(self) -> None:
+    def test_default_evaluator_is_unset(self) -> None:
+        """ADR-0013 decision 2 replaced the `agent` default with an empty one.
+
+        `agent` as a *default* meant the host's own subagent graded the host's
+        own output unless someone changed it, and on gk-trial2 nobody did.
+        Unset resolves at call time to a backend that is not the host; `agent`
+        remains available as an explicit choice.
+        """
         from gatekit import config
-        self.assertEqual(config.DEFAULTS["verify"]["evaluator"], "agent")
+        self.assertEqual(config.DEFAULTS["verify"]["evaluator"], "")
 
     def test_resolve_read_only_uses_read_only_argv(self) -> None:
         backend = workers.resolve(self.root, "claude", read_only=True)
@@ -275,3 +282,81 @@ class TestProbe(WorkerTestCase):
             code = workers.run(["check", "claude", "--probe", "--root", str(self.root)])
         self.assertEqual(code, 1)
         self.assertIn("fail", buf.getvalue())
+
+
+# ------------------------ ADR-0013 decision 2: the grader is another model
+
+
+class TestEvaluatorDefault(unittest.TestCase):
+    """On gk-trial2 `verify.evaluator` was left at `agent`, so Claude graded
+    Claude — the failure ADR-0007 exists to prevent, reached by leaving a
+    default alone. An unset evaluator now resolves to an enabled backend whose
+    name differs from the host."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(os.path.realpath(self._tmp.name))
+        (self.root / ".gatekit").mkdir()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def write_cfg(self, cfg: dict) -> None:
+        (self.root / ".gatekit" / "config.json").write_text(
+            json.dumps(cfg), encoding="utf-8")
+
+    def test_unset_resolves_to_an_enabled_other_backend(self) -> None:
+        self.write_cfg({"worker": {"default": "claude", "backends": {
+            "claude": {"argv": ["claude"], "read_only_argv": ["claude"], "enabled": True},
+            "codex": {"argv": ["codex"], "read_only_argv": ["codex"], "enabled": True}}}})
+        self.assertEqual(workers.evaluator_name(self.root, host="claude"), "codex")
+
+    def test_an_explicit_setting_always_wins(self) -> None:
+        self.write_cfg({"verify": {"evaluator": "agent"},
+                        "worker": {"default": "claude", "backends": {
+                            "codex": {"argv": ["codex"], "read_only_argv": ["codex"],
+                                      "enabled": True}}}})
+        self.assertEqual(workers.evaluator_name(self.root, host="claude"), "agent")
+
+    def test_a_disabled_other_backend_is_not_chosen(self) -> None:
+        self.write_cfg({"worker": {"default": "claude", "backends": {
+            "claude": {"argv": ["claude"], "read_only_argv": ["claude"], "enabled": True},
+            "codex": {"argv": ["codex"], "read_only_argv": ["codex"], "enabled": False}}}})
+        self.assertEqual(workers.evaluator_name(self.root, host="claude"), "agent")
+
+    def test_a_backend_without_read_only_argv_cannot_grade(self) -> None:
+        self.write_cfg({"worker": {"default": "claude", "backends": {
+            "claude": {"argv": ["claude"], "read_only_argv": ["claude"], "enabled": True},
+            "other": {"argv": ["other"], "enabled": True}}}})
+        self.assertEqual(workers.evaluator_name(self.root, host="claude"), "agent")
+
+    def test_the_host_never_grades_itself(self) -> None:
+        """A Codex host grades with Claude, not Codex — the rule is symmetric.
+
+        `config.DEFAULTS` always carries an enabled `claude` backend, so this
+        is the real shape of a Codex-hosted project rather than a contrived one.
+        """
+        self.write_cfg({"worker": {"default": "codex", "backends": {
+            "codex": {"argv": ["codex"], "read_only_argv": ["codex"], "enabled": True}}}})
+        self.assertEqual(workers.evaluator_name(self.root, host="codex"), "claude")
+
+    def test_agent_only_when_every_backend_is_the_host(self) -> None:
+        self.write_cfg({"worker": {"default": "claude", "backends": {
+            "claude": {"argv": ["claude"], "read_only_argv": ["claude"], "enabled": True},
+            "codex": {"enabled": False}}}})
+        self.assertEqual(workers.evaluator_name(self.root, host="claude"), "agent")
+
+    def test_falling_back_to_agent_is_reported(self) -> None:
+        self.write_cfg({"worker": {"default": "claude", "backends": {
+            "claude": {"argv": ["claude"], "read_only_argv": ["claude"], "enabled": True}}}})
+        name, why = workers.evaluator_choice(self.root, host="claude")
+        self.assertEqual(name, "agent")
+        self.assertIn("same model", why.lower())
+
+    def test_choosing_another_backend_says_so(self) -> None:
+        self.write_cfg({"worker": {"default": "claude", "backends": {
+            "claude": {"argv": ["claude"], "read_only_argv": ["claude"], "enabled": True},
+            "codex": {"argv": ["codex"], "read_only_argv": ["codex"], "enabled": True}}}})
+        name, why = workers.evaluator_choice(self.root, host="claude")
+        self.assertEqual(name, "codex")
+        self.assertEqual(why, "")
