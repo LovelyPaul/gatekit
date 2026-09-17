@@ -1,6 +1,18 @@
 # ADR-0013: Spawn a worker only when a different model is the point
 
-Status: proposed 2026-09-17.
+Status: accepted 2026-09-17 (owner approval in the session that measured the
+run); all six decisions implemented the same day and released in 0.8.0.
+
+Two corrections were made while implementing, both found by running the new
+code against the real `gk-trial2` spec rather than only against fixtures:
+
+- Decision 5 first counted a task's **direct** dependencies. `e2e-full-flow`
+  declares one and waits on seven, so the check missed the case it was written
+  for; it now measures transitive reach.
+- Decision 4's evidence match was unbounded, so a one-letter task id matched
+  inside ordinary prose and a shared ancestor directory (`src`) matched every
+  task in the project. It now matches on identifier boundaries and only counts
+  a leaf the dependency actually owns.
 
 Origin: the `gk-trial2` run — a Next.js + Prisma + Playwright project built
 through the full pipeline on 2026-09-17. It took **4.5 hours** of wall clock

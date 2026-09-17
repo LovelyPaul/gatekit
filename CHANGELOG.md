@@ -4,6 +4,69 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.8.0 — 2026-09-17
+
+Measured on a real project (`gk-trial2`, a Next.js + Prisma + Playwright
+build): nine tasks whose successful worker output totalled **26 minutes** took
+**4.5 hours** of wall clock across 25 jobs and 35 worker spawns, and the
+completion contract that judges the result runs in **13.7 seconds**. Only 7 of
+those 35 spawns actually failed. ADR-0013 is the response.
+
+### Added
+
+- `jobs recheck [task ...]` re-reads the current `spec/04-tasks.md` and runs a
+  task's gates against the working tree — no worker, no new job. A gate names
+  files and commands that do not exist until the work is done, so refining one
+  mid-build is the normal case; it accounted for 28 of the 35 spawns.
+  Rechecking all nine trial tasks takes **6.9 seconds**.
+- `build.execution` chooses who implements a task. Under the new `host` mode
+  `jobs start` prepares the job, returns an ordered `plan` and spawns nothing;
+  the session implements each task and calls `jobs complete <id>`, which runs
+  the same gates and writes the same `status.json` a worker's exit would. A
+  worker is a cold session of the same model, so it is now reserved for a
+  differing model or a genuinely wide round.
+- A `PreCompact` hook stamps the live build state into `spec/PROGRESS.md`
+  before the conversation is summarised, and the prompt injection names the
+  live job on return. Host execution puts a build in one session, so a
+  compaction is routine rather than exceptional.
+- `jobs shape` reports tasks, rounds, waves and dependency links with no
+  evidence in the instruction, plus the round total that dropping them gives.
+  `/gatekit:tasks` shows it and asks before writing the file. On the trial
+  spec: 9 tasks / 7 rounds, three unevidenced links, **3 rounds** without them.
+
+### Changed
+
+- `verify.evaluator` no longer defaults to `agent`. Unset now resolves to an
+  enabled backend whose name differs from the host, so the grader is not the
+  model that wrote the code; with none, it falls back to `agent` **and says
+  why**, in `workers list` and in `/gatekit:verify`'s report. On the trial the
+  field was left alone, so Claude graded Claude. An explicit setting still
+  always wins.
+- `spec validate` warns when a task writes only test material and its
+  transitive dependency reach is two or more — a check that passes only once
+  several tasks are done is a criterion in `05-gate.md`, not a task. The
+  trial's `e2e-full-flow` failed five times as a task and its command already
+  sat in the gate file.
+- `build.md` and `tasks.md` rewritten accordingly: build's opening rule is now
+  conditional on `execution`, failures route to `recheck` when the gate moved
+  rather than to `redelegate`, and the three-failure stop is stated as binding
+  across jobs since `max_retries` resets on every `jobs start`.
+
+### Fixed
+
+- `jobs stop` and the draining runner each wrote `job.json` from a snapshot, so
+  whichever wrote last dropped the other's field. Surfaced by CI on Python 3.9
+  during the 0.7.0 release; 3.13 loses the race the other way and had hidden it
+  through three releases.
+- `_opt` read an option's value without consuming it, so scanning for bare
+  arguments took `--root`'s path as a task id.
+
+### Compatibility
+
+Existing projects keep their behaviour: `config.DEFAULTS` carries
+`build.execution = "worker"`, so only a project that sets `host` runs
+in-session, and an explicitly configured evaluator is never overridden.
+
 ## 0.7.0 — 2026-09-17
 
 ### Added
