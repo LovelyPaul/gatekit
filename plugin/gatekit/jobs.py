@@ -1599,15 +1599,25 @@ def status(root, job_id: Optional[str] = None) -> dict:
         overall = verdict.UNVERIFIED
     else:
         overall = verdict.OK
+    done = all(s in TERMINAL_STATES for s in states) if states else False
+    finished_at = job.get("finished_at")
+    # ADR-0013 host execution: `start()` returns the plan and spawns nothing,
+    # so nothing else ever calls `_finalise_job`. A worker-mode job stamps
+    # `finished_at` when its own loop drains; a host-mode job only becomes
+    # done when `complete_task` records the last terminal state, and this is
+    # the first place that moment is visible. Found on a real retrial where
+    # every task passed but the job never recorded when.
+    if done and not finished_at:
+        finished_at = _finalise_job(jdir, job).get("finished_at")
     return {
         "job_id": job_id,
         "verdict": overall,
         "backend": (job.get("backend") or {}).get("name"),
         "started_at": job.get("started_at"),
-        "finished_at": job.get("finished_at"),
+        "finished_at": finished_at,
         "stopped_at": job.get("stopped_at"),
         "preflight_warnings": job.get("preflight_warnings") or [],
-        "done": all(s in TERMINAL_STATES for s in states) if states else False,
+        "done": done,
         "tasks": rows,
     }
 

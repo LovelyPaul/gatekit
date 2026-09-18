@@ -2158,3 +2158,61 @@ class TestStatusShowsCarriedCount(JobTestCase):
         with contextlib.redirect_stdout(out):
             jobs.run(["status", "--job", job["job_id"], "--root", str(self.root)])
         self.assertNotIn("consecutive", out.getvalue())
+
+
+class TestHostExecutionFinishesJob(JobTestCase):
+    """Host execution's `start()` returns immediately after handing back the
+    plan, so nothing calls `_finalise_job`. Found via a real gk-trial2 retrial
+    where `job.json.finished_at` stayed empty despite every task passing."""
+
+    def host_config(self) -> None:
+        cfg = {"build": {"execution": "host", "max_retries": 2, "parallel": 3,
+                         "task_timeout_s": 60},
+               "worker": {"default": "fake", "backends": {"fake": {
+                   "argv": [sys.executable, str(FAKE_WORKER)], "enabled": True}}}}
+        (self.root / ".gatekit" / "config.json").write_text(
+            json.dumps(cfg), encoding="utf-8")
+
+    def test_finished_at_is_absent_right_after_start(self) -> None:
+        self.host_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root)
+        saved = json.loads(
+            (self.root / ".gatekit" / "jobs" / job["job_id"] / "job.json").read_text())
+        self.assertNotIn("finished_at", saved)
+
+    def test_status_stamps_finished_at_once_every_task_is_terminal(self) -> None:
+        self.host_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root)
+        (self.root / "src").mkdir(exist_ok=True)
+        (self.root / "src" / "note.txt").write_text("done", encoding="utf-8")
+        jobs.complete_task(self.root, "write-note", job_id=job["job_id"])
+        payload = jobs.status(self.root, job["job_id"])
+        self.assertTrue(payload["done"])
+        self.assertIsNotNone(payload["finished_at"])
+        saved = json.loads(
+            (self.root / ".gatekit" / "jobs" / job["job_id"] / "job.json").read_text())
+        self.assertIn("finished_at", saved)
+
+    def test_finished_at_is_not_stamped_while_a_task_is_still_queued(self) -> None:
+        self.host_config()
+        first = self.simple_task()
+        second = self.simple_task(task_id="second", target="src/second.txt")
+        self.write_tasks(first, second)
+        job = jobs.start(self.root)
+        (self.root / "src").mkdir(exist_ok=True)
+        (self.root / "src" / "note.txt").write_text("done", encoding="utf-8")
+        jobs.complete_task(self.root, "write-note", job_id=job["job_id"])
+        payload = jobs.status(self.root, job["job_id"])
+        self.assertFalse(payload["done"])
+        self.assertIsNone(payload["finished_at"])
+
+    def test_finished_at_is_stamped_once_and_not_rewritten(self) -> None:
+        self.host_config()
+        self.write_tasks(self.simple_task())
+        job = jobs.start(self.root)
+        jobs.complete_task(self.root, "write-note", job_id=job["job_id"])
+        first = jobs.status(self.root, job["job_id"])["finished_at"]
+        second = jobs.status(self.root, job["job_id"])["finished_at"]
+        self.assertEqual(first, second)

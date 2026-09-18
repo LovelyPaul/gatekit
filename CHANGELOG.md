@@ -4,6 +4,23 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.9.1 — 2026-09-18
+
+A real retrial of `gk-trial2` on 0.9.0 with `build.execution: host`: the same
+nine tasks that took 4.5 hours across 25 jobs on 0.7.0 finished in **one job**,
+roughly 2m32s wall clock — eight tasks passed at preflight with no worker
+spawned, one was implemented by the host session, and the completion contract
+ran in 16.2s. `verdict=ok`, all nine tasks `passed`.
+
+### Fixed
+
+- `job.json.finished_at` was never stamped under `build.execution: host`.
+  Worker-mode `start()` drains its loop and calls `_finalise_job` when done;
+  host mode returns the plan immediately after `preflight`, so nothing ever
+  finalised the job — found because the retrial's own `job.json` showed no
+  `finished_at` despite every task passing. `status()` now stamps it itself,
+  the first time it observes every task as terminal.
+
 ## 0.9.0 — 2026-09-17
 
 ADR-0013's first open question, closed the same day it was raised.

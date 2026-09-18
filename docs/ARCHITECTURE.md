@@ -450,6 +450,11 @@ forces `worker`: naming a model is a request for that model. A worker is a
 cold session of the same model, so spawning one per task buys a second opinion
 from the model already present; reserve it for a differing model (adversarial
 verification, a Codex host delegating to Claude) or a genuinely wide round.
+Under `host`, `start` never calls `_finalise_job` — nothing drains a loop the
+way `worker` mode's does — so `status()` stamps `job.json.finished_at` itself,
+the first time every task in the job reads as terminal; found on a real
+`gk-trial2` host-execution retrial where the job otherwise finished correctly
+(`verdict=ok`, all nine tasks `passed`) but `finished_at` stayed empty.
 
 `jobs.recheck(root, task_ids=None, job_id=None) -> {"job_id", "rechecked",
 "missing"}` re-reads **the current** `spec/04-tasks.md`, runs the named tasks'
@@ -619,7 +624,7 @@ task id refused; `--backend` forcing worker mode; a config without
 `build.execution` still spawning; `recheck` passing a task whose gate was
 narrowed, leaving a still-failing one `failed`, reading the current task file
 rather than the job snapshot, naming tasks missing from it, and being
-idempotent; and `_positionals` not mistaking an option's value for a task id. `shape` counting tasks and rounds, sharing a round between independent tasks, flagging a dependency with no evidence in the instruction while sparing one named there or named by id, and reporting the pruned round total; a task warned as verification-shaped when it writes only test paths and its **transitive** dependency reach is two or more, and not warned on one direct dependency, a source path in scope, a `read-only` scope, or a cycle; the finding staying a `warn`. The PreCompact hook: recording every task's state, naming the job, creating PROGRESS.md when absent, leaving human content intact, replacing its own block on a second compaction, writing nothing with no job, surviving a corrupt status file and an unwritable spec dir, exiting 0 as a subprocess, and leaving `spec validate` findings unchanged. ADR-0014: a failure incrementing the attempt ledger and a pass clearing it; `blocked`/`stopped` leaving it alone; `redelegate` and `start` both refusing at the budget with exit 3; `--force-retry` clearing exactly one task; `recheck` not counting while `complete_task` does; a corrupt or missing `attempts.json` reading as empty; the status row and table showing the carried count.
+idempotent; and `_positionals` not mistaking an option's value for a task id. `shape` counting tasks and rounds, sharing a round between independent tasks, flagging a dependency with no evidence in the instruction while sparing one named there or named by id, and reporting the pruned round total; a task warned as verification-shaped when it writes only test paths and its **transitive** dependency reach is two or more, and not warned on one direct dependency, a source path in scope, a `read-only` scope, or a cycle; the finding staying a `warn`. The PreCompact hook: recording every task's state, naming the job, creating PROGRESS.md when absent, leaving human content intact, replacing its own block on a second compaction, writing nothing with no job, surviving a corrupt status file and an unwritable spec dir, exiting 0 as a subprocess, and leaving `spec validate` findings unchanged. ADR-0014: a failure incrementing the attempt ledger and a pass clearing it; `blocked`/`stopped` leaving it alone; `redelegate` and `start` both refusing at the budget with exit 3; `--force-retry` clearing exactly one task; `recheck` not counting while `complete_task` does; a corrupt or missing `attempts.json` reading as empty; the status row and table showing the carried count. Host execution: `finished_at` absent right after `start`, stamped by `status()` once the last task turns terminal, not stamped while one is still queued, and stamped once (idempotent on repeated calls).
 
 ADR-0012 adds, in `gates/question.py`: a justified over-budget call consuming
 its line and raising nothing; an unjustified one raising `unjustified`; the
