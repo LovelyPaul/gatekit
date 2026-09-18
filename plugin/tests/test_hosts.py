@@ -236,3 +236,133 @@ class TestInstallSafety(HostProject):
         with redirect_stdout(buf):
             workers.run(["list", "--json", "--root", str(self.root)])
         self.assertEqual(json.loads(buf.getvalue())["evaluator"], "agent")
+
+
+# ------------------------------------------- ADR-0015: codex hook trust
+
+
+class CodexTrustProject(HostProject):
+    """A fake $CODEX_HOME so these tests never touch the real ~/.codex."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._codex_home = tempfile.TemporaryDirectory()
+        self.codex_home = pathlib.Path(os.path.realpath(self._codex_home.name))
+        self._env_patch = os.environ.get("CODEX_HOME")
+        os.environ["CODEX_HOME"] = str(self.codex_home)
+
+    def tearDown(self) -> None:
+        if self._env_patch is None:
+            os.environ.pop("CODEX_HOME", None)
+        else:
+            os.environ["CODEX_HOME"] = self._env_patch
+        self._codex_home.cleanup()
+        super().tearDown()
+
+    def write_config(self, text: str) -> None:
+        (self.codex_home / "config.toml").write_text(text, encoding="utf-8")
+
+    def hooks_json_path(self) -> str:
+        return str((self.root / ".codex" / "hooks.json").resolve())
+
+
+class TestCodexHooksTrusted(CodexTrustProject):
+    def test_no_config_file_is_not_trusted(self) -> None:
+        self.install()
+        self.assertFalse(hosts.codex_hooks_trusted(self.root))
+
+    def test_config_with_no_matching_entry_is_not_trusted(self) -> None:
+        self.install()
+        self.write_config(
+            '[hooks.state."/some/other/project/.codex/hooks.json:pre_tool_use:0:0"]\n'
+            'trusted_hash = "sha256:deadbeef"\n'
+        )
+        self.assertFalse(hosts.codex_hooks_trusted(self.root))
+
+    def test_a_matching_pre_tool_use_entry_is_trusted(self) -> None:
+        self.install()
+        self.write_config(
+            '[hooks.state."%s:pre_tool_use:0:0"]\n'
+            'trusted_hash = "sha256:deadbeef"\n' % self.hooks_json_path()
+        )
+        self.assertTrue(hosts.codex_hooks_trusted(self.root))
+
+    def test_a_matching_entry_for_a_different_event_still_counts(self) -> None:
+        """Any trusted hook from this project's hooks.json is a signal that
+        the layer was approved; the write gate specifically is what matters
+        most, but user_prompt_submit trust implies the same approval flow
+        was completed for this file."""
+        self.install()
+        self.write_config(
+            '[hooks.state."%s:pre_tool_use:1:0"]\n'
+            'trusted_hash = "sha256:deadbeef"\n' % self.hooks_json_path()
+        )
+        self.assertTrue(hosts.codex_hooks_trusted(self.root))
+
+    def test_project_trust_alone_is_not_hook_trust(self) -> None:
+        """The real gk-trial2 case: `trust_level = "trusted"` at the project
+        level with zero hooks.state entries. Project trust and hook trust are
+        recorded separately, and only the second gates a hook actually firing."""
+        self.install()
+        self.write_config(
+            '[projects."%s"]\n'
+            'trust_level = "trusted"\n' % str(self.root.resolve())
+        )
+        self.assertFalse(hosts.codex_hooks_trusted(self.root))
+
+    def test_malformed_toml_reads_as_not_trusted(self) -> None:
+        self.install()
+        self.write_config("[[[not valid toml")
+        self.assertFalse(hosts.codex_hooks_trusted(self.root))
+
+    def test_no_codex_directory_at_all_is_not_trusted(self) -> None:
+        # No install() call: .codex/hooks.json does not exist yet.
+        self.write_config(
+            '[hooks.state."%s:pre_tool_use:0:0"]\n'
+            'trusted_hash = "sha256:deadbeef"\n' % self.hooks_json_path()
+        )
+        self.assertFalse(hosts.codex_hooks_trusted(self.root))
+
+    def test_empty_hooks_state_table_is_not_trusted(self) -> None:
+        self.install()
+        self.write_config("[hooks.state]\n")
+        self.assertFalse(hosts.codex_hooks_trusted(self.root))
+
+
+class TestCodexTrustFallbackParser(CodexTrustProject):
+    """Force the pre-3.11 code path even when tomllib is available here, so
+    the fallback is actually exercised rather than merely present."""
+
+    def with_fallback(self, fn):
+        original = hosts.tomllib
+        hosts.tomllib = None
+        try:
+            return fn()
+        finally:
+            hosts.tomllib = original
+
+    def test_fallback_matches_a_trusted_hook(self) -> None:
+        self.install()
+        self.write_config(
+            '[hooks.state."%s:pre_tool_use:0:0"]\n'
+            'trusted_hash = "sha256:deadbeef"\n' % self.hooks_json_path()
+        )
+        self.assertTrue(self.with_fallback(lambda: hosts.codex_hooks_trusted(self.root)))
+
+    def test_fallback_rejects_an_untrusted_project(self) -> None:
+        self.install()
+        self.write_config(
+            '[projects."%s"]\n'
+            'trust_level = "trusted"\n' % str(self.root.resolve())
+        )
+        self.assertFalse(self.with_fallback(lambda: hosts.codex_hooks_trusted(self.root)))
+
+    def test_fallback_handles_escaped_quotes_in_the_key(self) -> None:
+        # A defensive case: Codex's own keys are plain paths today, but the
+        # header syntax allows escaped quotes and the parser must not choke.
+        text = _trusted_hook_keys_source = (
+            '[hooks.state."/weird\\"path/.codex/hooks.json:pre_tool_use:0:0"]\n'
+            'trusted_hash = "sha256:deadbeef"\n'
+        )
+        keys = self.with_fallback(lambda: hosts._trusted_hook_keys(text))
+        self.assertEqual(keys, ['/weird"path/.codex/hooks.json:pre_tool_use:0:0'])

@@ -53,8 +53,8 @@ producer is grading itself, which is what this command exists to prevent. The
 fix is `/gatekit:setup codex`.
 
 **If the evaluator is a backend name**, the grader is a separate CLI, a
-different model, running with that backend's `read_only_argv`. Write the
-bullet list below (from "You
+different model, running read-only against source (`write.py` refuses inside
+its session either way). Write the bullet list below (from "You
 are the evaluator" onward, in `output_lang`, leaving out the one bullet that
 starts "Record the result under" — a CLI evaluator cannot write) to
 `.gatekit/evaluator-prompt.md`, then run:
@@ -62,6 +62,17 @@ starts "Record the result under" — a CLI evaluator cannot write) to
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs evaluate --prompt .gatekit/evaluator-prompt.md --lang <output_lang>
 ```
+
+**For a Codex evaluator specifically** (ADR-0015): `--sandbox read-only`
+blocks more than source edits — Vitest's config cache, Playwright's
+`test-results/` — so most criteria would read `unverified` for a reason
+unrelated to the code. `evaluate` runs Codex with `--sandbox workspace-write`
+instead, relying on the write gate as the real protection, but only once this
+project's Codex hooks are actually trusted. If they are not, `evaluate`
+refuses with `EvaluatorSandboxError` naming the exact fix — **show that
+message to the user verbatim**; do not retry with `--force-read-only-evaluator`
+on their behalf, since that silently trades the fix for an honest-but-mostly-
+`unverified` report.
 
 It prints the evaluator's reply tail (the verdict table) and its state.
 `failed` or `timeout` means the evaluator did not finish; that is

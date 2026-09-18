@@ -24,12 +24,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import pathlib
 import re
 import sys
 from typing import Any, Dict, List, Optional
 
 from gatekit import config, paths, verdict
+
+try:  # Python 3.11+
+    import tomllib  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - exercised only on 3.9/3.10 in CI
+    tomllib = None  # type: ignore[assignment]
 
 #: Hosts that need a generated layer. Claude Code is served by the plugin.
 INSTALLABLE_HOSTS = ("codex",)
@@ -176,6 +182,74 @@ def merged_agents_md(existing: Optional[str], plugin_root: pathlib.Path) -> str:
         # markers out of order: leave the user's text alone and append a fresh block
     joiner = "" if existing.endswith("\n\n") else ("\n" if existing.endswith("\n") else "\n\n")
     return existing + joiner + block
+
+
+#: A `[hooks.state."<quoted key>"]` table header. Codex quotes the whole key
+#: because it embeds `/`, `.` and `:`, which bare TOML keys cannot hold.
+_HOOKS_STATE_HEADER_RE = re.compile(
+    r'^\[hooks\.state\."((?:[^"\\]|\\.)*)"\]\s*$'
+)
+
+
+def _codex_home() -> pathlib.Path:
+    """`$CODEX_HOME`, defaulting to `~/.codex` — Codex's own convention."""
+    override = os.environ.get("CODEX_HOME")
+    return pathlib.Path(override) if override else pathlib.Path.home() / ".codex"
+
+
+def _trusted_hook_keys_fallback(text: str) -> List[str]:
+    """`[hooks.state."<key>"]` table names, for Python 3.9/3.10 without
+    `tomllib`.
+
+    Not a general TOML reader: `~/.codex/config.toml` mixes plugin config,
+    MCP server settings and other tables this gatekit has no reason to parse,
+    so a full parser would be scope creep for a dependency-free build. This
+    reads exactly one shape — the table headers under `[hooks.state]` — and
+    ignores everything else in the file, including whether those tables carry
+    a real `trusted_hash` key; a header existing at all is Codex's own record
+    that the approval flow ran for that hook.
+    """
+    return [
+        m.group(1).replace('\\"', '"').replace("\\\\", "\\")
+        for m in (_HOOKS_STATE_HEADER_RE.match(line) for line in text.splitlines())
+        if m
+    ]
+
+
+def _trusted_hook_keys(text: str) -> List[str]:
+    """Every `hooks.state` key in *text*, via `tomllib` when available."""
+    if tomllib is not None:
+        try:
+            data = tomllib.loads(text)
+        except (tomllib.TOMLDecodeError, ValueError):
+            return []
+        state = ((data.get("hooks") or {}).get("state") or {})
+        return list(state) if isinstance(state, dict) else []
+    return _trusted_hook_keys_fallback(text)
+
+
+def codex_hooks_trusted(root: pathlib.Path) -> bool:
+    """True when Codex has recorded trust for *this project's* `.codex/hooks.json`.
+
+    ADR-0015. Codex tracks two kinds of trust separately: a project's own
+    `trust_level`, and a per-hook `hooks.state."<hooks.json path>:<event>:*"`
+    entry keyed by content hash. Only the second gates whether a hook actually
+    fires — a trusted *project* with zero `hooks.state` entries for it (the
+    real shape found on a fresh install) still has every project hook skipped
+    silently. A malformed or unreadable config file, or no file at all, reads
+    as **not trusted**: "could not tell" must never round to "trusted" here,
+    the same rule the write gate itself applies to an unreadable task scope.
+    """
+    hooks_path = root / ".codex" / "hooks.json"
+    if not hooks_path.is_file():
+        return False
+    config_path = _codex_home() / "config.toml"
+    try:
+        text = config_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    prefix = str(hooks_path.resolve()) + ":"
+    return any(key.startswith(prefix) for key in _trusted_hook_keys(text))
 
 
 def install(

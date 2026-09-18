@@ -530,15 +530,41 @@ any task is in a not-done state (`failed`, `timeout`, `stopped`), `unverified`
 when the rest are not all `passed` (running, queued, or `blocked`), and
 `done` when every task is terminal.
 
-`jobs evaluate [--backend name] [--prompt FILE] [--lang ko|en]` runs one
-read-only worker as the independent evaluator (ADR-0007): job dir
+`jobs evaluate [--backend name] [--prompt FILE] [--lang ko|en]
+[--force-read-only-evaluator]` runs one worker as the independent evaluator
+(ADR-0007): job dir
 `.gatekit/jobs/<job_id>/evaluate/{task.json,prompt.md,output.txt,stderr.txt,status.json}`,
-`job.json.kind = "evaluate"`, backend resolved with `read_only=True`, env
-`GATEKIT_TASK_ID=evaluate` with `task.json.write_scope = "read-only"` so the
-write gate refuses writes inside the evaluator's own session on top of the
-CLI sandbox. `state` ∈ `passed|failed|timeout`; anything but `passed` is
-`unverified` for every criterion. Its stdout ends with the evaluator's reply
-tail, which is the verdict table.
+`job.json.kind = "evaluate"`, env `GATEKIT_TASK_ID=evaluate` with
+`task.json.write_scope = "read-only"` so the write gate refuses writes inside
+the evaluator's own session regardless of backend. `state` ∈
+`passed|failed|timeout`; anything but `passed` is `unverified` for every
+criterion. Its stdout ends with the evaluator's reply tail, which is the
+verdict table.
+
+**ADR-0015 — the Codex evaluator's own sandbox.** For every backend except
+Codex, `evaluate` resolves with `read_only=True` (the backend's
+`read_only_argv`), which is the real protection beneath the write gate. Codex
+is checked instead: `codex exec --sandbox read-only` blocks a test runner's
+own scratch writes (Vitest's config cache, Playwright's `test-results/`) along
+with source edits, so most criteria come back `unverified` for a reason
+unrelated to the code under test. `evaluate` runs Codex's normal `argv`
+(`--sandbox workspace-write`) instead, but only when
+`hosts.codex_hooks_trusted(root)` confirms this project's `.codex/hooks.json`
+has a matching `hooks.state` entry in Codex's own `$CODEX_HOME/config.toml`
+(default `~/.codex`) — a project's own `trust_level` is a separate record and
+does not imply hook trust, and an untrusted project hook is skipped by Codex
+silently rather than refused, so a stray write from an untrusted hook would go
+unwatched. When `.codex/hooks.json` is missing, `evaluate` installs it
+(`hosts.install`, idempotent) before checking; installing a file never grants
+trust, which only a human can do interactively. Untrusted and unforced raises
+`jobs.EvaluatorSandboxError` (subclass of `ValueError`, CLI exit 2) naming the
+one-time fix: run `codex exec --sandbox workspace-write "echo trust-check"` by
+hand and approve the hook-trust prompt. `--force-read-only-evaluator` keeps
+the stricter sandbox regardless. `hosts.codex_hooks_trusted` parses
+`config.toml` with `tomllib` (3.11+) or a narrow hand-rolled reader scoped to
+`[hooks.state."<key>"]` table headers only (3.9/3.10); any parse failure or
+missing file reads as **not trusted** — "could not tell" never rounds to
+"trusted".
 
 `workers.py`: `list`, `check <name> [--probe]` (`shutil.which` on argv[0] →
 ok/fail, `--version` probe → ok/unverified; with `--probe`, one trivial
@@ -624,7 +650,18 @@ task id refused; `--backend` forcing worker mode; a config without
 `build.execution` still spawning; `recheck` passing a task whose gate was
 narrowed, leaving a still-failing one `failed`, reading the current task file
 rather than the job snapshot, naming tasks missing from it, and being
-idempotent; and `_positionals` not mistaking an option's value for a task id. `shape` counting tasks and rounds, sharing a round between independent tasks, flagging a dependency with no evidence in the instruction while sparing one named there or named by id, and reporting the pruned round total; a task warned as verification-shaped when it writes only test paths and its **transitive** dependency reach is two or more, and not warned on one direct dependency, a source path in scope, a `read-only` scope, or a cycle; the finding staying a `warn`. The PreCompact hook: recording every task's state, naming the job, creating PROGRESS.md when absent, leaving human content intact, replacing its own block on a second compaction, writing nothing with no job, surviving a corrupt status file and an unwritable spec dir, exiting 0 as a subprocess, and leaving `spec validate` findings unchanged. ADR-0014: a failure incrementing the attempt ledger and a pass clearing it; `blocked`/`stopped` leaving it alone; `redelegate` and `start` both refusing at the budget with exit 3; `--force-retry` clearing exactly one task; `recheck` not counting while `complete_task` does; a corrupt or missing `attempts.json` reading as empty; the status row and table showing the carried count. Host execution: `finished_at` absent right after `start`, stamped by `status()` once the last task turns terminal, not stamped while one is still queued, and stamped once (idempotent on repeated calls).
+idempotent; and `_positionals` not mistaking an option's value for a task id. `shape` counting tasks and rounds, sharing a round between independent tasks, flagging a dependency with no evidence in the instruction while sparing one named there or named by id, and reporting the pruned round total; a task warned as verification-shaped when it writes only test paths and its **transitive** dependency reach is two or more, and not warned on one direct dependency, a source path in scope, a `read-only` scope, or a cycle; the finding staying a `warn`. The PreCompact hook: recording every task's state, naming the job, creating PROGRESS.md when absent, leaving human content intact, replacing its own block on a second compaction, writing nothing with no job, surviving a corrupt status file and an unwritable spec dir, exiting 0 as a subprocess, and leaving `spec validate` findings unchanged. ADR-0014: a failure incrementing the attempt ledger and a pass clearing it; `blocked`/`stopped` leaving it alone; `redelegate` and `start` both refusing at the budget with exit 3; `--force-retry` clearing exactly one task; `recheck` not counting while `complete_task` does; a corrupt or missing `attempts.json` reading as empty; the status row and table showing the carried count. Host execution: `finished_at` absent right after `start`, stamped by `status()` once the last task turns terminal, not stamped while one is still queued, and stamped once (idempotent on repeated calls). ADR-0015: `codex_hooks_trusted`
+true for a matching `hooks.state` entry (any event, not only `pre_tool_use`),
+false with no config file, no matching entry, malformed TOML, an empty
+`[hooks.state]` table, or project-level `trust_level` alone with no
+`hooks.state` entry (the real `gk-trial2` shape) — each pinned through both
+`tomllib` and the 3.9/3.10 fallback parser, including one case with an escaped
+quote in the key; `evaluate` refusing with `EvaluatorSandboxError` naming
+`workspace-write` and the trust-check command when Codex hooks are untrusted;
+installing the host layer first when `.codex/hooks.json` is absent;
+proceeding with the writable `argv` once trusted; `--force-read-only-evaluator`
+bypassing the refusal and keeping `read_only_argv`; a non-Codex backend never
+triggering the check at all.
 
 ADR-0012 adds, in `gates/question.py`: a justified over-budget call consuming
 its line and raising nothing; an unjustified one raising `unjustified`; the
@@ -722,7 +759,8 @@ def preflight(root, jdir, tasks: list[dict]) -> dict   # {"passed": [ids], "warn
 def classify_gate_result(gate: dict, argv=None) -> str  # "command_error" | "suspicious" | "expected" (ADR-0009 decision 1)
 def looks_like_command_error(gate: dict, argv=None) -> bool   # classify_gate_result(...) == "command_error"
 def stop(root, job_id: str | None = None) -> dict      # {"job_id", "stopped", "signalled", "skipped"}
-def evaluate(root: pathlib.Path, backend_name: str | None = None, prompt_path=None, timeout_s=None, lang: str = "en") -> dict
+def evaluate(root, backend_name=None, prompt_path=None, timeout_s=None, lang="en", force_read_only_evaluator=False) -> dict   # raises EvaluatorSandboxError (ADR-0015)
+class EvaluatorSandboxError(ValueError)                # untrusted Codex hooks refuse workspace-write (ADR-0015)
 def load_tasks(root: pathlib.Path) -> list[dict]       # from spec/04-tasks.md via spec.parse_fences
 def parse_screens(text: str) -> dict                   # {"S2": {"name","layout","states"}} from 02-screens.md (ADR-0011)
 def execution_mode(cfg: dict) -> str                   # "host" | "worker" (ADR-0013)
@@ -749,6 +787,7 @@ INSTALLABLE_HOSTS: tuple[str, ...]                     # ("codex",)
 def install(root: pathlib.Path, host: str, plugin_root: pathlib.Path | None = None, dry_run: bool = False) -> dict   # {"host","written":[relpaths]}
 def status(root: pathlib.Path, host: str, plugin_root: pathlib.Path | None = None) -> dict   # {"verdict","detail","fix"}
 def codex_hooks(plugin_root: pathlib.Path) -> dict     # the .codex/hooks.json document
+def codex_hooks_trusted(root: pathlib.Path) -> bool    # ADR-0015: hooks.state entry present, not just project trust_level
 def rewrite_command(text: str, plugin_root: pathlib.Path) -> str
 def merged_agents_md(existing: str | None, plugin_root: pathlib.Path) -> str
 def run(argv: list[str]) -> int

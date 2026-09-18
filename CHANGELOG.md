@@ -4,6 +4,44 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.10.0 — 2026-09-18
+
+The `gk-trial2` retrial's Codex evaluator run: exit 0, 111 seconds, and 12 of
+18 criteria came back `unverified` for one repeated reason — `--sandbox
+read-only` blocks a test runner's own scratch writes (Vitest's config cache,
+Playwright's `test-results/`), not just source edits.
+
+### Fixed
+
+- `jobs.evaluate` under Codex now runs `--sandbox workspace-write`, relying
+  on the write gate (a project hook) as the real protection instead of the
+  read-only sandbox — but only once Codex has actually recorded trust for
+  this project's `.codex/hooks.json`. Verified this was silent, not loud: a
+  trusted *project* (`trust_level = "trusted"`) with zero `hooks.state`
+  entries for its hooks file still has every project hook skipped by Codex
+  without any error, so switching to `workspace-write` with no other change
+  would have been a code-writing session with nothing watching it.
+- `hosts.codex_hooks_trusted(root)` checks `$CODEX_HOME/config.toml`
+  (`tomllib` on 3.11+, a narrow fallback reader for 3.9/3.10) for a
+  `hooks.state` entry matching this project's hooks file; any parse failure
+  or missing file reads as not trusted. Untrusted and unforced,
+  `evaluate` raises `EvaluatorSandboxError` naming the one-time fix
+  (`codex exec --sandbox workspace-write "echo trust-check"`, run once by
+  hand to approve the hook-trust prompt) rather than silently falling back
+  to a mostly-`unverified` report. `--force-read-only-evaluator` keeps the
+  stricter sandbox on request. `.codex/hooks.json` is installed
+  automatically when absent — installing a file is safe and reversible;
+  granting trust is not, and stays a human's decision.
+- `job.json.backend.read_only` previously hardcoded `true` for every
+  evaluator run regardless of which sandbox actually ran; it now reflects
+  the sandbox `evaluate` chose.
+
+Verified against the real `gk-trial2` project, whose Codex hooks were
+installed but not yet trusted: `evaluate(root, backend_name="codex")`
+raises `EvaluatorSandboxError` with the exact remediation text.
+
+1047 tests pass.
+
 ## 0.9.1 — 2026-09-18
 
 A real retrial of `gk-trial2` on 0.9.0 with `build.execution: host`: the same
