@@ -1,6 +1,10 @@
-# {{project_name}} — product requirements
+---
+title: "{{project_name}} — product requirements"
+date: "{{date}}"
+status: "draft"
+---
 
-Written: {{date}} · Status: draft
+# {{project_name}} — product requirements
 
 ## Problem
 
@@ -23,6 +27,7 @@ and add a row to the assumption ledger.
 ## Non-goals
 
 - {{Explicitly out of scope for this round. This is what stops scope creep later.}}
+- {{For a project with no screens at all (a pure CLI or library): add a line here reading exactly "[non-ui] {{why}}" — this exempts the project from ADR-0017's screen-spec and prototype-confirmation gates.}}
 
 ## Users
 
@@ -58,11 +63,18 @@ matching a row in this table.
 
 > ⚠️ Assumption 1: {{what you assumed}}
 
-| # | Assumption | Basis | Impact if wrong | How to confirm |
-|---|---|---|---|---|
-| 1 | {{what you assumed}} | {{why you believed it}} | {{what breaks}} | {{who to ask, how}} |
+| # | Assumption | Basis | Impact if wrong | How to confirm | Blocking | Confirmed |
+|---|---|---|---|---|---|---|
+| 1 | {{what you assumed}} | {{why you believed it}} | {{what breaks}} | {{who to ask, how}} | {{y \| n}} | {{y \| n}} |
 
 Rule: inline markers and table rows correspond one-to-one by number. If only
 one side exists, `python3 -m gatekit spec validate` reports it. When an
 assumption is confirmed, do not delete the row — replace the basis with the
-confirmed fact.
+confirmed fact, and flip `Confirmed` to `y`.
+
+`Blocking` (ADR-0017) marks a row load-bearing enough that being wrong sinks
+the plan — a wrong guess about who the real user is, not a wrong guess about
+button color. A row marked `Blocking: y` with `Confirmed: n` makes
+`spec validate` fail, not merely warn: `/gatekit:gate` refuses to proceed
+while any such row stands. Mark a row `Blocking: n` when it is a reasonable
+default that costs little to be wrong about.

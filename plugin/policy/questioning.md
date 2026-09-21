@@ -1,5 +1,28 @@
 # Policy: questioning
 
+## Ask one, then stop and wait
+
+Asking a question ends your turn. Send exactly one question, then stop —
+do not imagine or invent the user's answer and continue on your own to a
+second, third, or further question in the same turn. Every next question
+in an interview-style conversation is written only after the user's actual
+reply arrives, never before. This applies with no exception: not when the
+likely answer seems obvious, not when several questions feel related enough
+to ask together, not when the conversation is "almost done." A model that
+keeps producing question after question without a real reply in between is
+not conducting an interview — it is performing one, alone.
+
+## Nothing but the question
+
+Every message a user sees during an interview-style conversation is either
+a question or a plain statement in the detected language — never narration
+of your own process ("Let me record this," "I'll follow this thread,"
+"This is an important answer"), never meta-commentary on the answer just
+given. Read the answer, decide the next question, ask it; nothing goes in
+between, in any language. Losing this discipline mid-conversation reads as
+the model thinking out loud in front of the user rather than conducting an
+interview.
+
 ## Draft first
 
 Write the draft before asking anything beyond the opening probe. A draft with
@@ -70,14 +93,33 @@ a mismatch, in either direction.
 
 ## Stop signals
 
-Stop questioning immediately and move to the draft when the user says any of:
+Stop questioning immediately and move to the draft when the user says any of
+these. There are two shapes, and both count — do not wait for the delegating
+shape when the question already asked "is there more?" and the answer is no:
 
+**Delegating** — the user hands you the judgement:
 - "알아서 해줘", "너가 정해", "그냥 해줘", "빨리"
 - "you decide", "your call", "just do it", "whatever you think", "skip the questions"
 
-After a stop signal: no more `AskUserQuestion` calls in this pipeline. Fill
-every remaining unknown with a documented assumption, deliver the draft, and
-list the assumptions at the end so the user can correct any of them in one pass.
+**Exhausted** — the user answers the specific question with "there is no
+more," which is not the same speech act as "I don't know" or silence:
+- "없어", "딱히 없어", "그게 다야", "더 없어", "이제 없어"
+- "no", "none", "that's it", "nothing else", "no more", "that's all"
+
+A direct "no" to "anything else?" is exhausted, not merely an unhelpful
+answer to keep probing past — a per-topic budget (like the three-question
+cap on a solution-named answer) exists for when the user has *not* said
+stop; once they have, the budget is moot. Do not read a plain negative
+answer as evasion, and do not counter it with "just one more angle" or a
+second phrasing of the same question — that turns a stop signal into an
+interrogation, exactly what this policy exists to prevent.
+
+After a stop signal: no more `AskUserQuestion` calls in this pipeline (or, in
+a pipeline that never uses `AskUserQuestion`, no more plain-chat questions
+either). Fill every remaining unknown with a documented assumption — or, for
+a command with its own explicit floor-waiver field (e.g. `/gatekit:discover`'s
+`pain_floor_waived`), record that field — deliver the draft, and list the
+assumptions at the end so the user can correct any of them in one pass.
 
 ## Over-questioning guard
 

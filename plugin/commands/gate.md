@@ -32,6 +32,9 @@ send the user to `/gatekit:tasks`.
 
 ## Step 2 — derive criteria
 
+When writing `spec/05-gate.md`, fill its YAML frontmatter block (`title`/
+`date`/`status`) at the top along with the rest of the template.
+
 One criterion per acceptance criterion in 01, plus one per task in 04 whose
 completion is not already covered. Each is a ` ```gatekit-criterion ` fence:
 
@@ -57,6 +60,33 @@ Requirements:
   `stdout_regex` and the `stderr_*` forms exist too; every unknown key is a
   derive error, so spell them exactly.
 
+**The screenshot criterion (ADR-0017 decision 9).** For every task in 04
+whose `write_scope` touched a UI surface, add one more criterion whose
+`argv` runs the project's E2E runner (`npx playwright test` unless
+`spec/03-architecture.md` names a different one already in use) against a
+spec that navigates to the task's screen and saves
+`spec/design/build-<task-id>.png`, and whose `artifacts` names that same
+path:
+
+```json
+{"id": "task-one-screenshot", "argv": ["npx", "playwright", "test", "e2e/screenshot-task-one.spec.ts"],
+ "expect": {"exit": 0}, "timeout_s": 30, "artifacts": ["spec/design/build-task-one.png"]}
+```
+
+Write the actual Playwright spec file this `argv` runs — like every other
+criterion, this one must be runnable in this repository right now, not a
+guess. If the project has no E2E runner configured at all, that setup is
+this task's own responsibility (the same way a styling-touching task
+already gets the token gate added by `/gatekit:tasks` Step 4) — do not
+derive a criterion whose `argv` cannot possibly run here yet. **Never
+substitute an MCP browser tool call for this criterion's `argv`** —
+`contract.py` runs every criterion with `subprocess.run`, and a tool like
+`mcp__claude-in-chrome__*` exists only inside an interactive agent session,
+not as a standalone command. A project with no browser available at all
+(a sandboxed host) will see this criterion's `argv` itself fail to launch,
+which `contract.py` already reports as `unverified`, never a fabricated
+pass — that is the correct outcome, not something to work around here.
+
 Every criterion must be **runnable in this repository right now**. Run each one
 before writing it in. A criterion you have not executed is a guess, and the
 Stop hook will execute it for real. Read the run's output, not only its
@@ -75,6 +105,9 @@ plausible-looking pass invalid, at minimum:
   rather than only a sentence here
 - a criterion that timed out, which is `unverified` and never a pass
 - a command exiting 0 with its declared artifact absent
+- a UI task's screenshot criterion coming back `unverified` (no browser, no
+  E2E runner) being reported as if the screen were confirmed working — it
+  means nobody, human or evaluator, has actually looked at it yet
 - TODOs, stubs, or empty implementations left behind
 - editing this file to remove a failing criterion
 - reporting success without having run anything

@@ -302,6 +302,27 @@ patterns (`tests/rules/*.test.js`), a bare directory is loaded as a module and
 fails with `Cannot find module`; `gates/tokens.py` takes globs too
 (`src/**`), a bare directory scans zero files and exits 3.
 
+### 6b. Screen spec and prototype confirmation gates (ADR-0017 decisions 3, 4)
+
+`spec.validate` reports two more `fail` conditions against `04-tasks.md` (the
+file whose command, `/gatekit:tasks`, must not proceed while either stands),
+both exempted when `01-prd.md`'s Non-goals section contains the literal
+marker `[non-ui]` (a pure-CLI or library spec with nothing to prototype):
+
+- **`screens_required`** — `01-prd.md` exists and `02-screens.md` does not.
+  `heading-map.json`'s `absent_ok` no longer covers `02-screens.md`
+  unconditionally; this check replaces that blanket allowance with the
+  `[non-ui]`-conditional one. `01-prd.md`'s own absence is reported once, by
+  the existing required-file check, never doubled here.
+- **`prototype_required`** — `02-screens.md` exists but carries no line
+  matching `Prototype confirmed <date>` / `프로토타입 확정 <date>`
+  (`YYYY-MM-DD`). This line is prose the validator scans for — not a
+  hash-anchored approval like `05-gate.md`'s (§7) — because
+  `/gatekit:mockup`'s live-prototype revision loop (Step 7b) has no single
+  moment to pin a hash to before the loop's last accepted edit. Only the
+  user's explicit confirmation writes this line; the command must never
+  infer it from "the prototype looks finished."
+
 ## 6a. Discovery record in `spec/00-discovery.md` (ADR-0005)
 
 The optional first stage for a user who does not yet know what to build.
@@ -328,6 +349,33 @@ gates (`user`, `current_way` ≥ 2 steps, numeric `frequency_per_month` and
 `unpassed`. A gate is never filled by the validator; `unpassed` that is not a list, or names outside the gate list, is `fail`; a gate both filled and listed in `unpassed` is `warn`. Discovery questions are plain chat (not
 `AskUserQuestion`), budgeted per gate by the command at three; the question
 gate does not count them.
+
+### 6a.1 The `pains` array (ADR-0017 decisions 1 and 2)
+
+Additive to the fence above: a `pains` top-level key holding a list of
+`{"summary": "…", "chosen": bool, "verdict_suggested": {"verdict": "build|reuse|eliminate|unknown", "why": "…"}|null, "verdict": "build|reuse|eliminate|unknown"|null}`.
+A record with no `pains` key at all is untouched by every check below (the
+pre-ADR-0017 fence shape stays valid forever).
+
+Once `pains` is present, `spec.validate`:
+
+- fails if `pains` is not a list;
+- fails if fewer than `PAIN_FLOOR` (3) entries exist and the top-level
+  `pain_floor_waived` is not truthy (the discovery command's record of a
+  user stop signal);
+- fails on any entry that is not an object, whose `verdict_suggested` is
+  present but not `{"verdict": <one of the four>, "why": <non-empty string>}`,
+  or whose `verdict` is present but not one of the four tokens;
+- fails unless **exactly one** entry has `"chosen": true`;
+- on the chosen entry: fails if its confirmed `verdict` is `eliminate` or
+  `reuse` (mirrors `ai-dev-pm`'s `blocksPromote()` — `/gatekit:interview`
+  must not draft a spec for a pain the pipeline itself judged should not be
+  built); warns (never fails) if `verdict` is `null` while
+  `verdict_suggested` exists (the interviewer proposed, the user has not
+  confirmed — this is the exact shape of the failure `gk-trial2`'s
+  Assumption 4 named: a mapping decided without ever being posed as a
+  question); `unknown` never blocks, deliberately — see `spec.py`'s comment
+  on why blocking "not sure yet" would be worse than the gap it closes.
 
 ## 7. Hash-anchored approvals (`approval.py`)
 

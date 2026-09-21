@@ -138,9 +138,11 @@ to route around a diagnosis you have not done.
 When every task is terminal, update `spec/PROGRESS.md` in `output_lang`.
 
 If the file does not exist, copy
-`${CLAUDE_PLUGIN_ROOT}/spec-kit/templates/<output_lang>/PROGRESS.md` first.
-**Keep the template's headings exactly** — `spec validate` rejects a heading
-from the other language. Under them record: the job id, its execution mode and
+`${CLAUDE_PLUGIN_ROOT}/spec-kit/templates/<output_lang>/PROGRESS.md` first,
+filling its YAML frontmatter block (`title`/`date`/`status`) along with the
+rest of the placeholders. **Keep the template's headings exactly** — `spec
+validate` rejects a heading from the other language. Under them record: the
+job id, its execution mode and
 backend, and whether the build is done; one line per task (id, final state,
 gates passed of total); every redelegated task with the gate that failed and
 what changed; tasks left blocked with the failing gate named; the timestamp.

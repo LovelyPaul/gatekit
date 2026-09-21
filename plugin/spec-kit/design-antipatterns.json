@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "note": "Generic-looking AI-output patterns the verify evaluator checks a build screenshot against (ADR-0017 decision 9). Unlike presets/design/ (recommendations, only committed after a real build observes them), this is a refusal list seeded from a reviewed conversation about why bare-agent UI output tends to look generic, and it grows the same way: a real trial names a new pattern, add it here with the observed evidence.",
+  "patterns": [
+    {
+      "id": "AP1",
+      "name": "unstated gradient hero",
+      "rule": "A hero or header section uses a purple-to-blue (or similarly saturated) gradient with no stated reason tying it to the project's own design direction.",
+      "evidence": "seed:chatgpt-review-2026-09-19"
+    },
+    {
+      "id": "AP2",
+      "name": "single-face typography",
+      "rule": "Every text role (heading, body, label) uses the same sans-serif family (commonly Inter or a system font) with no second face for contrast.",
+      "evidence": "seed:chatgpt-review-2026-09-19"
+    },
+    {
+      "id": "AP3",
+      "name": "identical-card layout",
+      "rule": "A page or section is built entirely from identically-shaped cards laid out in a row, with no other layout device.",
+      "evidence": "seed:chatgpt-review-2026-09-19"
+    },
+    {
+      "id": "AP4",
+      "name": "decorative emoji as icons",
+      "rule": "Emoji stand in for icons in navigation, feature lists, or section markers instead of an icon set or no icon at all.",
+      "evidence": "seed:chatgpt-review-2026-09-19"
+    },
+    {
+      "id": "AP5",
+      "name": "centered-everything layout",
+      "rule": "Every block of content is center-aligned with no deliberate asymmetry anywhere on the screen.",
+      "evidence": "seed:chatgpt-review-2026-09-19"
+    },
+    {
+      "id": "AP6",
+      "name": "no styling at all",
+      "rule": "The screen renders as unstyled semantic HTML with no stylesheet, no design tokens applied, and no visual hierarchy — the browser's own defaults are the entire visual design.",
+      "evidence": "observed:gk-todo-2026-09-19"
+    }
+  ]
+}

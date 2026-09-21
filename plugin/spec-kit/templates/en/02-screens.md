@@ -1,3 +1,9 @@
+---
+title: "{{project_name}} — screen specification"
+date: "{{date}}"
+status: "draft"
+---
+
 # {{project_name}} — screen specification
 
 Source: {{Figma URL · HTML file · screenshot filenames · interview}}

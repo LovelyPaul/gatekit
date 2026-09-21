@@ -146,6 +146,7 @@ MESSAGES = {
         "ledger_orphan_inline": "본문 가정 {num}번에 대응하는 원장 행이 없습니다.",
         "ledger_orphan_row": "원장 {num}번 행에 대응하는 본문 가정 표기가 없습니다.",
         "ledger_superseded": "본문이 아직 대체된 가정 A{num}을(를) 가리키고 있습니다. 이를 대체한 A{successor}을(를) 참조하도록 고치세요.",
+        "ledger_blocking_unconfirmed": "가정 {num}번은 blocking(y)인데 아직 confirmed(n)입니다. 확인 전에는 다음 단계로 넘어갈 수 없습니다 (ADR-0017).",
         "preview_as_evidence": "근거 칸이 미리보기 파일({path})을 인용하고 있습니다. 미리보기는 이 명세에서 그린 것이므로 명세의 근거가 될 수 없습니다 (ADR-0011).",
         "tokens_unparsable": "spec/tokens.json 을 JSON 객체로 읽을 수 없습니다: {err}",
         "tokens_source": "source 는 {expect} 여야 합니다.",
@@ -186,6 +187,19 @@ MESSAGES = {
         "disc_minutes_per_run": "minutes_per_run 은 숫자",
         "disc_why_chain": "why_chain 은 문자열 리스트, 증상 + 서로 다른(바꿔 말하기 제외) '왜' 3칸 이상",
         "disc_failed_attempts": "failed_attempts 는 result 가 failed|works-but-costly 인 항목 1개 이상, 또는 \"not-applicable\"",
+        "disc_insights_count_type": "insights_count 는 0 이상의 숫자여야 합니다.",
+        "disc_insights_count_low": "insights_count 가 {count}로 낮습니다(최소 {floor} 권장). 상한은 없습니다 — 더 물어서 자연스럽게 늘어난 값을 적으세요.",
+        "pains_not_list": "pains 는 리스트여야 합니다.",
+        "pains_below_floor": "불편이 {count}개뿐입니다. 최소 3개를 먼저 채운 뒤 좁혀야 합니다 (ADR-0017). 사용자가 그만하라고 했다면 pain_floor_waived 를 true 로 적으세요.",
+        "pain_not_object": "pains[{index}] 는 객체여야 합니다.",
+        "pain_verdict_suggested_invalid": "pains[{index}].verdict_suggested.verdict 는 build|reuse|eliminate|unknown 중 하나여야 합니다.",
+        "pain_verdict_suggested_no_why": "pains[{index}].verdict_suggested 에 근거(why)가 없습니다.",
+        "pain_verdict_invalid": "pains[{index}].verdict 값이 잘못되었습니다: {value} (build|reuse|eliminate|unknown 중 하나)",
+        "pains_chosen_count": "chosen 이 true 인 불편이 정확히 1개여야 합니다 (현재 {count}개).",
+        "pain_verdict_blocks": "고른 문제의 확정 판정이 {verdict} 입니다 — 이 판정은 interview 진행을 막습니다 (ADR-0017). 없애거나 재활용할 것이면 이 문제를 만들지 않고 다른 불편을 고르세요.",
+        "pain_verdict_unconfirmed": "고른 문제에 verdict_suggested 만 있고 사용자가 확정한 verdict 가 없습니다. 인터뷰어의 제안을 사용자 확인 없이 그대로 다음 단계로 넘기지 마세요 (ADR-0017).",
+        "screens_required": "spec/02-screens.md 가 없습니다. 01-prd.md 가 화면을 수반하는 프로젝트로 보이므로(비UI로 선언하려면 목표가 아닌 것에 [non-ui] 표시), /gatekit:tasks 를 실행하기 전에 /gatekit:mockup 을 먼저 실행하세요 (ADR-0017).",
+        "prototype_required": "화면 명세가 있는데 프로토타입 확정 기록이 없습니다. /gatekit:mockup 이 만든 살아있는 HTML 프로토타입을 사용자가 확인·수정한 뒤 확정해야 /gatekit:tasks 를 진행할 수 있습니다 (ADR-0017).",
         "ok": "검사를 통과했습니다.",
     },
     "en": {
@@ -198,6 +212,7 @@ MESSAGES = {
         "ledger_orphan_inline": "Inline assumption {num} has no matching ledger row.",
         "ledger_orphan_row": "Ledger row {num} has no matching inline assumption marker.",
         "ledger_superseded": "The text still points at superseded assumption A{num}. Reference A{successor}, which supersedes it.",
+        "ledger_blocking_unconfirmed": "Assumption {num} is blocking (y) but still not confirmed (n). This must be confirmed before proceeding (ADR-0017).",
         "preview_as_evidence": "An evidence cell cites a preview file ({path}). A preview is drawn from this spec, so it cannot be evidence for it (ADR-0011).",
         "tokens_unparsable": "spec/tokens.json could not be read as a JSON object: {err}",
         "tokens_source": "source must be {expect}.",
@@ -238,6 +253,19 @@ MESSAGES = {
         "disc_minutes_per_run": "minutes_per_run must be a number",
         "disc_why_chain": "why_chain must be a list of strings: the symptom plus at least three distinct (not reworded) whys",
         "disc_failed_attempts": "failed_attempts needs one entry with result failed|works-but-costly, or \"not-applicable\"",
+        "disc_insights_count_type": "insights_count must be a number >= 0.",
+        "disc_insights_count_low": "insights_count is low ({count}, {floor}+ recommended). There is no ceiling — ask more and record the naturally higher number.",
+        "pains_not_list": "pains must be a list.",
+        "pains_below_floor": "Only {count} pain(s) surfaced. At least 3 must be surfaced before narrowing (ADR-0017). If the user gave a stop signal, record pain_floor_waived: true.",
+        "pain_not_object": "pains[{index}] must be an object.",
+        "pain_verdict_suggested_invalid": "pains[{index}].verdict_suggested.verdict must be one of build|reuse|eliminate|unknown.",
+        "pain_verdict_suggested_no_why": "pains[{index}].verdict_suggested is missing its justification (why).",
+        "pain_verdict_invalid": "pains[{index}].verdict has an invalid value: {value} (must be build|reuse|eliminate|unknown)",
+        "pains_chosen_count": "Exactly one pain must have chosen: true (found {count}).",
+        "pain_verdict_blocks": "The chosen pain's confirmed verdict is {verdict} — this verdict blocks progressing to interview (ADR-0017). If it should be eliminated or reused, pick a different pain instead of building this one.",
+        "pain_verdict_unconfirmed": "The chosen pain has a verdict_suggested but no user-confirmed verdict. Do not carry the interviewer's proposal into the next stage without the user confirming it (ADR-0017).",
+        "screens_required": "spec/02-screens.md is missing. 01-prd.md appears to be a UI-bearing project (mark it [non-ui] in Non-goals to declare otherwise); run /gatekit:mockup before /gatekit:tasks (ADR-0017).",
+        "prototype_required": "A screen spec exists but no prototype confirmation is recorded. The user must open, revise, and confirm the live HTML prototype /gatekit:mockup built before /gatekit:tasks can proceed (ADR-0017).",
         "ok": "Checks passed.",
     },
 }
@@ -405,6 +433,57 @@ def _check_preview_citations(name: str, text: str, lang: str) -> List[dict]:
     return findings
 
 
+#: ADR-0017 decision 5. Two new optional trailing columns on the ledger table:
+#: `Blocking` (y/n — is this row load-bearing enough that being wrong sinks
+#: the plan) and `Confirmed` (y/n — has anyone actually verified it). Both
+#: columns are additive: a row with neither (every pre-ADR-0017 ledger) is
+#: untouched by this check. Two columns rather than one, because the
+#: template's existing prose convention ("when confirmed, replace the basis
+#: with the confirmed fact") cannot be checked mechanically — there is no way
+#: to tell "this basis cell was rewritten to a confirmed fact" from "this
+#: basis cell always read this" by pattern-matching text alone.
+_YES_NO_RE = re.compile(r"^\s*(y|n|yes|no)\s*$", re.IGNORECASE)
+
+
+def _row_cells(line: str) -> List[str]:
+    """Split a markdown table row into its cell texts, dropping the empty
+    leading/trailing pieces `"| a | b |".split("|")` produces."""
+    parts = line.strip().split("|")
+    if parts and parts[0].strip() == "":
+        parts = parts[1:]
+    if parts and parts[-1].strip() == "":
+        parts = parts[:-1]
+    return [p.strip() for p in parts]
+
+
+def _is_yes(cell: Optional[str]) -> bool:
+    return bool(cell) and cell.strip().lower() in ("y", "yes")
+
+
+def _blocking_unconfirmed_rows(section: str) -> List[int]:
+    """Ledger row numbers marked blocking (y) with confirmed not (y).
+
+    Only rows carrying *both* trailing columns are considered — a ledger
+    table with neither column has nothing for this check to see, which is
+    the backward-compatibility guarantee `test_spec_blocking_assumptions.py`
+    pins.
+    """
+    out: List[int] = []
+    for line in section.splitlines():
+        row = _LEDGER_ROW_RE.match(line)
+        if not row:
+            continue
+        cells = _row_cells(line)
+        if len(cells) < 7:
+            continue  # no Blocking/Confirmed columns on this row
+        blocking, confirmed = cells[-2], cells[-1]
+        if not (_YES_NO_RE.match(blocking) and _YES_NO_RE.match(confirmed)):
+            continue
+        if _is_yes(blocking) and not _is_yes(confirmed):
+            out.append(int(row.group("num")))
+    return out
+
+
 def _check_ledger(text: str, lang: str) -> List[dict]:
     findings: List[dict] = []
     section = _ledger_section(text, lang)
@@ -433,6 +512,12 @@ def _check_ledger(text: str, lang: str) -> List[dict]:
                     _msg(lang, "ledger_superseded", num=superseded, successor=successor),
                 )
             )
+    # ADR-0017 decision 5: blocking(y) + confirmed(n) fails outright — the
+    # owner's explicit strict choice over the milder warn-only alternative.
+    for num in sorted(_blocking_unconfirmed_rows(section)):
+        findings.append(
+            _finding("01-prd.md", V.FAIL, _msg(lang, "ledger_blocking_unconfirmed", num=num))
+        )
     return findings
 
 
@@ -904,6 +989,121 @@ def _gate_filled(gate: str, record: dict) -> bool:
     return False
 
 
+#: ADR-0017 decision 2. `unknown` is deliberately absent from the blocking
+#: set — see `_check_pains`'s comment on why blocking it would be a mistake.
+PAIN_VERDICTS = ("build", "reuse", "eliminate", "unknown")
+
+#: Verdicts that refuse promotion to /gatekit:interview (ADR-0017 decision 2,
+#: mirroring ai-dev-pm's `blocksPromote()`).
+_PAIN_VERDICTS_BLOCKING = ("eliminate", "reuse")
+
+#: ADR-0017 decision 1: discovery must surface at least this many distinct
+#: pains before narrowing to one, unless the user gave a stop signal (recorded
+#: as `pain_floor_waived`). A stated count, not a measured one — see the ADR's
+#: "Three, not grill-me's twenty" note.
+PAIN_FLOOR = 3
+
+
+def _check_pains(record: dict, lang: str) -> List[dict]:
+    """ADR-0017 decisions 1 and 2: the `pains` array in the discovery fence.
+
+    Additive to the pre-ADR-0017 fence shape: a record with no `pains` key at
+    all is untouched by this function (early return), so every discovery
+    record written before this ADR — and `test_spec_discovery.py`'s
+    `full_record()` — stays valid with no new findings.
+    """
+    name = "00-discovery.md"
+    if "pains" not in record:
+        return []
+    findings: List[dict] = []
+    pains = record.get("pains")
+    if not isinstance(pains, list):
+        return [_finding(name, V.FAIL, _msg(lang, "pains_not_list"))]
+
+    # Decision 1: the branch floor. `pain_floor_waived` is the discovery
+    # command's record of a stop signal (policy/questioning.md) — the user
+    # said stop, so fewer than the floor is honest, not a shortcut.
+    waived = bool(record.get("pain_floor_waived"))
+    if len(pains) < PAIN_FLOOR and not waived:
+        findings.append(_finding(name, V.FAIL, _msg(lang, "pains_below_floor", floor=PAIN_FLOOR, count=len(pains))))
+
+    chosen_pains = []
+    for index, pain in enumerate(pains):
+        if not isinstance(pain, dict):
+            findings.append(_finding(name, V.FAIL, _msg(lang, "pain_not_object", index=index)))
+            continue
+        if pain.get("chosen"):
+            chosen_pains.append((index, pain))
+
+        suggested = pain.get("verdict_suggested")
+        if suggested is not None:
+            if not isinstance(suggested, dict) or suggested.get("verdict") not in PAIN_VERDICTS:
+                findings.append(_finding(name, V.FAIL, _msg(lang, "pain_verdict_suggested_invalid", index=index)))
+            elif not (isinstance(suggested.get("why"), str) and suggested["why"].strip()):
+                findings.append(_finding(name, V.FAIL, _msg(lang, "pain_verdict_suggested_no_why", index=index)))
+
+        confirmed = pain.get("verdict")
+        if confirmed is not None and confirmed not in PAIN_VERDICTS:
+            findings.append(_finding(name, V.FAIL, _msg(lang, "pain_verdict_invalid", index=index, value=confirmed)))
+
+    # Exactly one chosen pain: none means Step 2's ranking never happened;
+    # two or more means the ranking recorded a tie nobody broke.
+    if len(chosen_pains) != 1:
+        findings.append(_finding(name, V.FAIL, _msg(lang, "pains_chosen_count", count=len(chosen_pains))))
+        return findings
+
+    _, chosen = chosen_pains[0]
+    confirmed = chosen.get("verdict")
+    if confirmed in _PAIN_VERDICTS_BLOCKING:
+        # ai-dev-pm's promote() gate, adapted: a pain that should be
+        # eliminated or that duplicates an existing tool must not reach
+        # /gatekit:interview. This mirrors VALIDATION_FAILED there — a
+        # code-level refusal, not a prompt suggestion.
+        findings.append(_finding(name, V.FAIL, _msg(lang, "pain_verdict_blocks", verdict=confirmed)))
+    elif confirmed is None:
+        # Proposed but not yet confirmed by the user — exactly the gap
+        # gk-trial2's Assumption 4 fell into (the interviewer decided a
+        # mapping and nobody confirmed it). This must be visible, but it is
+        # not yet a known-bad verdict, so it warns rather than blocks.
+        #
+        # `unknown` is deliberately never in _PAIN_VERDICTS_BLOCKING either:
+        # blocking "we don't know yet" would make refusing to decide the
+        # strategy that avoids the gate, which is worse than letting an
+        # honestly-uncertain pain through (ai-dev-pm's same reasoning).
+        findings.append(_finding(name, V.WARN, _msg(lang, "pain_verdict_unconfirmed")))
+
+    return findings
+
+
+#: A floor, never a ceiling. grill-me counts "distinct decision branches
+#: resolved" and refuses to close below 20-30; discover's own free-form
+#: conversation (2026-09-20) borrows the same "a mechanical count, not a
+#: self-reported feeling of being done" spirit, at a much smaller floor
+#: because a discovery conversation and a grill-me decision branch are not
+#: the same unit. There is deliberately no matching ceiling constant
+#: anywhere in this file or in discover.md — the owner was explicit that a
+#: cap on how far the conversation can go is exactly the mistake being
+#: undone here.
+_INSIGHT_FLOOR = 3
+
+
+def _check_insight_count(record: dict, lang: str) -> List[dict]:
+    """`insights_count` records how many distinct facts/branches the free-form
+    discovery conversation actually surfaced, the same role grill-me's
+    decision-branch count plays: a number a machine can check instead of the
+    interviewer's own "I've asked enough" feeling. Optional field — a record
+    that predates this (or a test fixture) is simply not checked."""
+    name = "00-discovery.md"
+    if "insights_count" not in record:
+        return []
+    count = record.get("insights_count")
+    if not _is_number(count) or count < 0:
+        return [_finding(name, V.FAIL, _msg(lang, "disc_insights_count_type"))]
+    if count < _INSIGHT_FLOOR:
+        return [_finding(name, V.WARN, _msg(lang, "disc_insights_count_low", count=count, floor=_INSIGHT_FLOOR))]
+    return []
+
+
 def _check_discovery(text: str, lang: str) -> List[dict]:
     name = "00-discovery.md"
     findings: List[dict] = []
@@ -920,15 +1120,51 @@ def _check_discovery(text: str, lang: str) -> List[dict]:
         return findings
     record = records[0]
 
+    # Free-form discovery (found 2026-09-20, after ADR-0017 decisions 7-11
+    # ran against a real project): the six deepening gates used to be filled
+    # against the record's own top level, one at a time, in a fixed order,
+    # with progress shown to the user ("[gate 3-4] 2/6"). That fixed-slot
+    # shape is exactly what the owner rejected as "허접함" next to grill-me
+    # and ai-dev-pm — a scripted interrogation instead of a free-ranging
+    # conversation that surfaces insight. The gates themselves (who, how
+    # today, how often, why, what was tried) are still useful information —
+    # only the fixed-slot, one-at-a-time, progress-counted *process* of
+    # filling them is gone. So the gate fields now live inside whichever
+    # pain the conversation actually deepened (a `chosen: true` entry in
+    # `pains`, summarized post-hoc from a free conversation, not filled
+    # slot-by-slot during it), not at the top level.
+    #
+    # A record with no `pains` key, or with `pains` but no gate fields on
+    # any pain, is the pre-2026-09-20 shape: gates are still read from the
+    # top level so every discovery file written before this change, and
+    # `test_spec_discovery.py`'s own `full_record()`, keep validating
+    # exactly as before.
+    pains = record.get("pains")
+    chosen_pain = None
+    if isinstance(pains, list):
+        for pain in pains:
+            if isinstance(pain, dict) and pain.get("chosen"):
+                chosen_pain = pain
+                break
+
+    gate_source = record
+    unpassed_source = record
+    if chosen_pain is not None and any(gate in chosen_pain for gate in DISCOVERY_GATES):
+        gate_source = chosen_pain
+        unpassed_source = chosen_pain
+
     problem = record.get("problem")
-    if not (isinstance(problem, str) and problem.strip()):
+    if chosen_pain is None and not (isinstance(problem, str) and problem.strip()):
+        # `problem` is the pre-pains, single-problem shape's required field.
+        # Once pains exist, the chosen pain's own `summary` plays this role
+        # (checked in `_check_pains`) — nothing new to require here.
         findings.append(_finding(name, V.FAIL, _msg(lang, "disc_no_problem")))
 
     deadline = record.get("deadline")
     if not (isinstance(deadline, str) and deadline.strip()):
         findings.append(_finding(name, V.WARN, _msg(lang, "disc_deadline")))
 
-    unpassed = record.get("unpassed")
+    unpassed = unpassed_source.get("unpassed")
     if unpassed is None:
         unpassed = []
     if not isinstance(unpassed, list):
@@ -939,7 +1175,7 @@ def _check_discovery(text: str, lang: str) -> List[dict]:
             findings.append(_finding(name, V.FAIL, _msg(lang, "disc_unknown_unpassed", name=item)))
 
     for gate in DISCOVERY_GATES:
-        if _gate_filled(gate, record):
+        if _gate_filled(gate, gate_source):
             if gate in unpassed:
                 findings.append(_finding(name, V.WARN, _msg(lang, "disc_unpassed_but_filled", gate=gate)))
             continue
@@ -949,6 +1185,9 @@ def _check_discovery(text: str, lang: str) -> List[dict]:
             findings.append(
                 _finding(name, V.WARN, _msg(lang, "disc_gate_unfilled", gate=gate, why=_msg(lang, "disc_" + gate)))
             )
+
+    findings.extend(_check_pains(record, lang))
+    findings.extend(_check_insight_count(record, lang))
     return findings
 
 
@@ -1047,6 +1286,85 @@ def _check_tokens(root: pathlib.Path, lang: str) -> List[dict]:
 
 
 # --------------------------------------------------------------------------
+# screen spec required for UI-bearing projects (ADR-0017 decision 3)
+# --------------------------------------------------------------------------
+
+#: A PRD carrying this marker in its Non-goals section is declaring itself
+#: non-UI (a pure CLI or library) — /gatekit:interview writes it when the
+#: project has no screens by design, not as something spec validate infers
+#: from feature prose. Matched literally rather than by keyword-scanning
+#: feature text: a prose heuristic over feature descriptions would be exactly
+#: the kind of guess a code gate must not make (CLAUDE.md: prose is never the
+#: enforcement mechanism).
+_NON_UI_MARKER_RE = re.compile(r"\[non-ui\]", re.IGNORECASE)
+
+
+def _prd_implies_ui(prd_text: str) -> bool:
+    """True unless the PRD explicitly declares itself non-UI.
+
+    Defaulting to True (UI-bearing) rather than scanning Features for
+    screen-shaped keywords: most specs have a UI, and a keyword scan would
+    both miss real UIs described in unexpected words and false-positive on
+    unrelated prose. The explicit `[non-ui]` marker is the one signal that is
+    exactly as reliable as the person who wrote it.
+    """
+    return not _NON_UI_MARKER_RE.search(prd_text or "")
+
+
+def _check_screens_required(prd_text: Optional[str], screens_text: Optional[str], lang: str) -> List[dict]:
+    """ADR-0017 decision 3: a UI-bearing PRD needs spec/02-screens.md before
+    /gatekit:tasks proceeds — the same hard-stop shape 01-prd.md's own
+    absence already gets, not the silent `missing_optional` warn every other
+    optional file receives.
+
+    Reported against 04-tasks.md (whether or not that file exists yet)
+    because the *effect* of this gap is that /gatekit:tasks must not run —
+    the same file `_check_tasks` and traceability findings already use for
+    "something about proceeding to tasks is wrong."
+    """
+    if prd_text is None:
+        # 01-prd.md's own absence is already a `missing_required` failure;
+        # do not also report this and double-count the same root gap.
+        return []
+    if screens_text is not None:
+        return []
+    if not _prd_implies_ui(prd_text):
+        return []
+    return [_finding("04-tasks.md", V.FAIL, _msg(lang, "screens_required"))]
+
+
+#: ADR-0017 decision 4: the confirmation line /gatekit:mockup's revision loop
+#: writes once the user has actually opened, revised, and signed off on the
+#: live prototype. Prose, not a hash-anchored approval like 05-gate.md's,
+#: because the prototype is revised in-loop until confirmed — there is no
+#: single moment to pin a hash to before the loop's last edit. A date is
+#: required, not just the word "confirmed", so a stale copy-pasted line from
+#: an unrelated project would still need someone to have typed today's date.
+_PROTOTYPE_CONFIRMED_RE = re.compile(
+    r"(?:프로토타입\s*확정|prototype\s+confirmed)\s+\d{4}-\d{2}-\d{2}",
+    re.IGNORECASE,
+)
+
+
+def _check_prototype_required(prd_text: Optional[str], screens_text: Optional[str], lang: str) -> List[dict]:
+    """ADR-0017 decision 4: /gatekit:tasks must not run until the live HTML
+    prototype has been opened, revised, and explicitly confirmed.
+
+    Only meaningful once a screen spec exists at all — decision 3's
+    `_check_screens_required` already reports the missing-screens gap on its
+    own, and a non-UI project (declared via `[non-ui]`) needs no prototype in
+    the first place.
+    """
+    if prd_text is None or screens_text is None:
+        return []
+    if not _prd_implies_ui(prd_text):
+        return []
+    if _PROTOTYPE_CONFIRMED_RE.search(screens_text):
+        return []
+    return [_finding("04-tasks.md", V.FAIL, _msg(lang, "prototype_required"))]
+
+
+# --------------------------------------------------------------------------
 # entry point
 # --------------------------------------------------------------------------
 
@@ -1112,6 +1430,10 @@ def validate(root: pathlib.Path, lang: Optional[str] = None) -> dict:
     prd = contents.get("01-prd.md")
     if prd is not None:
         findings.extend(_check_ledger(prd, lang))
+
+    screens_text = contents.get("02-screens.md")
+    findings.extend(_check_screens_required(prd, screens_text, lang))
+    findings.extend(_check_prototype_required(prd, screens_text, lang))
 
     tasks_text = contents.get("04-tasks.md")
     if tasks_text is not None:

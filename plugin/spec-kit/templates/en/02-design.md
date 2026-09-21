@@ -1,3 +1,9 @@
+---
+title: "{{project_name}} — design specification"
+date: "{{date}}"
+status: "draft"
+---
+
 # {{project_name}} — design specification
 
 Optional. Written by `/gatekit:design` from a reference site, a preset, a

@@ -1,3 +1,9 @@
+---
+title: "{{project_name}} — 작업 목록"
+date: "{{date}}"
+status: "초안"
+---
+
 # {{project_name}} — 작업 목록
 
 각 작업은 아래 형식의 `gatekit-task` 블록 하나로 표현한다. `jobs.py`가 이

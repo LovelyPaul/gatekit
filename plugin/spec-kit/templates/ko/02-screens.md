@@ -1,3 +1,9 @@
+---
+title: "{{project_name}} — 화면 명세"
+date: "{{date}}"
+status: "초안"
+---
+
 # {{project_name}} — 화면 명세
 
 출처: {{Figma URL · HTML 파일 · 스크린샷 파일명 · 인터뷰}}

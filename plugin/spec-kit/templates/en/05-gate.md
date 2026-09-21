@@ -1,3 +1,9 @@
+---
+title: "{{project_name}} — completion gate"
+date: "{{date}}"
+status: "draft"
+---
+
 # {{project_name}} — completion gate
 
 This file is the definition of "done". Once a human approves it, its hash is

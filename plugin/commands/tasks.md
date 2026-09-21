@@ -40,6 +40,24 @@ paths, and gates must be commands that actually run here.
 If `spec/01-prd.md` is missing, stop and tell the user to run
 `/gatekit:interview` first. Do not invent requirements.
 
+**ADR-0017 decisions 3 and 4 — two more hard stops, same shape as the one
+above.** Run `spec validate --json` now (not just at Step 6) and check for
+these findings before doing any planning work:
+
+- `screens_required` — `01-prd.md` implies a UI-bearing project (no
+  `[non-ui]` marker in Non-goals) and `spec/02-screens.md` does not exist.
+  **Stop** and tell the user to run `/gatekit:mockup` first. Do not guess a
+  screen layout here — that is mockup's job, not this command's.
+- `prototype_required` — `spec/02-screens.md` exists but carries no
+  `Prototype confirmed <date>` line. **Stop** and tell the user to finish
+  `/gatekit:mockup`'s live-prototype revision loop (Step 7b there) and
+  confirm it before tasks can be cut. A task list built against an
+  unconfirmed prototype risks exactly the "기다림 끝에 엉망" outcome this
+  ADR exists to prevent — the prototype is cheap to revise; a built task
+  list against the wrong shape is not.
+
+Neither stop applies to a project whose PRD carries the `[non-ui]` marker.
+
 ## Step 2 — cut vertical slices
 
 Each task must deliver something demonstrable end to end: data, logic, and the
@@ -124,6 +142,20 @@ never round it to a pass. Do not add it to a task whose write scope has no
 such path (e.g. pure backend logic, `"read-only"` tasks) — the ADR keeps the
 scan narrow so a `fail` from it stays trustworthy.
 
+**The screenshot criterion (ADR-0017 decision 9).** For any task whose
+`write_scope` includes a UI surface — same test as Step 2's "the surface a
+user touches" — `/gatekit:gate` (not this command) will derive a completion
+criterion requiring `spec/design/build-<task-id>.png` to exist, captured by
+a standalone script (`npx playwright test` or whatever E2E runner
+`spec/03-architecture.md` names — never an MCP tool call, which only exists
+inside an interactive session and cannot be a criterion `argv`). This
+command's job is only to make that possible: name the task so `<task-id>`
+is stable and unique (it already must be, per Step 3's uniqueness rule),
+and do not write anything to `spec/design/` yourselves — the screenshot is
+captured once the task's own gates already pass, as evidence for `/gatekit:
+verify`'s evaluator to look at later, not a gate this command or the worker
+clears itself.
+
 ## Step 5 — show the shape, then write spec/04-tasks.md
 
 Write the fences to a scratch copy, run `jobs shape`, and present its counts,
@@ -131,7 +163,8 @@ rounds, and unevidenced links with the round total dropping them would save. One
 `AskUserQuestion` — write as shown, merge tasks, or loosen dependencies — skipped
 after a stop signal.
 
-Then fill the template, headings verbatim from the heading map. Each task is one
+Then fill the template, including its YAML frontmatter block (`title`/`date`/
+`status`) at the top, headings verbatim from the heading map. Each task is one
 ` ```gatekit-task ` fence holding a single JSON object, and the instruction must
 be self-contained — a worker reads only that string and its scope. Fill the
 execution-order table so a human can see the rounds at a glance.
@@ -158,3 +191,16 @@ In `output_lang`:
 4. Next command: `/gatekit:gate`.
 
 Do not run any task. This command only plans them.
+
+## Step 8 — ask what happens next
+
+**ADR-0017 decision 6.** One closing `AskUserQuestion`, in `output_lang`,
+after the report. Options: proceed to `/gatekit:gate` now, revise the task
+list (merge tasks, loosen dependencies, or add a task for an uncovered
+feature), or stop here for now.
+
+- Proceeding: actually invoke `/gatekit:gate`.
+- Revising: apply the change, re-run Step 6's validation, and ask this
+  question again.
+- Stopping: confirm the file is saved and name `/gatekit:gate` for later,
+  then end the turn.

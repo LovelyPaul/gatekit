@@ -1,3 +1,9 @@
+---
+title: "{{project_name}} — recovery procedure"
+date: "{{date}}"
+status: "draft"
+---
+
 # {{project_name}} — recovery procedure
 
 What to do when the build fails. This document exists so that fixing is not

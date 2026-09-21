@@ -1,3 +1,9 @@
+---
+title: "{{project_name}} — 완료 게이트"
+date: "{{date}}"
+status: "초안"
+---
+
 # {{project_name}} — 완료 게이트
 
 이 파일은 "끝났다"의 정의다. 사람이 승인하면 해시가 고정되고, Stop 훅이

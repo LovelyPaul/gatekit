@@ -1,3 +1,9 @@
+---
+title: "{{project_name}} — 복구 절차"
+date: "{{date}}"
+status: "초안"
+---
+
 # {{project_name}} — 복구 절차
 
 빌드가 실패했을 때 무엇을 하는지 정한다. 즉흥적으로 고치지 않기 위한 문서다.

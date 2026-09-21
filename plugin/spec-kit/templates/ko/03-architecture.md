@@ -1,3 +1,9 @@
+---
+title: "{{project_name}} — 아키텍처"
+date: "{{date}}"
+status: "초안"
+---
+
 # {{project_name}} — 아키텍처
 
 ## 스택

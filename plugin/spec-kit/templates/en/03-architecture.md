@@ -1,3 +1,9 @@
+---
+title: "{{project_name}} — architecture"
+date: "{{date}}"
+status: "draft"
+---
+
 # {{project_name}} — architecture
 
 ## Stack

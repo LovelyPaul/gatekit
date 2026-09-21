@@ -1,7 +1,15 @@
+---
+title: "{{project_name}} — progress"
+date: "{{date}}"
+status: "{{not-started | in-progress | blocked | done}}"
+---
+
 # {{project_name}} — progress
 
-Read by both humans and machines. Do not change the format of the `STATUS:`
-line.
+Read by both humans and machines. Do not change the format of the body's
+`STATUS:` line below — the frontmatter's `status` is a summary for someone
+who has not opened the file; the body's `STATUS:` line remains the source
+of truth.
 
 STATUS: {{not-started | in-progress | blocked | done}} · {{iso timestamp}}
 

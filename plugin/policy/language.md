@@ -22,6 +22,17 @@ Everything the user reads:
 - `AskUserQuestion` question text, option labels, and option descriptions
 - verdict explanations and error messages you surface
 
+## What never reaches the user at all
+
+Internal rule names — ADR numbers, decision numbers, fence field names like
+`pain_floor_waived`, policy file names — are comments for whoever reads this
+command's source, not vocabulary for the person being interviewed. Never say
+"ADR-0017," "decision 4," "branch floor," or similar in a chat reply,
+`AskUserQuestion` text, or a written spec file's prose. If a question needs
+justifying, justify it in terms of the problem itself ("한두 개만으로는 뭐가
+진짜 문제인지 판단하기 어려워서요"), never by citing the rule that produced
+it. This applies everywhere the detected language applies, above.
+
 ## What never gets translated
 
 Identifiers stay in their source form regardless of language:

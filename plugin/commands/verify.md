@@ -79,6 +79,13 @@ It prints the evaluator's reply tail (the verdict table) and its state.
 `unverified` for every criterion, never a pass. Then continue at Step 3 and
 write `spec/PROGRESS.md` yourself in Step 5.
 
+**Screenshot judging (decision 9) depends on the evaluator backend actually
+being able to read an image file**, which not every CLI backend supports
+the same way an `agent` evaluator (a multimodal model reading via `Read`)
+does. If the configured backend's documentation does not confirm image
+input, treat every `-visual` verdict from it as `unverified` rather than
+trusting a text-only guess about an image it could not actually see.
+
 **If the evaluator is `agent`**, spawn one Agent. Its prompt **must** contain
 this fence verbatim — the spawn gate parses it as JSON and denies the spawn
 without it:
@@ -98,13 +105,29 @@ The rest of the evaluator's prompt says, in `output_lang`:
 - For each criterion and each E2E step, give one verdict from
   `ok / warn / fail / unverified`. A step you could not run is `unverified`;
   never round it to either side.
+- **For each screenshot criterion that came back `ok`** (ADR-0017 decision
+  9 — its `artifacts` entry is a `spec/design/build-<task-id>.png`), read
+  that image file and judge it, in addition to the criterion's own pass:
+  does it match the design direction on record (a chosen preset, or a
+  pattern in `spec/02-design.md`)? Does it show any pattern listed in
+  `${CLAUDE_PLUGIN_ROOT}/spec-kit/design-antipatterns.json` (an unstated
+  purple-to-blue gradient hero, one sans-serif used for every text role, a
+  page of identical cards, decorative emoji standing in for icons,
+  centered-everything with no deliberate asymmetry)? Report this as its own
+  verdict, on a criterion id suffixed `-visual` (e.g.
+  `task-one-screenshot-visual`), separate from the capture criterion's own
+  `ok`/`fail` — the screenshot existing and the screenshot looking right
+  are two different facts. If you cannot open or read the image, that
+  verdict is `unverified`, not a silent skip.
 - Do not fix anything you find. Report it.
 - Record the result under the **last-verification heading that already exists**
   in `spec/PROGRESS.md` (`## 마지막 검증` in Korean, `## Last verification` in
   English). Do not add a heading in another language — `spec validate` treats
   that as cross-language residue and fails. If the file or the heading is
   missing, copy
-  `${CLAUDE_PLUGIN_ROOT}/spec-kit/templates/<output_lang>/PROGRESS.md` first.
+  `${CLAUDE_PLUGIN_ROOT}/spec-kit/templates/<output_lang>/PROGRESS.md` first,
+  filling its YAML frontmatter block (`title`/`date`/`status`) along with the
+  rest of the placeholders.
   Write the timestamp, the aggregate verdict, and one line per criterion and per
   E2E step. This file is the one exception to read-only; nothing else may be
   written.
@@ -125,11 +148,15 @@ finding — report the disagreement rather than picking the better result.
 
 Report in `output_lang`, in this order:
 
-1. The aggregate verdict.
+1. The aggregate verdict (code criteria only — see the note below on why
+   this cannot include `-visual` verdicts).
 2. One row per criterion: id, verdict, and for anything not `ok` the reason and
    the tail of its output. Focus on `$ARGUMENTS` if one was given, but list all.
 3. One row per E2E step from the evaluator.
-4. Any disagreement between the evaluator's run and yours.
+4. **One row per `-visual` verdict, reported with the same weight as any
+   other criterion, never folded silently into the aggregate or omitted
+   because the aggregate already said `ok`.**
+5. Any disagreement between the evaluator's run and yours.
 
 Rules for the report:
 
@@ -138,10 +165,19 @@ Rules for the report:
   none of these are passes and none are failures.
 - Never restate a worker's or the evaluator's claim of success as a verdict. The
   contract run decides.
-- If the aggregate is `ok`, say the contract passes and name the commit or the
-  working tree it passed against.
-- If it is anything else, list what would have to change, and stop. Do not fix
-  the code here; route failures back through `/gatekit:build`.
+- **The `contract run` aggregate (`ok`/`fail`/`unverified`) only ever counts
+  code criteria — it has no way to see a `-visual` verdict, since that comes
+  from the evaluator reading an image, not from running a command.** Never
+  report "the contract passes" on the strength of the aggregate alone while
+  any `-visual` verdict reads `fail`. Check both: if the aggregate is `ok`
+  **and** every `-visual` verdict is `ok` or `unverified` (never `fail`),
+  say the contract passes and name the commit or the working tree it passed
+  against. If the aggregate is `ok` but a `-visual` verdict is `fail`, say
+  so explicitly and plainly — do not let a clean aggregate imply the build
+  is done when a screenshot criterion's own visual judgement says otherwise.
+- If the aggregate is anything else, or any `-visual` verdict is `fail`,
+  list what would have to change, and stop. Do not fix the code here; route
+  failures back through `/gatekit:build`.
 
 ## Step 5 — leave the trail
 

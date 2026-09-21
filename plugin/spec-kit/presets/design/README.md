@@ -5,8 +5,27 @@ what a project's `spec/tokens.json` holds at version 2: open token groups plus
 `patterns`. `gatekit design merge-preset <name>` merges it into the project's
 `spec/tokens.json`.
 
-No preset ships with the plugin. This directory holds this README and nothing
-else until one has been observed in a real build.
+Presets come in two kinds, told apart by their `source` field:
+
+- **Seed presets** (`"source": ["seed:<origin>"]`) — adopted from an
+  established, widely-used design system or component library (shadcn/ui,
+  Material, etc.), not invented here. These may be committed immediately,
+  without a gatekit build first: the origin's own track record is the
+  evidence, and gatekit's greenfield fallback (ADR-0017 decision 3) needs at
+  least one real option to offer before any project has ever been built
+  with it — a preset directory with nothing in it is not neutral, it is the
+  reason a source-less project falls through to unstyled browser defaults.
+- **Observed presets** (`"source": ["preset:<name>"]` after a real
+  `merge-preset` run, or any preset not adopted from an established source)
+  — must be **observed in a real build before being committed**, the
+  original rule this README stated. Write it, merge it into a real project,
+  run the build, and only then add the file here. A preset that has never
+  produced a passing build and is not a seed from elsewhere is a guess with
+  a filename.
+
+A seed preset that later gets refined from real build feedback stays a seed
+(its origin does not change), but the refinement itself should be checked
+against a real build the same way an observed preset would be.
 
 ## Shape
 
@@ -53,7 +72,11 @@ the assumption ledger rely on.
 
 ## Committing a new preset
 
-A preset must be **observed in a real build before it is committed** — the same
-rule ADR-0006 applies to host parity claims. Write it, merge it into a real
-project, run the build, and only then add the file here. A preset that has
-never produced a passing build is a guess with a filename.
+**Seed preset**: cite the real origin in `source` (e.g. `"seed:shadcn-ui"`),
+keep values as that system's own defaults or documented conventions — never
+invented values dressed up as someone else's — and commit directly.
+
+**Observed preset**: the same rule ADR-0006 applies to host parity claims —
+write it, merge it into a real project, run the build, and only then add
+the file here. A preset that has never produced a passing build and is not
+a cited seed is a guess with a filename.

@@ -1,6 +1,14 @@
+---
+title: "{{project_name}} — 진행 상황"
+date: "{{date}}"
+status: "{{not-started | in-progress | blocked | done}}"
+---
+
 # {{project_name}} — 진행 상황
 
-기계와 사람이 함께 읽는 파일이다. 첫 줄의 `STATUS:` 형식을 바꾸지 않는다.
+기계와 사람이 함께 읽는 파일이다. 아래 본문 첫 줄의 `STATUS:` 형식을 바꾸지
+않는다 — frontmatter의 `status`는 사람이 파일을 열지 않고도 알 수 있게 요약한
+것일 뿐, 본문의 `STATUS:` 줄이 기준이다.
 
 STATUS: {{not-started | in-progress | blocked | done}} · {{iso 타임스탬프}}
 

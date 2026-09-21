@@ -38,3 +38,5 @@
 ## Negative space
 
 - No screen covers the offline state.
+
+Prototype confirmed 2026-09-19

@@ -1,3 +1,9 @@
+---
+title: "{{project_name}} — task list"
+date: "{{date}}"
+status: "draft"
+---
+
 # {{project_name}} — task list
 
 Each task is one `gatekit-task` block. `jobs.py` reads these blocks and hands

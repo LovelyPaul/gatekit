@@ -1,3 +1,9 @@
+---
+title: "{{project_name}} — 디자인 명세"
+date: "{{date}}"
+status: "초안"
+---
+
 # {{project_name}} — 디자인 명세
 
 선택 파일. `/gatekit:design`이 참조 사이트·프리셋·패턴 파일, 또는
