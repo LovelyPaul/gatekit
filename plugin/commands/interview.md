@@ -2,7 +2,7 @@
 name: interview
 description: Turn a chosen problem into spec/01-prd.md and spec/03-architecture.md through a deep, free-ranging interview on implementation shape — pages, what each page does, what data it needs — laying the groundwork for design and tasks.
 argument-hint: "[what you want to build, in your own words]"
-allowed-tools: Read, Write, Edit, Glob, Grep, Bash
+allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch
 ---
 
 # /gatekit:interview
@@ -162,6 +162,91 @@ documents now. This is not a routing formality; it is the actual judgement
 call this command exists to get right; never predict how much is left
 before asking it.
 
+## Step 2.5 — research the domain, then propose what the conversation never raised
+
+**A free-ranging conversation only ever produces what the user thought to
+say.** For a known product category, some features are expected by anyone
+familiar with that category but are infrastructure to the user's actual
+goal, not the goal itself — so they rarely come up unprompted. Found on
+`gk-todo4`: a character-chat interview covered memory, intimacy, and
+persona in real depth, but never touched context-window management for
+long conversations, content-safety limits, or persona drift over a long
+session — all standard concerns for that category, none of them raised
+because the user was thinking about the relationship feature, not the
+category's usual pitfalls. The owner's framing after reading that PRD:
+"기본적으로 챗봇 기능으로 들어가야 할 내용들이 빠져있고, 완성도가 상당히
+낮아" — and the fix the owner asked for is not one or two more questions,
+it is a shift from "only what the user thought to say" toward the richer,
+propose-then-prune shape tools like Lovable use: surface a fuller feature
+set drawn from real knowledge of the category, and let the user cut or
+adjust rather than build from a blank slate.
+
+**Step 2.5a — freeze what the conversation already established.** Before
+doing anything else, list every feature Step 2's conversation actually
+produced as a locked set. This is the differentiator ledger — the reason
+this specific product exists, in the user's own terms (for a
+character-chat product: intimacy scoring, memory accumulation, persona).
+**Nothing in Step 2.5b–d may alter, replace, or "improve" an item in this
+set** — research only ever fills gaps beside it, never edits it.
+
+**Step 2.5b — research the category.** Identify the product category from
+the frozen set and the discovery record. Run `WebSearch` with **four
+distinct angles**, not one generic query:
+
+1. standard/essential features for this category (what a spec sheet or
+   comparison article says every product in it has)
+2. user complaints and reviews naming what such products commonly get
+   wrong or lack (this is the closest proxy to what actually made
+   `gk-todo4`'s reference product get deleted — a real failure mode, not a
+   feature-list guess)
+3. recent/leading examples and what differentiates them (trend pieces,
+   "best of" roundups) — kept and labeled separately, never blended into
+   "standard"
+4. technical pitfalls or postmortems specific to the category (engineering
+   blog posts, "what we got wrong building X")
+
+**Cross-check before accepting anything as a candidate: an item only
+becomes a "standard" candidate when it is corroborated by two or more
+independent sources** — a single blog's opinion is not evidence of a
+category norm. An item from only one source, or from angle 3 (leading
+examples), is never labeled "standard" — carry it as a separately-labeled
+"참고 아이디어" (reference idea) instead, explicitly marked as not typical.
+
+**Step 2.5c — diff against the frozen set, then present.** Drop every
+research candidate that already overlaps (even loosely) with an item in
+Step 2.5a's frozen set — research exists to fill gaps beside the
+differentiator ledger, never to second-guess or restate it. Present what
+remains to the user as plain statements, in `output_lang`, in two clearly
+separated groups:
+
+- **기본기 후보 (hygiene candidates)** — cross-checked as standard for this
+  category, each with which of the four research angles it came from (so a
+  "2건 이상의 실제 서비스/리뷰에서 반복적으로 언급됨" style citation is
+  visible, not just asserted)
+- **참고 아이디어 (reference ideas)** — single-source or trend-only, marked
+  as optional inspiration, never framed as something expected
+
+If the discovery record (`spec/00-discovery.md`) contains an experience
+that confirms or contradicts a candidate (the user's own account of what a
+prior tool got wrong), say so alongside it — this is the strongest
+available evidence and outranks the research.
+
+**Step 2.5d — prune, not fill in a blank.** Ask the user to react to the
+whole presented set as ordinary Step 2 questions (`policy/questioning.md`'s
+"ask one, then stop and wait," no fixed count, no ceiling) — but the
+starting posture is a proposed, fuller feature set the user cuts or edits,
+not an empty form the user fills. "빼주세요," "이건 나중에요," "이렇게
+바꿔주세요" are all valid, complete answers — do not push for a reason
+beyond what the user volunteers. Every item the user keeps (from either
+group) becomes an `F<n>` with a one-line evidence note: `출처: 리서치
+(2건 이상 교차확인)`, `출처: 리서치 (참고 아이디어)`, or `출처: 사용자
+경험` — so a later reader can audit why an item the user never explicitly
+requested ended up in the PRD.
+
+Once the user's reaction to the full presented set is settled (or a stop
+signal arrives), continue to Step 3, drafting from Step 2's conversation
+**plus** whatever this step's proposal the user kept.
+
 ## Step 3 — draft
 
 Once the interview settles (Step 2's own confirmation, not a fixed point),
@@ -231,9 +316,15 @@ expected `warn` at this stage. Do not create those files here.
 
 ## Step 5 — confirm the draft
 
-One `AskUserQuestion`: does the draft match what the interview actually
-established? Offer approve, revise a named section (returns to Step 2's
-conversation on that point, then re-drafts), or start over.
+Show the full `F<n>` feature list as it stands now — Step 2's own features
+together with whatever Step 2.5 proposed that the user kept — as one list,
+without separating "what you said" from "what research added." The point
+is a single explicit confirmation that this whole set, not just the
+conversational part, is what gets built.
+
+One `AskUserQuestion`: does this match what should actually be built? Offer
+approve, revise a named section (returns to Step 2's conversation on that
+point, then re-drafts), or start over.
 
 ## Step 6 — report
 
@@ -245,7 +336,10 @@ In `output_lang`, in this order:
    its impact if wrong.
 4. The pages/screens the interview settled on and what each one does, as a
    short list — this is the concrete output the next command needs.
-5. The next command: `/gatekit:mockup` — to pick or extract a design
+5. What Step 2.5's research proposed, split by group (기본기 후보 /
+   참고 아이디어), and for each item whether the user kept it (as which
+   `F<n>`), turned it into a non-goal, or left it as a `notes` entry.
+6. The next command: `/gatekit:mockup` — to pick or extract a design
    direction for the pages just settled.
 
 Do not claim the spec is correct. Claim only that it validates and that these

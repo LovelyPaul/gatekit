@@ -210,7 +210,15 @@ nothing to prototype).
    triggering an error must show that state). This is still frontend-only,
    disconnected from any backend: no build has started, the same boundary
    Step 7a's static preview already drew, now expressed as working markup
-   instead of a picture.
+   instead of a picture. **Fill every screen with realistic sample content,
+   not empty inputs or lorem ipsum** — every feature `01-prd.md` lists as an
+   `F<n>` should be visibly present and populated with plausible data (a
+   character list showing real-looking character names and a last-message
+   preview, not three blank cards), so the prototype reads as a finished
+   product's actual screen, not a wireframe waiting for content. This is
+   the whole point of the prototype gate: the user judges completeness
+   against what the finished thing would look like, not against an
+   abstraction.
 2. Hand it to the user to actually open (a file path today; a
    Claude-in-Chrome-driven walkthrough where that tool is available and the
    user wants it — never the required path, since it adds real per-round
@@ -221,7 +229,19 @@ nothing to prototype).
    (the file `/gatekit:tasks` actually reads — nothing new needed here, this
    is the same write-back path Step 7a's loop already uses), then hand the
    prototype back. Repeat until the user confirms explicitly.
-4. On confirmation, append a line to `spec/02-screens.md`, after the
+4. **Before asking for final confirmation, ask one explicit question: does
+   this prototype fully cover what you want built, or is something still
+   missing?** This is not the same question as "does this look right" —
+   the prototype is the first time the whole feature set is visible as
+   actual screens rather than a list, and a gap that a `01-prd.md` bullet
+   list hid can become obvious once it is something to click through. If
+   the answer names something missing, treat it as new ground for
+   `/gatekit:interview`'s Step 2 conversation: route back there, let the
+   feature get defined properly (page, behavior, data — not invented here),
+   then return to regenerate this prototype once `01-prd.md` and
+   `02-screens.md` reflect it. Do not silently invent the missing feature
+   in the HTML to avoid the round trip.
+5. On confirmation, append a line to `spec/02-screens.md`, after the
    Negative space section, in the exact form `spec validate` scans for:
    `Prototype confirmed <date>` (or `프로토타입 확정 <date>` in Korean). This
    is prose, not a hash-anchored approval like `05-gate.md`'s — the

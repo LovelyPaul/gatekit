@@ -1,11 +1,13 @@
 # ADR-0017: A branch floor for discover/interview, and a verdict gate before promotion
 
-Status: accepted 2026-09-19, extended 2026-09-20/21 with decisions 7–22
+Status: accepted 2026-09-19, extended 2026-09-20/21/24 with decisions 7–24
 found during real use on `gk-todo2`, `gk-todo3`, and `gk-todo4` (decision 22
-from reading `gk-todo4`'s completed, end-to-end run). All 1091 plugin tests
-pass (`cd plugin && python3 -m unittest discover -s tests`) — decisions 13
-through 22 are prompt/template-only changes with no new spec.py logic, so
-the count is unchanged from decision 12. Implementation
+from reading `gk-todo4`'s completed, end-to-end run; decisions 23–24 from
+the owner's review of that same run's PRD quality — 23 was superseded by
+24 the same day, in the same review conversation, before either shipped).
+All 1091 plugin tests pass (`cd plugin && python3 -m unittest discover -s
+tests`) — decisions 13 through 24 are prompt/template-only changes with no
+new spec.py logic, so the count is unchanged from decision 12. Implementation
 notes on decisions this document left underspecified:
 
 - **Decision 5's "blocking (y/n) column"** was implemented as **two**
@@ -1264,6 +1266,106 @@ by inventing the `-visual` convention; this decision is the fix for the gap
 that convention left — a second, unreconciled number sitting next to the
 one everyone actually reads.
 
+### 23. Superseded same-day by decision 24 — a checklist-question fix was too narrow for what the owner was actually asking for
+
+Found on `gk-todo4` (same finding as decision 24 below): the character-chat
+interview never surfaced context-window management, content-safety limits,
+or persona drift. The first fix tried here was narrow — a new Step 2.5
+reading a seed data file (`plugin/spec-kit/domain-checklists.json`, same
+convention as `design-antipatterns.json`) that matched a known domain and
+asked its checklist items as ordinary questions. Reviewing it with the
+owner surfaced that this missed the actual point: **a seed file starts
+empty and only grows from real trials, so it cannot help a domain it has
+not seen yet — "쓸만해질 때까지 기다려달라" is not something a user will
+accept.** More fundamentally, the owner's real complaint was not "a few
+questions are missing" but that `interview.md`'s whole posture is
+answer-only — it builds exclusively from what the user thought to say, the
+same structural gap decision 12 already named, never from what the
+interviewer itself knows about the category. The owner named the actual
+target directly: tools like Lovable propose a fuller feature set from
+domain knowledge and let the user prune it, rather than building up from a
+blank form one answer at a time. **The checklist-file approach and its
+Step 2.5 are withdrawn; `plugin/spec-kit/domain-checklists.json` was
+deleted the same day it was created.** Decision 24 replaces it.
+
+### 24. `interview.md` researches the category and proposes a fuller feature set for the user to prune, instead of building only from what the conversation's own threads produced
+
+This is the shape decision 23 was reaching for and missed: not "ask a few
+more questions from a static list" but "propose, then prune" — the same
+posture the owner pointed to in Lovable, adapted to keep gatekit's own
+discipline (nothing invented silently, every addition auditable, the
+user's own words never overridden).
+
+**The core risk this decision had to solve first: research proposing
+generic, averaged-out features could dilute a product's actual
+differentiators** — if research does not know character-chat's intimacy
+mechanic is the whole point of this specific product, treating research
+output and conversation output as one undifferentiated pool risks
+"smoothing" the product toward a category average. The fix is a hard
+separation, not a shared bucket: **Step 2.5a freezes everything Step 2's
+conversation already established as a locked differentiator set before any
+research runs, and research (2.5b–d) is only ever allowed to propose items
+that do not already overlap it** — filling gaps beside the user's own
+stated reasons for building this thing, never second-guessing or replacing
+them.
+
+**Decision:**
+
+- **Step 2.5a** locks Step 2's conversation output as-is — the
+  differentiator ledger, untouchable by what follows.
+- **Step 2.5b** runs `WebSearch` (added to `interview.md`'s
+  `allowed-tools`) across four distinct angles rather than one generic
+  query: category-standard features, user complaints/reviews (the closest
+  available proxy for what actually made `gk-todo4`'s reference product get
+  deleted — a real failure mode, not a guessed feature list), recent/leading
+  examples kept in a separate "reference idea" bucket, and
+  technical-pitfall or postmortem sources. **An item is only labeled a
+  "standard" (기본기) candidate when at least two independent sources
+  corroborate it** — a single source's opinion never counts as a category
+  norm, and anything from the leading-examples angle alone stays labeled a
+  reference idea, explicitly not typical.
+- **Step 2.5c** diffs research candidates against the Step 2.5a frozen set
+  (drop anything already covered) and presents what remains to the user in
+  two visibly separate groups — cross-checked hygiene candidates with their
+  citation basis, and single-source/trend reference ideas marked as
+  optional inspiration — cross-referencing `spec/00-discovery.md` when the
+  user's own recorded experience confirms or contradicts a candidate (that
+  evidence outranks research).
+- **Step 2.5d** is a prune conversation, not a fill-in-the-blank one: the
+  user reacts to the whole proposed set under the same rules as every other
+  Step 2 question (one at a time, stop-and-wait, no fixed count), and
+  "빼주세요"/"나중에요" are complete answers needing no further
+  justification. Every kept item becomes an `F<n>` carrying a one-line
+  evidence note (`출처: 리서치 (2건 이상 교차확인)`, `출처: 리서치 (참고
+  아이디어)`, or `출처: 사용자 경험`) — so a later reader can audit why an
+  item the user never explicitly requested is in the PRD, the same
+  auditability principle behind decision 5's `Blocking`/`Confirmed`
+  columns.
+- **Step 5** (confirm the draft) now shows the full `F<n>` list — Step 2's
+  own features and whatever Step 2.5 added that the user kept — as one
+  undifferentiated list before asking for approval, so the confirmation
+  covers the whole set the user is actually about to get built, not only
+  the conversational part.
+- **`/gatekit:mockup` Step 7b** gains two changes closing the loop this
+  decision opens: the live prototype must now be filled with **realistic
+  sample content for every `F<n>`**, not empty inputs, because the
+  prototype is the point where a feature-list gap becomes visually obvious
+  in a way a bullet list hides; and immediately before final confirmation,
+  the command now asks explicitly whether the prototype fully covers what
+  should be built — a "something's missing" answer routes back to
+  `/gatekit:interview`'s Step 2 conversation to define the feature
+  properly (page, behavior, data), never invented directly into the HTML.
+
+**What this does not do.** It does not turn interview into a template
+library the way Lovable's is — there is no stored library of
+previously-built app structures to draw from; research runs fresh every
+time via live search, which trades consistency (the same domain researched
+twice can turn up different candidates) for not needing to wait for a seed
+library to accumulate before being useful on day one. Whether specific
+research findings are worth hard-coding as a `design-antipatterns.json`-style
+seed file remains open, to be revisited once real interviews using this
+flow show which research findings turn out reliably useful across runs.
+
 ## Consequences
 
 **What this buys.** The exact failure the owner observed — an
@@ -1347,7 +1449,17 @@ stage, closes the two gaps a live conversation could never have surfaced:
 the `Blocking` bar now catches an assumption that would hurt a feature's
 actual quality, not only one that would sink the whole plan, and a
 `-visual` fail can no longer sit unreconciled next to a clean aggregate —
-the report states plainly when the two disagree.
+the report states plainly when the two disagree. Decision 24 (superseding
+23's narrower attempt) closes the gap decisions 12/13 left open by design:
+following only the threads the user opens can never surface a
+domain-standard concern the user never thought to raise, so `interview.md`
+now freezes what the conversation established, researches the category
+live across four angles, and proposes a fuller feature set — cross-checked
+hygiene candidates separated from single-source reference ideas — for the
+user to prune, with "out of scope" as a valid, recorded answer rather than
+a forced inclusion. `/gatekit:mockup`'s prototype now carries realistic
+sample content for every feature and asks explicitly, before confirmation,
+whether the prototype covers everything that should be built.
 
 **What it costs.** Discovery sessions get longer for a user who arrives
 with exactly one pain already in mind — the branch floor asks for two more
@@ -1370,9 +1482,21 @@ keeps seeing "new" wording in a genuinely closed topic. Decision 9 adds one
 screenshot capture per UI-touching task during build (small, and does not
 block the task's own gate) and one more thing the verify evaluator checks
 per task — a modest addition to a step that already runs a full contract
-pass. All these costs are the same deliberate trade: less silent inference
-and fewer artificial ceilings, more forced, cheap-relative-to-a-full-build
-checkpoints — paid for in session length, not in rework after a build.
+pass. Decision 24 adds a live `WebSearch` round (four queries) plus a
+prune conversation to every interview — real time and real risk: research
+quality varies run to run since nothing is cached or reused, a
+badly-corroborated candidate could still slip through the two-source bar
+if the sources are not actually independent, and the frozen differentiator
+set (Step 2.5a) is the only thing stopping research from diluting a
+product's own reason for existing, so a bug in that freeze is a real
+regression risk to watch for. `/gatekit:mockup` now costs more per
+revision round too — sample content for every feature is real content to
+write, not placeholders, and the new "does this cover everything"
+question can send the flow back to `/gatekit:interview` for another
+round-trip. All these costs are the same deliberate trade: less silent
+inference and fewer artificial ceilings, more forced, cheap-relative-to-a-
+full-build checkpoints — paid for in session length, not in rework after a
+build.
 
 **What it does not do.** It does not add `deep-interview`'s numeric
 ambiguity score or its Round-4/6/8 challenge-agent machinery wholesale —
