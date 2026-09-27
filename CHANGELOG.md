@@ -4,6 +4,95 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.11.0 — 2026-09-27
+
+Four real projects went through the pipeline (`gk-trial2`, `gk-todo`,
+`gk-todo4`, `gk-todo5`). Two of them were abandoned mid-way for the same
+reason: the interview was too shallow, so the spec shipped without features
+the owner considered obviously necessary, and the first look at a real
+screen came only after the build. This release is mostly about that gap.
+
+### Changed
+
+- **`/gatekit:discover` and `/gatekit:interview` are free-ranging
+  conversations** (ADR-0017). No named gates, no fixed question slots, no
+  progress counter, no question ceiling — the interviewer asks whatever the
+  last answer makes worth asking, and a post-hoc summary is confirmed with
+  the user rather than filled in live. The earlier six-gate script was found,
+  against real runs, to produce a scripted interrogation instead of an
+  interview.
+- **`/gatekit:interview` now researches the product category and proposes
+  what the conversation never raised** (ADR-0017 decision 24). It freezes
+  the features the conversation established — the product's own reasons for
+  existing, never edited by what follows — then searches four angles
+  (standard features, user complaints, leading examples, technical
+  postmortems), keeps only candidates two independent sources corroborate,
+  and presents them in two labelled groups for the user to prune. The user
+  cuts from a fuller draft instead of filling a blank form.
+- **`build.execution` defaults to `host`** (applying ADR-0013 decision 1,
+  which shipped in 0.8.0 everywhere except the line that decides it). A
+  worker is a cold session of the same model, re-deriving the project per
+  task; on the run that measured this, 26 minutes of work took 4.5 hours
+  across 35 spawns. Spawn a worker when the model must genuinely differ, or
+  when a round is wide enough for parallelism to pay. Set
+  `"execution": "worker"` explicitly for the old behaviour.
+- **A task's gate must test what that task builds.** Pointing several tasks
+  at the whole suite let a real trial record three features as complete with
+  no code written for them: the first feature's tests made the shared gate
+  pass, so preflight skipped every worker. The whole suite keeps its place
+  in `spec/05-gate.md`, where "does everything hold together" is the actual
+  question.
+- **Command files hold the skeleton; their long-form procedures live in
+  `policy/` and `spec-kit/` data files.** Seven commands had grown past the
+  160-line limit `ARCHITECTURE.md` §0 sets to stop a command from becoming a
+  second product beside its skill shim. Nothing was cut — the duplicated
+  conversation rules in discover and interview are now one shared file.
+
+### Added
+
+- **A prototype confirmation gate before `/gatekit:tasks`** (ADR-0017
+  decision 4). For a UI-bearing project, `/gatekit:mockup` builds a real
+  clickable prototype filled with realistic sample content, revises it with
+  the user, and asks explicitly whether anything is missing. `spec validate`
+  refuses to let tasks proceed until `02-screens.md` records the
+  confirmation — so the first look at a screen happens before the build, not
+  after.
+- **A verdict gate on discovery** (ADR-0017 decision 2). Each improvement
+  opportunity carries a model-proposed `verdict_suggested` and a
+  user-confirmed `verdict`; a confirmed `eliminate` or `reuse` blocks
+  `/gatekit:interview` rather than letting the pipeline build something that
+  should not be built. `unknown` never blocks.
+- **Screenshot evidence and `-visual` verdicts** (ADR-0017 decisions 9, 22).
+  UI tasks leave `spec/design/build-<task-id>.png`; the verify evaluator
+  reads those images against the design direction and a seeded
+  anti-pattern list. The contract aggregate counts code criteria only, so a
+  clean aggregate is never reported as a pass while a `-visual` verdict
+  fails.
+- **`Blocking` / `Confirmed` columns on every assumption ledger row**
+  (ADR-0017 decisions 5, 22). The bar is "would being wrong here hurt a core
+  feature's actual quality," not "would the whole plan collapse"; a blocking
+  row left unconfirmed fails validation and `/gatekit:gate` refuses to
+  proceed.
+- **Three seed design presets** (`shadcn-neutral`, `editorial-warm`,
+  `tool-dense`) so a project with no design source picks a direction instead
+  of defaulting to unstyled browser output.
+- **YAML frontmatter on every spec-kit template**, so a written file's
+  title, date, and status are readable without opening the body.
+
+### Fixed
+
+- `gate_no_abs_paths` scanned every file on disk despite being documented as
+  scanning tracked files, so it failed on git-ignored trial artifacts
+  locally while CI stayed green. It now asks git what is tracked.
+- `SECURITY.md` carried a placeholder contact address; vulnerability reports
+  now go through GitHub's private reporting.
+- Both READMEs still described the Claude CLI as the default build worker
+  and opened with a stale `0.1.0` status line.
+- The Korean user manual described the six-gate discovery script, a
+  two-question interview ceiling, six hook gates (there are seven — `compact`
+  was undocumented), and no prototype gate. Rewritten against the code, and
+  reoriented from "what the system does" to "what you do".
+
 ## 0.10.0 — 2026-09-18
 
 The `gk-trial2` retrial's Codex evaluator run: exit 0, 111 seconds, and 12 of
