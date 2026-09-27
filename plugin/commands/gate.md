@@ -121,8 +121,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" spec validate --json
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract derive
 ```
 
-`spec validate` must not be `fail` before you continue. `contract derive`
-writes `.gatekit/contract.json` with the source hash of `05-gate.md`.
+`spec validate` must not be `fail` before you continue. `contract derive` writes `.gatekit/contract.json` with the source hash of `05-gate.md`.
 
 ## Step 5 — show the criteria
 
@@ -151,14 +150,11 @@ The check must print `ok`. Never edit the file to make a hash match.
 
 ## Step 7 — report
 
-In `output_lang`:
-
-1. The file path and the number of criteria.
-2. The `spec validate` and `approve check` results, quoted from the runs.
-3. That the write gate now allows source edits outside `spec/`.
-4. That any later edit to `05-gate.md` expires the approval and requires
-   re-approval plus `contract derive`.
-5. Next command: `/gatekit:build`.
+In `output_lang`: (1) the file path and the number of criteria; (2) the
+`spec validate` and `approve check` results, quoted from the runs; (3) that
+the write gate now allows source edits outside `spec/`; (4) that any later
+edit to `05-gate.md` expires the approval and requires re-approval plus
+`contract derive`; (5) the next command, `/gatekit:build`.
 
 If the user did not approve, say so explicitly and state that the write gate
 remains closed. Do not approve on their behalf.

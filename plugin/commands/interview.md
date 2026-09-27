@@ -7,297 +7,111 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash, WebSearch
 
 # /gatekit:interview
 
-Input: `$ARGUMENTS` — the user's description of what they want to build.
-
-If `$ARGUMENTS` is empty, or names a product without a real user and their
-pain ("a chatbot", "a productivity app"), stop and route the user to
+Input: `$ARGUMENTS` — the user's description of what they want to build. If
+it is empty, or names a product without a real user and their pain ("a
+chatbot", "a productivity app"), stop and route the user to
 `/gatekit:discover`. This pipeline assumes the problem is already known.
 
-**The point of this command is not writing a PRD quickly — it is a deep
-interview that turns a chosen problem into implementation shape**: how many
-pages or screens the thing needs, what each one does, what a user sees and
-can act on, what information it needs to work. Design direction (palette,
-typography, mood) is deliberately out of scope here — that is
-`/gatekit:mockup`'s job, once this command's output gives it something
-concrete to design for. **Never say "ADR-0017" or any other internal rule
-name to the user** — these are comments in this file for you, not
-vocabulary for them.
+**The point is not writing a PRD quickly — it is a deep interview that
+turns a chosen problem into implementation shape**: how many pages the
+thing needs, what each does, what a user sees and can act on, what
+information it needs. Design direction (palette, typography, mood) is out
+of scope — that is `/gatekit:mockup`'s job, once this command gives it
+something concrete to design for.
 
 ## Step 0 — load policy and language
 
-1. Read `${CLAUDE_PLUGIN_ROOT}/policy/language.md`,
-   `${CLAUDE_PLUGIN_ROOT}/policy/questioning.md`, and
-   `${CLAUDE_PLUGIN_ROOT}/policy/verification.md`.
+1. Read these under `${CLAUDE_PLUGIN_ROOT}/policy/`: `language.md`,
+   `questioning.md`, `conversation.md` (how Step 2 is conducted),
+   `assumptions.md` (the ledger Step 3 writes), `verification.md`.
 2. Detect the output language from the user's own words:
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang "$ARGUMENTS"
 ```
 
-Call the result `output_lang`. Every user-facing string below is written in it.
-Identifiers are never translated.
+Call it `output_lang`; every user-facing string below is in it, and
+identifiers are never translated.
 
-3. Read `${CLAUDE_PLUGIN_ROOT}/spec-kit/heading-map.json` and the templates in
-   `${CLAUDE_PLUGIN_ROOT}/spec-kit/templates/<output_lang>/`. If no template
-   directory matches, use `en` and say so once.
+3. Read `${CLAUDE_PLUGIN_ROOT}/spec-kit/heading-map.json` and the templates
+   in `${CLAUDE_PLUGIN_ROOT}/spec-kit/templates/<output_lang>/`. If none
+   matches, use `en` and say so once.
 
-**From `policy/questioning.md`, these apply:** both stop-signal categories
-(delegating and exhausted — see `discover.md` for the distinction), and the
-guard against asking what is already knowable. The two-call
-`AskUserQuestion` budget does **not** apply to the interview conversation
-itself (Step 2 below) — see Step 2 for why.
+**From `policy/questioning.md`:** both stop-signal categories and the guard
+against asking what is already knowable. Its two-call `AskUserQuestion`
+budget does **not** apply to Step 2's conversation.
 
 ## Step 1 — bring discovery in as given, do not re-ask it
 
 Look at what is already knowable. Do not ask the user for any of it.
 
-**If `spec/00-discovery.md` exists, its `pains` entry marked `chosen: true`
-is the starting point of this interview, taken as settled fact — not
-re-verified, not re-asked.** Since 2026-09-20, discovery is a free-ranging
-conversation summarized post-hoc; read the chosen pain's fields (`summary`,
-`user`, `current_way`, `frequency_per_month`, `minutes_per_run`, `why_chain`,
-`failed_attempts`) as the problem this interview builds on. **Read `notes`
-too, if present — it holds whatever the discovery conversation established
-that the named fields have no slot for (success criteria the user stated,
-concrete requirements like "여러 캐릭터를 만들 수 있어야 한다").** Treat it
-with the same weight as the named fields, not as a footnote: a requirement
-recorded there is as settled as one recorded in `current_way`, and Step 2's
-own conversation should build on it rather than re-asking something `notes`
-already answered. Whatever the chosen pain never established is an open gap
-this interview's own conversation (Step 2) can pick up if it turns out to
-matter for implementation shape — but the problem itself, why it happens,
-and who has it are not re-litigated here.
+**If `spec/00-discovery.md` exists, its entry marked `chosen: true` is this
+interview's starting point, taken as settled fact — not re-verified, not
+re-asked.** Read every field it filled, and **read `notes` too**: it holds
+what the named fields have no slot for (success criteria, requirements like
+"여러 캐릭터를 만들 수 있어야 한다") at the same weight, not as a footnote.
+What the record never established is an open gap Step 2 can pick up; the
+problem itself is not re-litigated here.
 
-**Check the verdict gate first.** Run `spec validate` (Step 4 below does
-this anyway, but do it now, before the interview starts): if a finding
-names `pain_verdict_blocks`, the chosen pain's confirmed verdict is
-`eliminate` or `reuse` — **stop before continuing**, tell the user in
-`output_lang` which verdict blocked it and why (quoting the
-`verdict_suggested.why` that led there), and ask whether they want to pick a
-different pain from `00-discovery.md`'s `pains` list instead. Do not
-continue from a discovery record whose chosen pain is blocked. A finding
-naming `pain_verdict_unconfirmed` (proposed but not user-confirmed) is not
-blocking — resolve it early in Step 2's conversation instead of silently
-carrying `verdict_suggested` forward as fact.
+**Check the verdict gate first.** Run `spec validate` before the interview
+starts. A `pain_verdict_blocks` finding means the confirmed verdict is
+`eliminate` or `reuse` — **stop**, tell the user which verdict blocked it
+and why (quoting `verdict_suggested.why`), and ask whether they want a
+different pain. `pain_verdict_unconfirmed` is not blocking — resolve it
+early in Step 2 rather than carrying a proposal forward as fact.
 
-Also look at:
-- `spec/` — do 01 or 03 already exist? If so, you are revising, not creating.
-- The repository: languages, frameworks, test runner, existing conventions.
-- `README*`, `package.json`, `pyproject.toml`, lockfiles, CI config.
-
-Record what you found. These are facts, not assumptions.
+Also look at `spec/` (do 01 or 03 exist? then you are revising), the
+repository's languages, frameworks and test runner, and `README*`,
+`package.json`, lockfiles, CI config. **These are facts, not assumptions.**
 
 ## Step 2 — the interview: one continuous conversation toward implementation shape
 
-**There is no fixed number of questions and no ceiling — the same principle
-`discover.md` follows.** This is not a two-call budget of discrete
-decisions; it is a conversation that keeps going, one question at a time,
-in `output_lang`, plain chat (not `AskUserQuestion`), for as long as it is
-still turning up something concrete the design and task-cutting stages will
-need and do not have yet.
+Two files govern this step, both read in Step 0:
 
-**Ask one question, then stop and wait for the actual reply
-(`policy/questioning.md`).** Sending a question ends your turn — never
-invent or imagine the user's answer and continue on your own to a second or
-third question in the same turn. Every next question is written only after
-a real reply arrives. A run of self-generated questions with no actual
-answer in between is not an interview.
+- **`${CLAUDE_PLUGIN_ROOT}/policy/conversation.md` — *how* to ask.** Every
+  rule there applies here exactly as it does in `discover.md`.
+- **`${CLAUDE_PLUGIN_ROOT}/spec-kit/interview-subjects.md` — *what* to ask
+  about**: how many pages, what a user can do on each, what each feature
+  needs to work, the unglamorous branches, and confirming each feature's
+  mapping to behavior in the turn it comes up.
 
-**Every message the user sees is either a question or a plain statement in
-`output_lang` — nothing else.** No narration of your own process ("Let me
-note this," "I'll follow up on that"), no meta-commentary on the answer
-just given, nothing between reading an answer and asking the next question
-— see `discover.md`'s identical rule, which applies here word for word.
-
-Ask about, in whatever order the conversation actually goes (follow
-whatever thread the last answer opened, the same way `discover.md` does —
-not a fixed checklist):
-
-- **How many pages or screens does this need**, and what is each one for?
-  A todo app might be one page; a multi-role tool might need several. Do
-  not assume a number — ask, and let the answer shape everything after it.
-- **For each page, what can a user actually do there** — every feature that
-  lives on it, described as behavior ("registers a task, sees it appear in
-  a list immediately"), not as a UI element name.
-- **What does each feature need to work** — what information it reads,
-  what it writes, what has to already exist for it to make sense (a user
-  needs to exist before a task can belong to them, say).
-- **The unglamorous branches**: what happens when a list is empty, an
-  action fails, two people try to do the same thing, something the user
-  expects to see is missing. These are exactly the kind of question that
-  keeps surfacing new ground, not padding.
-- **How this specific feature reached the PRD (mapping to behavior)** — for
-  each feature that comes out of this conversation, confirm the specific
-  translation from "the feature exists" to "here is what happens when
-  someone uses it," in the same turn the feature itself comes up, not as a
-  separate pass afterward. This is exactly the check a prior real trial
-  (`gk-trial2`) skipped: Assumption 4 there recorded that "각 단계를 어떤
-  화면 동작으로 옮길지는 인터뷰어가 정했고 사용자가 확인하지 않았다" — the
-  interviewer decided a mapping silently and it reached the PRD as fact. A
-  mapping that is genuinely obvious from something the user already said
-  needs no separate question; one that is not gets however much
-  back-and-forth it takes, in the moment it comes up, not deferred to a
-  later confirmation pass.
-
-Each question should have a **recommended answer** drawn from what has been
-said so far — people correct a wrong guess faster than they fill a blank.
-**When more than one plausible scenario exists, list them as a short
-numbered set (1/2/3/4, one short phrase each) instead of spelling them out
-as rambling prose** — still plain chat, never `AskUserQuestion`. A single
-clear guess stays a single sentence. **Whenever you list numbered
-branches, always add one final option for "none of these — tell me
-directly"**, so a real answer outside the guessed set always has somewhere
-to go. **Never precede the question with a preview sentence ("~이
-궁금합니다") and then ask the same thing again as the actual question** —
-say it once. A question stops being worth asking when the next likely answer
-already
-appears, in substance, in the last exchange or two (a reworded repeat is
-not new information). A stop signal always wins immediately.
-
-**When the conversation stops producing anything new** — no more pages
-surfacing, no more unanswered "what does this need," the branches covered —
-say so plainly and ask directly, in plain chat: continue the interview
-(if something still feels thin), or stop here and write the design
-documents now. This is not a routing formality; it is the actual judgement
-call this command exists to get right; never predict how much is left
-before asking it.
+The conversation keeps going as long as it still turns up something
+concrete that the design and task-cutting stages will need and do not have.
 
 ## Step 2.5 — research the domain, then propose what the conversation never raised
 
 **A free-ranging conversation only ever produces what the user thought to
-say.** For a known product category, some features are expected by anyone
-familiar with that category but are infrastructure to the user's actual
-goal, not the goal itself — so they rarely come up unprompted. Found on
-`gk-todo4`: a character-chat interview covered memory, intimacy, and
-persona in real depth, but never touched context-window management for
-long conversations, content-safety limits, or persona drift over a long
-session — all standard concerns for that category, none of them raised
-because the user was thinking about the relationship feature, not the
-category's usual pitfalls. The owner's framing after reading that PRD:
-"기본적으로 챗봇 기능으로 들어가야 할 내용들이 빠져있고, 완성도가 상당히
-낮아" — and the fix the owner asked for is not one or two more questions,
-it is a shift from "only what the user thought to say" toward the richer,
-propose-then-prune shape tools like Lovable use: surface a fuller feature
-set drawn from real knowledge of the category, and let the user cut or
-adjust rather than build from a blank slate.
+say** — `gk-todo4`'s character-chat PRD covered memory and persona in depth
+and never touched context-window management, content safety, or persona
+drift, all standard for that category.
 
-**Step 2.5a — freeze what the conversation already established.** Before
-doing anything else, list every feature Step 2's conversation actually
-produced as a locked set. This is the differentiator ledger — the reason
-this specific product exists, in the user's own terms (for a
-character-chat product: intimacy scoring, memory accumulation, persona).
-**Nothing in Step 2.5b–d may alter, replace, or "improve" an item in this
-set** — research only ever fills gaps beside it, never edits it.
-
-**Step 2.5b — research the category.** Identify the product category from
-the frozen set and the discovery record. Run `WebSearch` with **four
-distinct angles**, not one generic query:
-
-1. standard/essential features for this category (what a spec sheet or
-   comparison article says every product in it has)
-2. user complaints and reviews naming what such products commonly get
-   wrong or lack (this is the closest proxy to what actually made
-   `gk-todo4`'s reference product get deleted — a real failure mode, not a
-   feature-list guess)
-3. recent/leading examples and what differentiates them (trend pieces,
-   "best of" roundups) — kept and labeled separately, never blended into
-   "standard"
-4. technical pitfalls or postmortems specific to the category (engineering
-   blog posts, "what we got wrong building X")
-
-**Cross-check before accepting anything as a candidate: an item only
-becomes a "standard" candidate when it is corroborated by two or more
-independent sources** — a single blog's opinion is not evidence of a
-category norm. An item from only one source, or from angle 3 (leading
-examples), is never labeled "standard" — carry it as a separately-labeled
-"참고 아이디어" (reference idea) instead, explicitly marked as not typical.
-
-**Step 2.5c — diff against the frozen set, then present.** Drop every
-research candidate that already overlaps (even loosely) with an item in
-Step 2.5a's frozen set — research exists to fill gaps beside the
-differentiator ledger, never to second-guess or restate it. Present what
-remains to the user as plain statements, in `output_lang`, in two clearly
-separated groups:
-
-- **기본기 후보 (hygiene candidates)** — cross-checked as standard for this
-  category, each with which of the four research angles it came from (so a
-  "2건 이상의 실제 서비스/리뷰에서 반복적으로 언급됨" style citation is
-  visible, not just asserted)
-- **참고 아이디어 (reference ideas)** — single-source or trend-only, marked
-  as optional inspiration, never framed as something expected
-
-If the discovery record (`spec/00-discovery.md`) contains an experience
-that confirms or contradicts a candidate (the user's own account of what a
-prior tool got wrong), say so alongside it — this is the strongest
-available evidence and outranks the research.
-
-**Step 2.5d — prune, not fill in a blank.** Ask the user to react to the
-whole presented set as ordinary Step 2 questions (`policy/questioning.md`'s
-"ask one, then stop and wait," no fixed count, no ceiling) — but the
-starting posture is a proposed, fuller feature set the user cuts or edits,
-not an empty form the user fills. "빼주세요," "이건 나중에요," "이렇게
-바꿔주세요" are all valid, complete answers — do not push for a reason
-beyond what the user volunteers. Every item the user keeps (from either
-group) becomes an `F<n>` with a one-line evidence note: `출처: 리서치
-(2건 이상 교차확인)`, `출처: 리서치 (참고 아이디어)`, or `출처: 사용자
-경험` — so a later reader can audit why an item the user never explicitly
-requested ended up in the PRD.
-
-Once the user's reaction to the full presented set is settled (or a stop
-signal arrives), continue to Step 3, drafting from Step 2's conversation
-**plus** whatever this step's proposal the user kept.
+**Read `${CLAUDE_PLUGIN_ROOT}/spec-kit/domain-research.md` and follow it**:
+freeze what the conversation established (never edited by what follows),
+research the category across four angles with two-source corroboration,
+diff against the frozen set, present what remains in two labeled groups,
+and let the user prune rather than fill a blank. Once that settles (or a
+stop signal arrives), continue to Step 3, drafting from Step 2 **plus**
+whatever of this proposal the user kept.
 
 ## Step 3 — draft
 
-Once the interview settles (Step 2's own confirmation, not a fixed point),
-write both files from the templates, filling every placeholder — including
-each file's YAML frontmatter block (`title`/`date`/`status`) at the top. Do
-not leave `{{…}}` markers in the delivered files, in the frontmatter or
-anywhere else.
+Once the interview settles, write both files from the templates, filling
+every placeholder including each file's YAML frontmatter
+(`title`/`date`/`status`). Leave no `{{…}}` markers anywhere. Headings come
+verbatim from `heading-map.json[<output_lang>]`; never mix two languages'
+headings in one file.
 
-- `spec/01-prd.md` — problem, measured current state, goals, non-goals, users,
-  features with `F<n>` ids (each one's page and behavior fixed by Step 2's
-  conversation, not decided here), acceptance criteria, assumption ledger.
+- `spec/01-prd.md` — problem, measured current state, goals, non-goals,
+  users, features with `F<n>` ids (each one's page and behavior fixed by
+  Step 2, not decided here), acceptance criteria, assumption ledger.
 - `spec/03-architecture.md` — stack, data model, identifiers and tokens,
   external integrations, constraints.
 
-Headings must come verbatim from `heading-map.json[<output_lang>]`. Never mix
-the two languages' headings in one file.
-
-Every judgement you made without confirmation becomes both an inline marker at
-the place it is used and a numbered ledger row:
-
-```
-> ⚠️ Assumption 2: {{what you assumed}}
-```
-
-Numbers must match one-to-one between markers and rows. Measured values you do
-not have are written as "not measured" plus a ledger row, never invented.
-
-**Every ledger row also gets `Blocking` and `Confirmed` (`y`/`n`).** Mark
-`Blocking: y` when being wrong about this specific row would directly hurt
-how a core feature (an `F<n>`) actually feels to use — not only when it
-would sink the entire plan. "Would this make the plan collapse" is too high
-a bar and lets exactly the assumptions worth catching slip through as `n`:
-a numeric weighting or a display form for a feature's whole point (how
-intimacy is computed, how it is shown to the user, for a feature whose
-description is literally "친밀도와 말투 변화") is blocking even though the
-plan survives being wrong about it — what does not survive is that
-feature's actual quality. Things that are genuinely low-cost to be wrong
-about (which of three interchangeable sample characters ships first, an
-internal file name) stay `Blocking: n`. Every row starts `Confirmed: n`
-unless Step 1's or Step 2's
-own conversation already established it as fact (in which case it is not an
-assumption at all — do not add a row for something you already know). A row
-marked `Blocking: y` and left `Confirmed: n` makes `spec validate` fail, not
-warn — `/gatekit:gate` will refuse to proceed while it stands, so name the
-blocking rows plainly in Step 6's report rather than letting the user
-discover the block later.
-
-Since Step 2 already confirms each feature's page/behavior mapping as it
-comes up, an assumption row for that mapping should be rare here — its
-presence usually means Step 2 moved on before actually confirming something,
-which is worth noticing rather than papering over with a ledger row.
+**Every judgement made without confirmation becomes a ledger row plus an
+inline marker, per `${CLAUDE_PLUGIN_ROOT}/policy/assumptions.md`** (read in
+Step 0) — including the `Blocking` bar and why a `Blocking: y` row left
+`Confirmed: n` fails validation. Name those rows plainly in Step 6 rather
+than letting the user hit the block later at `/gatekit:gate`.
 
 ## Step 4 — validate
 
@@ -305,56 +119,42 @@ which is worth noticing rather than papering over with a ledger row.
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" spec validate --json
 ```
 
-If the verdict is `fail`: read the findings, **discard the failing file and
-rewrite it** from the template. Do not hand the user a file that fails
-validation, and do not patch around a finding you do not understand. Re-run
-until the verdict is `ok` or `warn`, or until three rewrites have failed — then
-stop and report exactly which findings remain.
-
-Findings for files that do not exist yet (02, 04, 05, RECOVERY, PROGRESS) are
-expected `warn` at this stage. Do not create those files here.
+On `fail`: read the findings, **discard the failing file and rewrite it**
+from the template. Never hand the user a file that fails validation, never
+patch around a finding you do not understand. Re-run until `ok` or `warn`,
+or until three rewrites failed — then stop and report what remains.
+Findings for files that do not exist yet are expected `warn`.
 
 ## Step 5 — confirm the draft
 
-Show the full `F<n>` feature list as it stands now — Step 2's own features
-together with whatever Step 2.5 proposed that the user kept — as one list,
-without separating "what you said" from "what research added." The point
-is a single explicit confirmation that this whole set, not just the
-conversational part, is what gets built.
+Show the full `F<n>` list as one list — Step 2's features and whatever of
+Step 2.5's proposal the user kept, without separating "what you said" from
+"what research added." One explicit confirmation that this whole set is
+what gets built.
 
 One `AskUserQuestion`: does this match what should actually be built? Offer
-approve, revise a named section (returns to Step 2's conversation on that
-point, then re-drafts), or start over.
+approve, revise a named section (returns to Step 2), or start over.
 
 ## Step 6 — report
 
-In `output_lang`, in this order:
+In `output_lang`, in this order: (1) the two file paths; (2) the `spec
+validate` verdict quoted from the run; (3) residual assumptions as a
+numbered list matching the ledger, each with its impact if wrong, blocking
+rows named plainly; (4) the pages settled on and what each does — the
+concrete output the next command needs; (5) what Step 2.5 proposed, by
+group (기본기 후보 / 참고 아이디어), and for each whether the user kept it
+(as which `F<n>`), made it a non-goal, or left it in `notes`; (6) the next
+command, `/gatekit:mockup`.
 
-1. The two file paths written.
-2. The `spec validate` verdict, quoted from the actual run.
-3. The residual assumptions as a numbered list matching the ledger, each with
-   its impact if wrong.
-4. The pages/screens the interview settled on and what each one does, as a
-   short list — this is the concrete output the next command needs.
-5. What Step 2.5's research proposed, split by group (기본기 후보 /
-   참고 아이디어), and for each item whether the user kept it (as which
-   `F<n>`), turned it into a non-goal, or left it as a `notes` entry.
-6. The next command: `/gatekit:mockup` — to pick or extract a design
-   direction for the pages just settled.
-
-Do not claim the spec is correct. Claim only that it validates and that these
-assumptions are open.
+Do not claim the spec is correct. Claim only that it validates and that
+these assumptions are open.
 
 ## Step 7 — ask what happens next
 
 One closing `AskUserQuestion`, in `output_lang`, right after the report —
-this is a routing choice after the draft already validated, not an
-information-gathering question. Options: proceed to `/gatekit:mockup` now
-(to recommend and pick a design direction for the pages just settled),
-revise a named section of the draft, or stop here for now.
+a routing choice, not information-gathering. Options: proceed to
+`/gatekit:mockup` now, revise a named section, or stop here.
 
 - Proceeding: actually invoke `/gatekit:mockup`.
-- Revising: apply the change, re-run Step 4's validation, and ask this
-  question again.
-- Stopping: confirm the files are saved and name `/gatekit:mockup` for
-  later, then end the turn.
+- Revising: apply the change, re-run Step 4, ask again.
+- Stopping: confirm the files are saved and name `/gatekit:mockup`.

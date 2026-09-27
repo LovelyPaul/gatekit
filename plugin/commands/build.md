@@ -9,12 +9,12 @@ allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 
 Input: `$ARGUMENTS` — optional comma-separated task ids. Empty means every task.
 
-**Who writes the code depends on `build.execution` (ADR-0013).** Under `host`
-**you do**, task by task, in this session — a worker is a cold session of the
-same model, paying a fresh project discovery per task to buy a second opinion
-from the model already here. Under `worker` workers do, and you never edit a
-task's files yourself. Either way **the gates decide, never your own report.**
-Hand a task to a worker only when the model must differ (Codex for
+**Who writes the code depends on `build.execution` (ADR-0013).** Under
+`host` **you do**, task by task, in this session — a worker is a cold
+session of the same model, paying a fresh project discovery per task to buy
+a second opinion from the model already here. Under `worker` workers do and
+you never edit a task's files. Either way **the gates decide, never your own
+report.** Hand a task to a worker only when the model must differ (Codex for
 verification, a Codex host delegating to Claude) or a round holds three or
 more independent tasks.
 
@@ -156,7 +156,5 @@ ran is `unverified`, not done.
 
 If every task is `passed`, tell the user to run `/gatekit:verify` and stop.
 Build passing is not the same as the completion contract passing; only
-`/gatekit:verify` reports that, and it uses an evaluator that did not write the
-code.
-
-If any task is blocked, say so plainly and do not hand off.
+`/gatekit:verify` reports that, using an evaluator that did not write the
+code. If any task is blocked, say so plainly and do not hand off.
