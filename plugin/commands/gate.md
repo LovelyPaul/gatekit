@@ -74,26 +74,20 @@ path:
 ```
 
 Write the actual Playwright spec file this `argv` runs — like every other
-criterion, this one must be runnable in this repository right now, not a
-guess. If the project has no E2E runner configured at all, that setup is
-this task's own responsibility (the same way a styling-touching task
-already gets the token gate added by `/gatekit:tasks` Step 4) — do not
-derive a criterion whose `argv` cannot possibly run here yet. **Never
-substitute an MCP browser tool call for this criterion's `argv`** —
-`contract.py` runs every criterion with `subprocess.run`, and a tool like
-`mcp__claude-in-chrome__*` exists only inside an interactive agent session,
-not as a standalone command. A project with no browser available at all
-(a sandboxed host) will see this criterion's `argv` itself fail to launch,
-which `contract.py` already reports as `unverified`, never a fabricated
-pass — that is the correct outcome, not something to work around here.
+criterion it must be runnable here right now, not a guess. If the project
+has no E2E runner at all, that setup is the task's own responsibility; do
+not derive a criterion whose `argv` cannot run yet. **Never substitute an
+MCP browser tool call for the `argv`** — `contract.py` runs criteria with
+`subprocess.run`, and `mcp__*` tools exist only inside an agent session. On
+a host with no browser the `argv` fails to launch and `contract.py` reports
+`unverified`, never a fabricated pass; that is the correct outcome.
 
-Every criterion must be **runnable in this repository right now**. Run each one
-before writing it in. A criterion you have not executed is a guess, and the
-Stop hook will execute it for real. Read the run's output, not only its
-exit code: `node --test <directory>` and `gates/tokens.py <directory>` both
-"run" and both are wrong — the first loads the directory as a module
-(`Cannot find module`), the second scans zero files and exits 3. Use glob
-patterns (`tests/rules/*.test.js`, `src/**`).
+Every criterion must be **runnable in this repository right now**. Run each
+one before writing it in — an unexecuted criterion is a guess, and the Stop
+hook will run it for real. Read the output, not only the exit code:
+`node --test <directory>` and `gates/tokens.py <directory>` both "run" and
+both are wrong (the first loads the directory as a module, the second scans
+zero files and exits 3). Use glob patterns (`tests/rules/*.test.js`).
 
 ## Step 3 — write the "not counted as done" section
 
@@ -108,6 +102,12 @@ plausible-looking pass invalid, at minimum:
 - a UI task's screenshot criterion coming back `unverified` (no browser, no
   E2E runner) being reported as if the screen were confirmed working — it
   means nobody, human or evaluator, has actually looked at it yet
+- **a feature whose own tests pass while nothing on a real screen reaches
+  it.** A real trial shipped three features this way: each had passing
+  tests and none was wired into the page. So for a UI-bearing project,
+  cover the wiring itself with at least one criterion that drives the app
+  end to end — open the screen, act on it, assert the result — rather than
+  trusting per-feature tests to imply it
 - TODOs, stubs, or empty implementations left behind
 - editing this file to remove a failing criterion
 - reporting success without having run anything
