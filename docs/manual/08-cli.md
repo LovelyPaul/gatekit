@@ -102,19 +102,19 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" approve list [--root PATH]
 ## jobs
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs start [--tasks id,id] [--backend name] [--parallel N] [--dry-run] [--no-preflight]
+python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs start [--tasks id,id] [--backend name] [--parallel N] [--dry-run] [--no-preflight] [--force-retry id,id]
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs status [--job ID] [--json]
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs wait [--job ID] [--timeout S]
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs results [--job ID] [--compact|--json]
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs redelegate <task_id> [--job ID]
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs stop [--job ID]
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs evaluate [--backend name] [--prompt FILE] [--lang ko|en] [--json]
+python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs evaluate [--backend name] [--prompt FILE] [--lang ko|en] [--force-read-only-evaluator] [--json]
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs clean [--all]
 ```
 
-`results --compact`는 태스크당 한 줄로 `id state gates_passed/total`을 출력한다. `clean`은 기본적으로 가장 최근 잡을 남기고, `--all`은 전부 지운다. `evaluate`는 `verify.evaluator`(또는 `--backend`)가 가리키는 백엔드를 `read_only_argv`로 한 번 실행해 평가자로 쓴다. `.gatekit/jobs/<잡>/evaluate/`에 기록하고 응답 꼬리(판정표)를 출력한다. 상태가 `passed`가 아니면 모든 기준이 `unverified`다.
+`results --compact`는 태스크당 한 줄로 `id state gates_passed/total`을 출력한다. `clean`은 기본적으로 가장 최근 잡을 남기고, `--all`은 전부 지운다. `evaluate`는 `verify.evaluator`(또는 `--backend`)가 가리키는 백엔드를 평가자로 쓴다. Codex 백엔드는 신뢰된 프로젝트 훅이 있으면 `--sandbox workspace-write`로(쓰기 게이트가 실제 보호막), 없으면 정확한 해결 명령과 함께 거부한다 — `--force-read-only-evaluator`는 이 거부 대신 예전처럼 `--sandbox read-only`로 강행한다(ADR-0015). `.gatekit/jobs/<잡>/evaluate/`에 기록하고 응답 꼬리(판정표)를 출력한다. 상태가 `passed`가 아니면 모든 기준이 `unverified`다.
 
-`start`는 워커를 띄우기 전에 태스크마다 게이트를 한 번 먼저 돌린다(ADR-0009). 이미 통과하면 워커 없이 `passed`로 기록하고, 쓰기 범위에 파일이 하나도 없는데 통과했다면 `warn`을 붙인다(항상 통과하는 게이트일 수 있다). 게이트 명령 자체가 오류이면(종료 코드 126·127, 또는 `Cannot find module`·`No such file or directory` 같은 출력이 게이트 인자 중 하나를 직접 가리킬 때) 잡을 시작하지 않고 종료 코드 4로 태스크와 게이트 이름을 알린다. 종료 코드 2 이상이나 인자를 가리키지 않는 비슷한 출력은 의심만 하고 경고를 남긴 채 시작한다. `--no-preflight`는 이 단계를 건너뛴다. `redelegate`는 현재 `spec/04-tasks.md`에서 태스크를 다시 읽고, 게이트·지시·쓰기 범위가 바뀌었으면 상태 줄에 `task re-read … (gates changed)`라고 적는다. `stop`은 이 잡이 띄운 워커만 종료하고(pid와 시작 시각을 함께 확인한다) 실행 중·대기 중 태스크를 `stopped`로 기록한다.
+`start`는 워커를 띄우기 전에 태스크마다 게이트를 한 번 먼저 돌린다(ADR-0009). 이미 통과하면 워커 없이 `passed`로 기록하고, 쓰기 범위에 파일이 하나도 없는데 통과했다면 `warn`을 붙인다(항상 통과하는 게이트일 수 있다). 게이트 명령 자체가 오류이면(종료 코드 126·127, 또는 `Cannot find module`·`No such file or directory` 같은 출력이 게이트 인자 중 하나를 직접 가리킬 때) 잡을 시작하지 않고 종료 코드 4로 태스크와 게이트 이름을 알린다. 종료 코드 2 이상이나 인자를 가리키지 않는 비슷한 출력은 의심만 하고 경고를 남긴 채 시작한다. `--no-preflight`는 이 단계를 건너뛴다. 이미 `max_retries`에 도달한 태스크가 있으면 `--force-retry <task_id>`로 그 태스크의 연속 실패 카운터(`.gatekit/attempts.json`)를 초기화하지 않는 한 시작을 거부한다(종료 코드 3, ADR-0014). `redelegate`는 현재 `spec/04-tasks.md`에서 태스크를 다시 읽고, 게이트·지시·쓰기 범위가 바뀌었으면 상태 줄에 `task re-read … (gates changed)`라고 적으며, 같은 카운터를 확인해 소진됐으면 마찬가지로 거부한다. `stop`은 이 잡이 띄운 워커만 종료하고(pid와 시작 시각을 함께 확인한다) 실행 중·대기 중 태스크를 `stopped`로 기록한다.
 
 태스크 상태는 `queued` / `running` / `gating` / `passed` / `failed` / `timeout` / `redelegated` / `stopped` / `blocked`다. `blocked`는 같은 잡 안의 의존 태스크가 `passed`가 아니어서 실행하지 않은 것이다. `stopped`와 `blocked`는 종료 상태이며 완료가 아니다.
 

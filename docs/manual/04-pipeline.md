@@ -48,7 +48,8 @@
                               ▼
                      ┌──────────────────┐
                      │ 5. build         │──▶ .gatekit/jobs/<job_id>/
-                     │   워커가 코드 작성│    spec/PROGRESS.md
+                     │ execution:worker →워커│ spec/PROGRESS.md
+                     │ execution:host →이 세션│
                      └──────────────────┘
                               │
                               ▼
@@ -70,7 +71,7 @@
 | 2b | `/gatekit:design` | Figma URL, 스크린샷, HTML, 라이브 사이트 URL, 프리셋 이름, 사용자 패턴 파일 | `02-design.md`, `tokens.json`(공유), 원장 gap 행 | question 게이트. `spec/tokens.json`이 있으면 `tasks`가 스타일 관련 작업에 tokens 게이트를 기본 추가 |
 | 3 | `/gatekit:tasks` | `01`, `02`, `02-design`, `03`, 실제 레포 구조 | `04-tasks.md` | `02-screens.md`에 프로토타입 확정 기록이 없으면 실행 거부 |
 | 4 | `/gatekit:gate` | `01`의 수용 기준, `04`의 작업 | `05-gate.md`, `contract.json`, 승인 | 승인이 쓰기 게이트를 연다 |
-| 5 | `/gatekit:build` | `04-tasks.md`, 승인된 `05-gate.md` | 잡 디렉터리, `PROGRESS.md` | write 게이트가 `write_scope` 강제. UI 작업은 스크린샷 산출물 요구 |
+| 5 | `/gatekit:build` | `04-tasks.md`, 승인된 `05-gate.md` | 잡 디렉터리, `PROGRESS.md` | write 게이트가 `write_scope` 강제. UI 작업은 스크린샷 산출물 요구. `build.execution`이 `worker`(기본)면 태스크마다 워커를 스폰하고, `host`면 이 세션이 직접 구현한다(ADR-0013) |
 | 6 | `/gatekit:verify` | `contract.json`, `05-gate.md` | 판정표(코드 기준 + `-visual`), `PROGRESS.md` 마지막 검증 | spawn 게이트가 평가자 범위 검사, stop 게이트가 계약 실행 |
 
 `doctor`와 `setup`은 이 순서에 속하지 않는다. `setup`은 프로젝트 최초 1회, `doctor`는 문제가 의심될 때 언제든 실행한다.

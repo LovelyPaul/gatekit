@@ -1,6 +1,6 @@
-# 훅 게이트 6개
+# 훅 게이트
 
-`plugin/hooks/hooks.json`에 6개 훅이 등록된다. 이 파일은 Claude Code가 자동으로 읽으며 `plugin.json`에 나열하지 않는다. 중복 참조는 플러그인 로드를 실패시킨다.
+`plugin/hooks/hooks.json`에 스크립트 7개가 등록된다. 이 파일은 Claude Code가 자동으로 읽으며 `plugin.json`에 나열하지 않는다. 중복 참조는 플러그인 로드를 실패시킨다. 이와 별개로, `tokens` 게이트는 훅이 아니라 `spec/04-tasks.md`의 태스크가 선언하는 태스크 게이트다(아래 별도 절 참고).
 
 | 게이트 | 이벤트 | 대상 도구 | 차단하는가 |
 |---|---|---|---|
@@ -8,7 +8,8 @@
 | write | `PreToolUse` | `Write`, `Edit`, `MultiEdit`, `NotebookEdit` | 예 |
 | bash | `PreToolUse` | `Bash` | 예 |
 | spawn | `PreToolUse` | `Agent`, `Task` | 예 |
-| question | `PostToolUse` | `AskUserQuestion` | 아니오 (채널이 없다) |
+| question | `PostToolUse` | `AskUserQuestion`, `Write`/`Edit`/`MultiEdit`/`NotebookEdit` | 아니오 (채널이 없다) |
+| compact | `PreCompact` | 없음 | 아니오 |
 | stop | `Stop` | 없음 | 예 (최대 3회) |
 
 ![훅 게이트 개요](../assets/gates.svg)
@@ -110,6 +111,16 @@ README*
 
 **이 예산이 적용되지 않는 것**: `discover`와 `interview`의 자유 대화(Step 2, plain chat으로 한 번에 하나씩 묻는 부분)는 `AskUserQuestion`을 아예 쓰지 않으므로 이 게이트의 대상이 아니다 — 개수 상한 없이 대화가 새로운 것을 만들어내는 한 계속된다. 이 게이트가 세는 것은 오직 사용자에게 선택지를 골라달라고 팝업을 띄우는 결정형 질문뿐이다.
 
+## compact 게이트
+
+**언제**: 대화가 압축(compact)되기 직전.
+
+**하는 일**: `build.execution: host`로 진행 중인 빌드가 있으면, 잡 id·실행 모드·태스크마다의 상태와 게이트 통과 수를 `spec/PROGRESS.md`의 정해진 구간에 찍어 넣는다(ADR-0013). 진행 중인 빌드가 없으면 아무것도 하지 않는다.
+
+**왜 필요한가**: `host` 모드에서는 이 세션 자신이 태스크를 구현하므로, 압축이 대화의 서사를 지워도 태스크 상태·게이트 결과는 이미 파일에 있다. 이 게이트는 그 파일 기반 상태를 압축 직전에 한 번 더 명시적으로 찍어서, 압축 후 돌아온 세션이 대화 기억이 아니라 파일을 읽고 이어가게 한다.
+
+**차단**: 하지 않는다. 자기 소유의 구간만 통째로 다시 쓰고 다른 내용은 건드리지 않는다.
+
 ## stop 게이트
 
 **언제**: 세션이 끝나려 할 때.
@@ -127,6 +138,16 @@ README*
 `stop_hook_active`가 참이면 — Claude Code가 이미 stop 훅 연속 실행 안에 있다는 뜻 — 다시 차단하면 루프가 되므로 언제나 통과시킨다. 이때도 계약을 실행하고 결과를 기록한다.
 
 **차단됐을 때 할 일**: 메시지에 나온 기준의 원인을 고치고 계약을 다시 실행한다. `unverified`가 원인이면 대개 타임아웃이며, 실측한 뒤 `gatekit-budget`을 선언하는 것이 정공법이다.
+
+## tokens 게이트 (태스크 게이트, 훅 아님)
+
+**언제**: 훅이 아니라 `spec/04-tasks.md`의 어느 태스크가 자신의 `gates` 목록에 이 게이트를 선언했을 때. `spec/tokens.json`이 있으면 `/gatekit:tasks`가 스타일시트·컴포넌트·템플릿 경로를 쓰는 태스크에 기본으로 추가한다.
+
+**하는 일**: 태스크가 쓴 파일을 스캔해, `tokens.json`의 토큰 그룹에 속할 법한 리터럴 값(hex/`rgb()` 색상, `space`/`radius` 범위의 `px` 길이, 폰트 패밀리 문자열)을 찾는다. 찾은 값이 모두 `tokens.json`의 값과 일치하면 `ok`, 어느 토큰과도 안 맞는 리터럴이 있으면 파일·줄·가장 가까운 토큰 이름을 대며 `fail`, `tokens.json`이 없거나 파싱 안 되거나 태스크가 스캔 대상 파일을 쓰지 않았으면 `unverified`다.
+
+**왜 필요한가**: "디자인 시스템을 써라"는 산문 지시로는 강제되지 않는다. 이 게이트가 그 지시를 판정으로 바꾼다. 하드코딩된 색을 쓴 워커는 이 태스크에서 실패하고, `redelegate`가 그 출력을 다음 프롬프트에 붙여 재시도시킨다.
+
+**한계**: 색상·길이·폰트 패밀리만 본다. 다른 속성이나 구조적 패턴(`02-design.md`의 `P<n>` 규칙)은 이 게이트가 보지 않는다.
 
 ## 훅은 언제나 exit 0이다
 

@@ -51,7 +51,7 @@
 
 **읽는 것**: Figma MCP 도구(`get_metadata`, `get_design_context`, `get_variable_defs`, `get_screenshot`), 또는 HTML 파일, 또는 이미지. 디자인 소스가 없으면 `plugin/spec-kit/presets/design/`의 프리셋 중 하나를 먼저 고르게 한다. 각 추출 항목은 근거(프레임 이름·파일 경로·셀렉터)를 함께 기록한다.
 
-**쓰는 것**: `spec/02-screens.md`, `spec/tokens.json`, 정적 프리뷰(선택), 그리고 실제로 클릭 가능한 프로토타입 `spec/design/prototype-<name>.html`.
+**쓰는 것**: `spec/02-screens.md`, `spec/tokens.json`, 정적 프리뷰(선택, 디자인 소스 없이 새로 설계할 때만 제안하는 클릭 불가능한 그림), 그리고 실제로 클릭 가능한 프로토타입 `spec/design/prototype-<name>.html`.
 
 **프로토타입 게이트(ADR-0017 결정 4, 건너뛸 수 없음)**: `02-screens.md`가 정한 모든 화면·모든 상태를 실제로 눌러볼 수 있는 HTML/CSS로 만든다. 모든 기능을 그럴듯한 샘플 데이터로 채워서, 빈 폼이 아니라 완성된 제품의 실제 화면처럼 보이게 한다. 사용자가 열어보고 고칠 부분을 말하면 HTML과 `02-screens.md`를 같이 고치는 왕복을 반복한다. 확정 직전에 "이 프로토타입이 원하는 걸 충분히 담고 있는지, 빠진 기능이 있는지"를 명시적으로 물어 — 빠졌다고 답하면 `/gatekit:interview`로 돌아가 그 기능을 제대로 정의한 뒤 프로토타입을 다시 만든다. 사용자가 명시적으로 확정해야 `02-screens.md`에 `프로토타입 확정 <날짜>` 줄이 생기고, 이 줄이 없으면 `spec validate`가 `prototype_required`로 `/gatekit:tasks`를 막는다.
 
@@ -107,21 +107,29 @@
 
 **언제**: `05-gate.md`가 승인된 뒤.
 
-**전제 조건 2가지**: `spec validate`가 `fail`이 아닐 것, `approve check spec/05-gate.md`가 `ok`일 것. 그리고 기본 워커 백엔드가 실제로 있을 것. 워커 점검이 `fail`이면 멈추고 `/gatekit:setup`으로 보낸다. `unverified`는 차단 사유가 아니며 한 번 알리고 계속한다.
+**누가 코드를 쓰는가는 `build.execution`(`.gatekit/config.json`)이 정한다(ADR-0013)**. 기본값은 `worker`: 태스크마다 별도 워커 프로세스가 코드를 쓰고, 이 커맨드 자신은 잡 디렉터리와 `spec/PROGRESS.md`만 쓴다. `host`로 설정하면 이 세션 자신이 태스크를 순서대로 직접 구현하고, 매 태스크 뒤에 그 태스크의 게이트를 워커 때와 똑같이 돌려 같은 `status.json`을 기록한다 — 그 경우에도 최종 판정은 항상 게이트가 내리지, 이 세션의 자체 보고가 아니다. 어느 모드든 서로 다른 모델을 써야 할 이유(Codex 검증, Codex 호스트가 Claude에 위임)가 있거나 한 라운드에 독립 태스크가 3개 이상일 때만 워커를 실제로 스폰한다.
+
+**전제 조건 2가지**: `spec validate`가 `fail`이 아닐 것, `approve check spec/05-gate.md`가 `ok`일 것. `execution: worker`일 때는 기본 워커 백엔드가 실제로 있어야 한다. 워커 점검이 `fail`이면 멈추고 `/gatekit:setup`으로 보낸다. `unverified`는 차단 사유가 아니며 한 번 알리고 계속한다.
 
 **읽는 것**: `jobs status`와 `jobs results --compact`의 표. `output.txt`와 `stderr.txt`는 워커 전사 전체라 절대 컨텍스트로 읽지 않는다. 특정 게이트 이름이 필요할 때만 그 태스크의 `gates.json`을 읽는다.
 
-**쓰는 것**: 잡 디렉터리와 `spec/PROGRESS.md`. **이 커맨드는 소스 코드를 쓰지 않는다.** 워커가 쓴다.
+**쓰는 것**: 잡 디렉터리와 `spec/PROGRESS.md`. `execution: worker`에서는 이 커맨드가 소스 코드를 쓰지 않는다 — 워커가 쓴다. `execution: host`에서는 이 세션 자신이 태스크 파일을 쓴다.
 
 **질문**: 없다.
 
-**실패하면**: `failed`나 `timeout`인 태스크는 `jobs redelegate <task_id>`로 재위임한다. 재위임 전에 `gates.json`의 실패 출력을 읽고, 게이트 명령 자체가 틀렸으면(태스크가 만들 일 없는 경로를 가리키거나, 워커 코드와 무관하게 같은 식으로 실패하면) 먼저 `spec/04-tasks.md`를 고친다. `redelegate`는 그 파일을 다시 읽는다(ADR-0009). `blocked`인 태스크는 의존 태스크가 통과하지 못해 실행되지 않은 것이라 재위임 대상이 아니다. 잡을 중단해야 하면 `jobs stop`을 쓴다. 종료 코드 3은 재시도 소진이다. 같은 태스크가 3회 실패하면 재위임을 멈추고 `spec/RECOVERY.md`에 진단을 쓴 뒤 파이프라인을 정지한다. 직접 고치지 않고, 다른 잡을 시작하지도 않는다.
+**게이트가 먼저 돈다(ADR-0009 preflight)**: 워커를 띄우기 전에 각 태스크의 게이트를 한 번 먼저 실행한다. 이미 통과하면 워커 없이 `passed`로 기록하고, 게이트 명령 자체가 오류이면(경로가 틀렸거나 존재하지 않는 모듈을 가리키는 등) 워커를 띄우지 않고 즉시 태스크와 게이트 이름을 알린 뒤 멈춘다.
+
+**태스크별 연속 실패 카운터(ADR-0014)**: `.gatekit/attempts.json`이 태스크마다 연속 실패 횟수를 잡을 넘나들며 기록한다(잡을 새로 시작해도 리셋되지 않는다). `max_retries`(기본 2)에 도달한 태스크는 `redelegate`도 새 `jobs start`도 거부한다(종료 코드 3). 원인을 고쳤다면 `jobs start --force-retry <task_id>`로 그 태스크 하나만 카운터를 초기화하고 다시 시도한다.
+
+**실패하면**: `failed`나 `timeout`인 태스크는 `jobs redelegate <task_id>`로 재위임한다. 재위임 전에 `gates.json`의 실패 출력을 읽고, 게이트 명령 자체가 틀렸으면(태스크가 만들 일 없는 경로를 가리키거나, 워커 코드와 무관하게 같은 식으로 실패하면) 먼저 `spec/04-tasks.md`를 고친다 — 이 경우 재위임하지 않고 `gatekit gates recheck`로 고친 게이트만 다시 돌린다(코드가 이미 맞다면 새 잡 없이 초 단위로 끝난다). `redelegate`는 그 파일을 다시 읽는다(ADR-0009). `blocked`인 태스크는 의존 태스크가 통과하지 못해 실행되지 않은 것이라 재위임 대상이 아니다. 잡을 중단해야 하면 `jobs stop`을 쓴다. 같은 태스크가 3회 연속 실패하면(카운터가 소진되면) 재위임을 멈추고 `spec/RECOVERY.md`에 진단을 쓴 뒤 파이프라인을 정지한다. 직접 고치지 않고, 다른 잡을 시작하지도 않는다.
 
 ## /gatekit:verify
 
 **언제**: 모든 태스크가 `passed`인 뒤. 빌드 통과와 계약 통과는 다르다.
 
-**핵심 원칙**: producer ≠ evaluator. 코드를 만든 세션은 채점하지 않는다. 읽고 실행할 수는 있지만 쓸 수 없는 별도 평가자를 띄운다. 평가자는 `.gatekit/config.json`의 `verify.evaluator`로 정한다. `agent`(기본)면 호스트의 읽기 전용 서브에이전트이고, 백엔드 이름(`claude`, `codex`)이면 그 CLI가 `read_only_argv`로 실행된다. 즉 Claude Code로 만든 코드를 Codex가, Codex로 만든 코드를 Claude가 채점할 수 있다. `workers set-evaluator <이름>`으로 바꾼다.
+**핵심 원칙**: producer ≠ evaluator. 코드를 만든 세션은 채점하지 않는다. 읽고 실행할 수는 있지만 쓸 수 없는 별도 평가자를 띄운다. 평가자는 `.gatekit/config.json`의 `verify.evaluator`로 정한다. 비워두면(기본) 호스트와 이름이 다른 활성 백엔드로 자동 해석되고, 그런 백엔드가 없으면 `agent`(호스트의 읽기 전용 서브에이전트)로 물러나며 그 사실을 경고로 알린다 — 코드를 만든 모델이 스스로를 채점하는 상황을 기본값이 조용히 만들지 않기 위해서다. `workers set-evaluator <이름>`으로 명시적으로 고정할 수 있다.
+
+**Codex 평가자의 샌드박스 신뢰 확인(ADR-0015)**: 백엔드 평가자가 실행하는 테스트 러너는 `--sandbox read-only`에서 자기 스크래치 파일(Vitest 캐시, Playwright의 `test-results/`)조차 못 써서 대부분의 기준이 이유 없이 `unverified`가 된다. 그래서 Codex 평가자는 `--sandbox workspace-write`로 돈다 — 대신 이때는 쓰기 게이트가 실제 보호막이 되는데, 이 프로젝트의 Codex 훅이 아직 신뢰되지 않았으면(`~/.codex/config.toml`에 이 프로젝트의 `hooks.state` 항목이 없으면) `evaluate`가 스스로 먼저 거부하고 정확한 해결 명령을 보여준다 — 쓰기 게이트가 없는 채로 쓰기 권한을 주지 않기 위해서다. `--force-read-only-evaluator`는 이 거부를 무시하고 예전처럼 `read-only`로 강행하되, 그 대가로 대부분의 기준이 다시 `unverified`가 된다는 것을 받아들이는 선택이다.
 
 **읽는 것**: `.gatekit/contract.json`, `spec/05-gate.md`의 E2E 단계.
 

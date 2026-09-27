@@ -28,7 +28,7 @@ git clone https://github.com/LovelyPaul/gatekit
 python3 "gatekit/plugin/bin/gatekit.py" install --host codex
 ```
 
-`.codex/hooks.json`(게이트 6개), `.agents/skills/gatekit-*`(커맨드별 스킬), `AGENTS.md`의 관리 블록이 생긴다. 생성 파일은 손으로 고치지 않고 `plugin/`을 고친 뒤 다시 `install`한다. Codex가 프로젝트의 `.codex/` 층을 신뢰하겠느냐고 물으면 승인하고 **새 세션을 연다**. 신뢰하지 않으면 훅은 파일로만 존재한다. doctor 8번 축이 이 층을 본다. 호스트별로 되는 것과 `unverified`인 것은 README의 동등성 표에 있다.
+`.codex/hooks.json`(게이트 스크립트 7개), `.agents/skills/gatekit-*`(커맨드별 스킬), `AGENTS.md`의 관리 블록이 생긴다. 생성 파일은 손으로 고치지 않고 `plugin/`을 고친 뒤 다시 `install`한다. Codex가 프로젝트의 `.codex/` 층을 신뢰하겠느냐고 물으면 승인하고 **새 세션을 연다**. 신뢰하지 않으면 훅은 파일로만 존재한다. doctor 8번 축이 이 층을 본다. 호스트별로 되는 것과 `unverified`인 것은 README의 동등성 표에 있다.
 
 재시작한 다음 반드시 진단을 돌린다.
 
@@ -38,11 +38,11 @@ python3 "gatekit/plugin/bin/gatekit.py" install --host codex
 
 ## 8축 doctor 판정표
 
-`doctor`는 7개 축을 각각 `ok`/`warn`/`fail`/`unverified`로 판정하고, 축마다 복붙 가능한 `fix` 문자열을 낸다. 종료 코드는 `fail`이 하나라도 있을 때만 1이다. 종료 코드 0은 "아무것도 실패하지 않았다"는 뜻이지 "다 괜찮다"는 뜻이 아니다.
+`doctor`는 8개 축을 각각 `ok`/`warn`/`fail`/`unverified`로 판정하고, 축마다 복붙 가능한 `fix` 문자열을 낸다. 종료 코드는 `fail`이 하나라도 있을 때만 1이다. 종료 코드 0은 "아무것도 실패하지 않았다"는 뜻이지 "다 괜찮다"는 뜻이 아니다.
 
 | # | 축 | 무엇을 보는가 | `fail`일 때 처방 |
 |---|---|---|---|
-| 1 | plugin files | `plugin.json`, `hooks.json`, 게이트 스크립트 6개가 존재하고 비어 있지 않은가 | `/plugin install gatekit` — 스크립트가 없으면 그 게이트는 아예 발화하지 않는다 |
+| 1 | plugin files | `plugin.json`, `hooks.json`, 게이트 스크립트 7개가 존재하고 비어 있지 않은가 | `/plugin install gatekit` — 스크립트가 없으면 그 게이트는 아예 발화하지 않는다 |
 | 2 | hooks registered | `installed_plugins.json`에 등재되고 `settings.json`의 `enabledPlugins`에서 활성인가 | `/plugin enable gatekit@gatekit` |
 | 3 | project state | `.gatekit/config.json`과 `approvals.json`이 파싱되는가 | 해당 파일을 손으로 고치거나 삭제한다 |
 | 4 | spec set | `spec validate` 판정 | 실패한 파일을 소유한 파이프라인으로 간다 |
