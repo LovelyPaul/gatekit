@@ -6,6 +6,11 @@ __pycache__/
 .DS_Store
 .review/
 dist/
+# gatekit run against this repo itself: local trial artifacts, never the
+# product. They carry absolute paths, which is why gate_no_abs_paths flags
+# them locally and CI (a fresh clone) stays clean.
+/spec/
+/tetris/
 # generated Codex host layer (gatekit install --host codex); regenerate, do not commit
 .codex/
 .agents/

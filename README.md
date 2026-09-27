@@ -1,6 +1,6 @@
 # gatekit
 
-Status: 0.1.0 — early. License: MIT.
+Status: 0.10.0 — early. License: MIT.
 
 gatekit is a gate-enforced harness for AI-assisted development in
 [Claude Code](https://claude.com/claude-code). It turns the usual prose
@@ -29,9 +29,13 @@ that matter into things a hook enforces:
 - **Four-state verdicts.** Every check reports `ok`, `warn`, `fail`, or
   `unverified`. `unverified` ("not checked") is never rounded to a pass or
   a fail — a check that couldn't run tells you that, plainly.
-- **Pluggable workers.** The Claude CLI is the default worker for build
-  tasks; Codex is available as an opt-in alternative once you confirm it's
-  installed.
+- **Workers only when the model should differ.** By default the session
+  running the build implements the tasks itself — a worker is a cold
+  session of the same model, re-deriving the project per task to buy a
+  second opinion from the model already present. Spawn one when the model
+  genuinely has to differ (adversarial verification, a Codex host
+  delegating to Claude) or when a round is wide enough for parallelism to
+  pay. The Claude CLI is the default backend; Codex is opt-in.
 
 ## Install
 

@@ -23,6 +23,7 @@ import argparse
 import json
 import pathlib
 import re
+import subprocess
 import sys
 
 PATTERN = re.compile(r"(/Users/[A-Za-z0-9_.-]+|/home/[A-Za-z0-9_.-]+|C:\\Users\\)")
@@ -68,7 +69,30 @@ def is_own_fixture(path: pathlib.Path, root: pathlib.Path) -> bool:
 
 
 def iter_tracked_files(root: pathlib.Path):
-    for path in sorted(root.rglob("*")):
+    """Yield the files git actually tracks, falling back to a full walk.
+
+    Only tracked files can leak a personal path to anyone else, and running
+    gatekit against its own repo leaves git-ignored artifacts (`.gatekit/
+    jobs/`, a trial's `spec/`) that legitimately contain absolute paths.
+    Walking everything reported those as violations on the author's machine
+    while CI — a fresh clone — stayed green, which is exactly the kind of
+    "fails only for you" noise a contributor should never have to decode.
+
+    The fallback keeps the gate working where `git` is absent or the root is
+    not a checkout; there, scanning everything is the honest conservative
+    choice.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(root), "ls-files", "-z"],
+            capture_output=True, check=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        paths = sorted(root.rglob("*"))
+    else:
+        paths = sorted(root / p for p in out.decode("utf-8").split("\0") if p)
+
+    for path in paths:
         if not path.is_file():
             continue
         if any(part in SKIP_DIR_NAMES for part in path.relative_to(root).parts):

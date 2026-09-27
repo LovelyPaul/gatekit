@@ -57,7 +57,16 @@ the worker believes it's allowed to do.
 ## Reporting a vulnerability
 
 If you find a security issue in gatekit, please report it privately
-rather than opening a public issue. Contact: **security@REPLACE_ME.example**
-(replace with a real contact before the first public release). Include
-enough detail to reproduce the issue; we'll acknowledge receipt and follow
-up with next steps.
+rather than opening a public issue.
+
+Use GitHub's private vulnerability reporting: go to the repository's
+**Security** tab and click **Report a vulnerability**
+([direct link](https://github.com/LovelyPaul/gatekit/security/advisories/new)).
+That keeps the report visible only to the maintainer until a fix ships.
+
+Include enough detail to reproduce the issue — the host (Claude Code or
+Codex), the gate involved, and the sequence that got past it. You will get
+an acknowledgement and, where the report holds, a note when the fix lands.
+
+gatekit is maintained by one person as an early-stage project: expect a
+best-effort response, not a commercial SLA.
