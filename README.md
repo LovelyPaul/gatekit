@@ -87,8 +87,16 @@ holds an API key.
 gatekit is built around three ways to get from an idea to a done, verified
 change:
 
-1. **Interview → spec.** Answer a short structured interview about what
-   you're building; gatekit writes `spec/01-prd.md` and
+1. **Discover/interview → spec.** For someone who doesn't yet know what to
+   build, `/gatekit:discover` is a free-ranging conversation (no fixed
+   question slots) that surfaces and summarizes real problems worth
+   solving. `/gatekit:interview` then goes deep on implementation shape —
+   pages, behavior, data — and, for a known product category, researches
+   it live (four search angles, cross-checked against independent sources)
+   to propose standard features the conversation itself never raised,
+   separated from the user's own stated reasons for building the thing, so
+   the user prunes a fuller draft instead of building up from a blank
+   form. Together they write `spec/00-discovery.md`, `spec/01-prd.md`, and
    `spec/03-architecture.md`, including the assumption ledger.
 2. **Mockup or design → spec.** Start from a visual mockup or existing
    screens; gatekit derives `spec/02-screens.md` and `spec/tokens.json`, and
@@ -188,8 +196,9 @@ defaults.
 
 ## Status
 
-**0.1.0 — early.** The core gate/ledger/contract/approval kernel and the
-CI enforcement tooling are in place; expect rough edges. See
+**0.10.0 — early.** The core gate/ledger/contract/approval kernel, worker
+dispatch (host or a different-model worker), Codex evaluator support, and
+the CI enforcement tooling are all in place; expect rough edges. See
 `CHANGELOG.md` for what shipped and `docs/decisions/` for the architectural
 decisions behind the current shape.
 
