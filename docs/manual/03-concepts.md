@@ -21,23 +21,38 @@ gatekit의 모든 검사는 `ok` / `warn` / `fail` / `unverified` 중 하나를 
 
 **이게 없으면**: 타임아웃 한 번으로 미검증 코드가 "완료"로 보고된다.
 
-## 스펙 세트 7문서
+## 스펙 세트
 
-`spec/` 아래에 사람이 리뷰하고 커밋하는 문서 7개다.
+`spec/` 아래에 사람이 리뷰하고 커밋하는 문서들이다.
 
 | 파일 | 내용 | 필수 |
 |---|---|---|
+| `00-discovery.md` | 자유 대화로 발굴한 개선과제와 그 verdict(`build`/`reuse`/`eliminate`/`unknown`) | 아니오 |
 | `01-prd.md` | 문제, 측정된 현재 상태, 목표, 기능, 수용 기준, 가정 원장 | 예 |
-| `02-screens.md` | 화면 목록·흐름·상태·컴포넌트·토큰·근거 없는 영역 | 아니오 |
+| `02-screens.md` | 화면 목록·흐름·상태·컴포넌트·토큰·근거 없는 영역, 프로토타입 확정 기록 | 아니오 |
+| `02-design.md` | 화면을 가로지르는 디자인 패턴·컴포넌트 시각 사양·토큰 요약 | 아니오 |
 | `03-architecture.md` | 스택, 데이터 모델, 식별자, 외부 연동, 제약 | 아니오 |
 | `04-tasks.md` | `gatekit-task` 펜스로 표현한 작업 목록 | 아니오 |
 | `05-gate.md` | `gatekit-criterion` 펜스로 표현한 완료 기준 | 예 |
 | `RECOVERY.md` | 진단 루프, 재시도 한도, 범위 잠금, 롤백 절차 | 아니오 |
 | `PROGRESS.md` | 현재 상태, 마일스톤, 실패한 시도, 마지막 검증 | 아니오 |
+| `tokens.json` | 색상·간격·폰트 등 기계 판독 디자인 값. `mockup`과 `design`이 공유하며 병합 | 아니오 |
 
-각 파일의 H2 제목은 `heading-map.json`이 정하며 언어별로 다르다. 한 파일 안에 두 언어의 제목이 섞이면 `spec validate`가 실패로 잡는다.
+각 Markdown 파일의 H2 제목은 `heading-map.json`이 정하며 언어별로 다르다. 한 파일 안에 두 언어의 제목이 섞이면 `spec validate`가 실패로 잡는다.
 
 **이게 없으면**: 검증기가 무엇을 찾아야 할지 몰라 어떤 문서든 통과시킨다.
+
+## verdict 게이트
+
+`00-discovery.md`의 각 개선과제는 모델이 제안하는 `verdict_suggested`와 사용자가 확정하는 `verdict`를 따로 갖는다(`build`/`reuse`/`eliminate`/`unknown`). 사용자가 확정한 값이 `eliminate`나 `reuse`면 `spec validate`가 `pain_verdict_blocks`를 내고 `/gatekit:interview` 진행을 막는다 — 만들지 말아야 할 것, 또는 이미 있는 것을 다시 만드는 것을 인터뷰 전에 걸러낸다. `unknown`은 절대 막지 않는다: 판단을 아직 못 내렸다는 사실 자체를 차단 사유로 삼으면, 판단을 미루는 쪽이 유리해지는 역설이 생긴다.
+
+**이게 없으면**: 이미 실패했거나 대체재가 있는 아이디어에 인터뷰·설계·빌드 전체를 쏟아붓는다.
+
+## 프로토타입 확정 게이트
+
+UI가 있는 프로젝트는 `/gatekit:mockup`이 실제로 클릭 가능한 HTML 프로토타입(`spec/design/prototype-<name>.html`)을 만들고, 사용자가 직접 열어보고 고칠 부분을 말하는 왕복을 거친다. 사용자가 명시적으로 확정하기 전까지는 `02-screens.md`에 `프로토타입 확정 <날짜>` 줄이 생기지 않고, 이 줄이 없으면 `spec validate`가 `prototype_required`를 내며 `/gatekit:tasks`가 진행을 거부한다.
+
+**이게 없으면**: 빌드가 다 끝난 뒤에야 처음으로 실제 화면을 보게 되고, 그때는 되돌리기에 이미 늦다.
 
 ## 가정 원장
 

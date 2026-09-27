@@ -4,9 +4,9 @@
 
 | 커맨드 | 인자 | 산출물 | AskUserQuestion 횟수 |
 |---|---|---|---|
-| `/gatekit:discover` | 선택. 거친 아이디어나 빈 인자 | `spec/00-discovery.md` | 0 (평문 질문, 게이트당 최대 3개) |
-| `/gatekit:interview` | 만들려는 것에 대한 설명 | `spec/01-prd.md`, `spec/03-architecture.md` | 최대 2 + 확인 1 |
-| `/gatekit:mockup` | Figma URL, HTML 경로, 스크린샷 경로 | `spec/02-screens.md`, `spec/tokens.json` | 최대 1 |
+| `/gatekit:discover` | 선택. 거친 아이디어나 빈 인자 | `spec/00-discovery.md` | 0 (평문 채팅, 개수 상한 없음) |
+| `/gatekit:interview` | 만들려는 것에 대한 설명 | `spec/01-prd.md`, `spec/03-architecture.md` | 0 (평문 채팅, 개수 상한 없음) + 확인 1 |
+| `/gatekit:mockup` | Figma URL, HTML 경로, 스크린샷 경로 | `spec/02-screens.md`, `spec/tokens.json`, 확정 프로토타입 | 최대 1 + 프로토타입 확정 (필수) |
 | `/gatekit:design` | Figma URL, 스크린샷·HTML 경로, 라이브 사이트 URL, 프리셋 이름, 패턴 파일 | `spec/02-design.md`, `spec/tokens.json` | 최대 1 |
 | `/gatekit:tasks` | 선택적 제약 (예: "round 1만") | `spec/04-tasks.md` | 0 |
 | `/gatekit:gate` | 선택적 추가 기준 | `spec/05-gate.md`, `.gatekit/contract.json`, 승인 | 승인 1 (수정 시 반복) |
@@ -19,37 +19,41 @@
 
 **언제**: 뭘 만들지 모를 때, 또는 "챗봇 같은 거"처럼 만들 것만 있고 실사용자와 불편이 없을 때. 선택 단계이며, 이 파일이 없어도 나머지 파이프라인은 그대로 돈다.
 
-**읽는 것**: 정책 파일 2종(언어·질문), 언어별 `00-discovery.md` 템플릿, 이미 있으면 `spec/00-discovery.md`(첫 빈 게이트부터 이어간다).
+**읽는 것**: 정책 파일 2종(언어·질문), 언어별 `00-discovery.md` 템플릿, 이미 있으면 `spec/00-discovery.md`(이어서 대화를 계속한다).
 
-**쓰는 것**: `spec/00-discovery.md` 하나. 산문 절 5개와 `gatekit-discovery` JSON 펜스 하나. 게이트를 하나 채울 때마다 파일을 갱신하므로 도중에 끊겨도 기록이 남는다.
+**쓰는 것**: `spec/00-discovery.md` 하나. 발굴한 개선과제들과 각각의 `verdict_suggested`/`verdict`.
 
-**질문**: 평문 채팅으로 한 번에 하나, 모든 질문에 추천 답을 붙인다. 과거에 실제로 일어난 일만 묻고, 해법이나 추상어가 나오면 마지막 사건으로 되돌린다. 게이트 하나에 질문 3개가 상한이고, 그래도 못 채우면 `unpassed`에 적고 넘어간다. 중단 신호("알아서 해줘")가 오면 지금까지 것으로 파일을 쓰고 멈춘다.
+**질문**: 이름 붙은 게이트도, 진행률 표시도, 정해진 질문 개수도 없다. 하나의 자유로운 대화로 진행하며, 한 번에 질문 하나를 던지고 실제 답을 받을 때까지 기다린다(`policy/questioning.md`의 "ask one, then stop and wait"). 과거에 실제로 일어난 일만 묻고, 해법이나 추상어가 나오면 마지막 사건으로 되돌린다. 대화가 더 이상 새로운 것을 만들어내지 못하면 그렇게 말하고 계속할지 여기서 멈출지 직접 물은 뒤에만 요약으로 넘어간다 — 스스로 판단해서 넘어가지 않는다. 중단 신호("알아서 해줘")가 오면 지금까지 것으로 바로 요약한다.
 
-**심화 게이트 6개**: 실사용자 1명(이름·역할), 현재 방식(번호 순서 2단계 이상), 빈도(숫자), 1회 소요(숫자), 원인(바꿔 말하기를 뺀 서로 다른 "왜" 3칸 이상, 첫 답과 달라야 하고 사용자가 확인), 실패한 대안(`failed` / `works-but-costly` 구분, 없으면 `not-applicable`). `spec validate`가 빈 게이트를 `warn`으로 잡고, 펜스 누락이나 빈 문제 문장은 `fail`이다.
+**요약과 확정**: 대화가 끝나면 사후에 개선과제들을 요약하고(`insights_count`로 이 대화가 얼마나 실질적이었는지 정직하게 기록), 요약이 실제로 맞는지 사용자에게 직접 확인받는다. 하나를 고르면 모델이 `verdict_suggested`를 제안하고 사용자가 `verdict`를 확정한다. 확정된 verdict가 `eliminate`나 `reuse`면 `spec validate`가 `pain_verdict_blocks`를 내고 `/gatekit:interview` 진행을 막는다.
 
-**다음**: `/gatekit:interview`가 이 파일을 사실로 읽어 열린 질문을 건너뛴다. `unpassed`에 적힌 게이트는 가정 원장 행이 된다.
+**다음**: `/gatekit:interview`가 `chosen: true`인 개선과제를 사실로 읽어 다시 확인하지 않고 그대로 이어받는다.
 
 ## /gatekit:interview
 
-**언제**: 아이디어만 있고 문서가 없을 때. `spec/01`이 이미 있으면 개정 모드로 동작한다. 인자에 실사용자와 불편이 없으면 `/gatekit:discover`로 보낸다.
+**언제**: 문제(또는 discovery가 고른 개선과제)는 정해졌지만 구현 형태(페이지·기능·데이터)가 아직 안 정해졌을 때. `spec/01`이 이미 있으면 개정 모드로 동작한다. 인자에 실사용자와 불편이 없으면 `/gatekit:discover`로 보낸다.
 
-**읽는 것**: 정책 파일 3종, `heading-map.json`, 언어별 템플릿, 기존 `spec/`, 레포의 언어·프레임워크·테스트 러너, `README*`·`package.json`·`pyproject.toml`·락파일·CI 설정.
+**읽는 것**: 정책 파일 3종, `heading-map.json`, 언어별 템플릿, 기존 `spec/`, `spec/00-discovery.md`(있으면 그 `chosen` 개선과제와 `notes`를 그대로 받아들인다), 레포의 언어·프레임워크·테스트 러너, `README*`·`package.json`·`pyproject.toml`·락파일·CI 설정.
 
 **쓰는 것**: `spec/01-prd.md`, `spec/03-architecture.md`. 템플릿의 `{{...}}` 자리표시자를 하나도 남기지 않는다.
 
-**질문**: 과거 행동에 대한 열린 질문 1개를 평문 채팅으로 던진다. 사용자 텍스트가 이미 답하거나 "알아서 해줘" 같은 중단 신호가 있으면 건너뛴다. 이후 사용자만 결정할 수 있는 사안에 대해 `AskUserQuestion`을 최대 2회, 마지막에 확인 질문 1회를 한다.
+**질문 (Step 2)**: 페이지가 몇 개인지, 각 페이지에서 뭘 할 수 있는지, 각 기능이 뭘 필요로 하는지, 빈 목록·실패·경합 같은 갈라지는 경우를 정해진 개수 없이 하나씩 묻는다. 각 기능이 화면 동작으로 어떻게 옮겨지는지도 그 자리에서 바로 확인한다 — 나중에 몰아서 확인하지 않는다.
+
+**리서치 (Step 2.5, ADR-0017 결정 24)**: 대화가 정리되면, 대화에서 나온 기능들을 먼저 변경 불가한 확정 목록(차별점)으로 고정한다. 그다음 이 제품이 속한 카테고리를 놓고 `WebSearch`로 네 방향(표준 기능, 사용자 불만/리뷰, 최신 사례, 기술적 실패담)을 조사해, 대화가 스스로 꺼내지 않은 카테고리 표준 기능을 찾아낸다. 2개 이상 독립 출처가 겹치는 것만 "기본기 후보"로, 나머지는 "참고 아이디어"로 분리해 사용자에게 제시하고, 사용자는 빼거나 고치는 식으로 반응한다(양식을 채우는 게 아니라 제안된 것을 쳐내는 방식). 채택된 항목마다 출처(리서치/사용자 경험)를 한 줄로 남긴다.
+
+**확인 (Step 5)**: 대화로 나온 기능과 리서치로 추가된 기능을 하나의 목록으로 합쳐 보여주고, 이대로 만들 것인지 최종 확인을 받는다.
 
 **실패하면**: `spec validate`가 `fail`이면 실패한 파일을 버리고 템플릿에서 다시 쓴다. 이해하지 못한 지적을 우회 수정하지 않는다. 3회 재작성에도 실패하면 멈추고 남은 지적을 정확히 보고한다.
 
 ## /gatekit:mockup
 
-**언제**: 디자인 산출물이 있을 때. 선택 단계다.
+**언제**: 디자인 산출물이 있을 때, 또는 새로 디자인 방향을 정해야 할 때. 선택 단계지만, UI가 있는 프로젝트라면 이 안의 프로토타입 확정 없이는 `/gatekit:tasks`로 못 넘어간다.
 
-**읽는 것**: Figma MCP 도구(`get_metadata`, `get_design_context`, `get_variable_defs`, `get_screenshot`), 또는 HTML 파일, 또는 이미지. 각 추출 항목은 근거(프레임 이름·파일 경로·셀렉터)를 함께 기록한다.
+**읽는 것**: Figma MCP 도구(`get_metadata`, `get_design_context`, `get_variable_defs`, `get_screenshot`), 또는 HTML 파일, 또는 이미지. 디자인 소스가 없으면 `plugin/spec-kit/presets/design/`의 프리셋 중 하나를 먼저 고르게 한다. 각 추출 항목은 근거(프레임 이름·파일 경로·셀렉터)를 함께 기록한다.
 
-**쓰는 것**: `spec/02-screens.md`, `spec/tokens.json`, 그리고 `spec/01-prd.md`의 가정 원장에 gap 행 추가.
+**쓰는 것**: `spec/02-screens.md`, `spec/tokens.json`, 정적 프리뷰(선택), 그리고 실제로 클릭 가능한 프로토타입 `spec/design/prototype-<name>.html`.
 
-**질문**: 최대 1회. 틀렸을 때 대가가 가장 큰 단일 gap에 대해서만 묻는다.
+**프로토타입 게이트(ADR-0017 결정 4, 건너뛸 수 없음)**: `02-screens.md`가 정한 모든 화면·모든 상태를 실제로 눌러볼 수 있는 HTML/CSS로 만든다. 모든 기능을 그럴듯한 샘플 데이터로 채워서, 빈 폼이 아니라 완성된 제품의 실제 화면처럼 보이게 한다. 사용자가 열어보고 고칠 부분을 말하면 HTML과 `02-screens.md`를 같이 고치는 왕복을 반복한다. 확정 직전에 "이 프로토타입이 원하는 걸 충분히 담고 있는지, 빠진 기능이 있는지"를 명시적으로 물어 — 빠졌다고 답하면 `/gatekit:interview`로 돌아가 그 기능을 제대로 정의한 뒤 프로토타입을 다시 만든다. 사용자가 명시적으로 확정해야 `02-screens.md`에 `프로토타입 확정 <날짜>` 줄이 생기고, 이 줄이 없으면 `spec validate`가 `prototype_required`로 `/gatekit:tasks`를 막는다.
 
 **실패하면**: Figma MCP 도구를 쓸 수 없으면 그 사실을 말하고 내보내기나 스크린샷을 요청한 뒤 멈춘다. URL만 보고 디자인을 추측하지 않는다.
 
@@ -71,11 +75,11 @@
 
 ## /gatekit:tasks
 
-**언제**: `01-prd.md`가 있고 아직 작업 분해가 없을 때. `01-prd.md`가 없으면 멈추고 `/gatekit:interview`로 보낸다.
+**언제**: `01-prd.md`가 있고 아직 작업 분해가 없을 때. `01-prd.md`가 없으면 멈추고 `/gatekit:interview`로 보낸다. UI가 있는 프로젝트라면 `02-screens.md`에 `프로토타입 확정 <날짜>` 줄이 없으면 `spec validate`가 `prototype_required`를 내며 멈춘다 — `/gatekit:mockup`에서 사용자가 실제로 프로토타입을 확정해야 한다.
 
 **읽는 것**: `01`의 기능 `F<n>`과 수용 기준, `02`의 화면 `S<n>`, `03`의 스택과 제약, 그리고 실제 레포 구조(디렉터리, 테스트 명령, 파일 명명 규칙).
 
-**쓰는 것**: `spec/04-tasks.md`. 각 작업은 `gatekit-task` 펜스 하나다.
+**쓰는 것**: `spec/04-tasks.md`. 각 작업은 `gatekit-task` 펜스 하나다. UI를 다루는 작업은 `spec/design/build-<task-id>.png` 스크린샷을 산출물로 요구하는 게이트를 함께 갖는다 — `verify`가 이 스크린샷을 읽고 디자인 안티패턴과 대조해 `-visual` 판정을 낸다.
 
 **질문**: 없다.
 
@@ -128,6 +132,8 @@
 **절차**: 먼저 `contract derive`로 재파생한다. 그다음 평가자를 띄운다. 서브에이전트면 그 프롬프트에 `gatekit-scope` 펜스가 반드시 들어가야 하고, 백엔드면 `jobs evaluate --prompt <파일>`이 읽기 전용 워커로 실행해 판정표를 출력한다. 평가자가 돌아오면 메인 세션이 `contract run --json`을 한 번 더 돌린다. 두 실행이 어긋나면 그 자체가 발견 사항이며, 더 나은 쪽을 고르지 않고 불일치를 보고한다.
 
 **실패하면**: 집계가 `ok`가 아니면 무엇이 바뀌어야 하는지 나열하고 멈춘다. 여기서 코드를 고치지 않고 `/gatekit:build`로 되돌린다.
+
+**`-visual` 판정(ADR-0017 결정 9, 22)**: 스크린샷을 산출물로 요구하는 기준이 `ok`로 통과하면, 평가자는 그 이미지를 실제로 읽고 디자인 방향과 안티패턴 목록(`plugin/spec-kit/design-antipatterns.json`)에 대조해 별도 판정(`<기준id>-visual`)을 낸다. **`contract run`의 집계는 코드 기준만 세므로 이 판정을 절대 포함하지 않는다** — 집계가 `ok`여도 `-visual` 판정 중 하나라도 `fail`이면 "계약을 통과했다"고 보고하지 않는다. `-visual` 판정은 다른 기준과 같은 무게로 보고에 각각의 행을 갖는다.
 
 ## /gatekit:doctor
 

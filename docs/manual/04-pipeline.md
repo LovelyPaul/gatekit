@@ -8,16 +8,23 @@
                     [ /gatekit:doctor ]  ← 아무 때나. 설치·상태 8축 진단
                     [ /gatekit:setup  ]  ← 프로젝트 최초 1회. config·워커 점검
                               │
-   한 문장 아이디어           ▼
+   뭘 만들지 모름              ▼
+        │            ┌──────────────────┐
+        └───────────▶│ 0. discover (선택)│──▶ spec/00-discovery.md
+                     │  자유 대화        │    (verdict 게이트)
+                     └──────────────────┘
+                              │
+   문제는 정해짐               ▼
         │            ┌──────────────────┐
         └───────────▶│ 1. interview     │──▶ spec/01-prd.md
-                     │                  │    spec/03-architecture.md
-   목업·스크린샷      └──────────────────┘
-        │                     │
-        │            ┌──────────────────┐
-        └───────────▶│ 2. mockup (선택) │──▶ spec/02-screens.md
-                     │                  │    spec/tokens.json
-   패턴·레퍼런스 사이트 └──────────────────┘    01의 가정 원장에 gap 행 추가
+                     │  자유 대화 + 리서치│    spec/03-architecture.md
+                     └──────────────────┘
+                              │
+                              ▼
+                     ┌──────────────────┐
+                     │ 2. mockup        │──▶ spec/02-screens.md
+                     │  ★ 프로토타입 확정│    spec/tokens.json
+   패턴·레퍼런스 사이트 └──────────────────┘    spec/design/prototype-*.html
         │                     │
         │            ┌──────────────────┐
         └───────────▶│ 2b. design (선택)│──▶ spec/02-design.md
@@ -46,7 +53,7 @@
                               │
                               ▼
                      ┌──────────────────┐
-                     │ 6. verify        │──▶ 독립 평가자 판정
+                     │ 6. verify        │──▶ 독립 평가자 판정 (+ -visual)
                      │   producer≠evaluator│  spec/PROGRESS.md 마지막 검증
                      └──────────────────┘
                               │
@@ -57,14 +64,14 @@
 
 | 단계 | 커맨드 | 입력 | 출력 | 관련 게이트 |
 |---|---|---|---|---|
-| 0 | `/gatekit:discover` | 아무것도 없어도 된다. 최근 2주의 불편 | `00-discovery.md` | `spec validate`가 심화 게이트 6개의 빈 칸을 `warn`으로 표시. 선택 단계 |
-| 1 | `/gatekit:interview` | 사용자의 한 문장 설명, 기존 레포, 있으면 `00-discovery.md` | `01-prd.md`, `03-architecture.md` | question 게이트가 질문 2회로 예산 관리 |
-| 2 | `/gatekit:mockup` | Figma URL, HTML, 스크린샷 | `02-screens.md`, `tokens.json`, 원장 gap 행 | question 게이트 |
+| 0 | `/gatekit:discover` | 아무것도 없어도 된다. 자유 대화 | `00-discovery.md` | `spec validate`가 확정 verdict `eliminate`/`reuse`를 `pain_verdict_blocks`로 차단. 선택 단계 |
+| 1 | `/gatekit:interview` | discovery가 고른 개선과제(있으면), 기존 레포 | `01-prd.md`, `03-architecture.md` | 자유 대화 + 도메인 리서치(`WebSearch`)로 기능을 제안, 사용자가 쳐낸다 |
+| 2 | `/gatekit:mockup` | Figma URL, HTML, 스크린샷, 또는 디자인 프리셋 | `02-screens.md`, `tokens.json`, 확정된 프로토타입 | 프로토타입을 사용자가 확정해야 `prototype_required`가 풀린다 |
 | 2b | `/gatekit:design` | Figma URL, 스크린샷, HTML, 라이브 사이트 URL, 프리셋 이름, 사용자 패턴 파일 | `02-design.md`, `tokens.json`(공유), 원장 gap 행 | question 게이트. `spec/tokens.json`이 있으면 `tasks`가 스타일 관련 작업에 tokens 게이트를 기본 추가 |
-| 3 | `/gatekit:tasks` | `01`, `02`, `02-design`, `03`, 실제 레포 구조 | `04-tasks.md` | 없음. 계획만 한다 |
+| 3 | `/gatekit:tasks` | `01`, `02`, `02-design`, `03`, 실제 레포 구조 | `04-tasks.md` | `02-screens.md`에 프로토타입 확정 기록이 없으면 실행 거부 |
 | 4 | `/gatekit:gate` | `01`의 수용 기준, `04`의 작업 | `05-gate.md`, `contract.json`, 승인 | 승인이 쓰기 게이트를 연다 |
-| 5 | `/gatekit:build` | `04-tasks.md`, 승인된 `05-gate.md` | 잡 디렉터리, `PROGRESS.md` | write 게이트가 `write_scope` 강제. tokens 게이트가 스타일 리터럴 검사 |
-| 6 | `/gatekit:verify` | `contract.json`, `05-gate.md` | 판정표, `PROGRESS.md` 마지막 검증 | spawn 게이트가 평가자 범위 검사, stop 게이트가 계약 실행 |
+| 5 | `/gatekit:build` | `04-tasks.md`, 승인된 `05-gate.md` | 잡 디렉터리, `PROGRESS.md` | write 게이트가 `write_scope` 강제. UI 작업은 스크린샷 산출물 요구 |
+| 6 | `/gatekit:verify` | `contract.json`, `05-gate.md` | 판정표(코드 기준 + `-visual`), `PROGRESS.md` 마지막 검증 | spawn 게이트가 평가자 범위 검사, stop 게이트가 계약 실행 |
 
 `doctor`와 `setup`은 이 순서에 속하지 않는다. `setup`은 프로젝트 최초 1회, `doctor`는 문제가 의심될 때 언제든 실행한다.
 
