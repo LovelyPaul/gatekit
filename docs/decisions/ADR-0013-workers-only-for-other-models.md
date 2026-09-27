@@ -2,6 +2,16 @@
 
 Status: accepted 2026-09-17 (owner approval in the session that measured the
 run); all six decisions implemented the same day and released in 0.8.0.
+**Decision 1's default finally applied 2026-09-27**: the original
+implementation left `config.DEFAULTS["build"]["execution"] = "worker"` as a
+compatibility hedge, so `jobs.execution_mode`'s "unset means host" fallback
+never fired for any project with a config file — which is every project
+`/gatekit:setup` has ever touched. The code comment claimed `/gatekit:setup`
+wrote `host` into new projects; no such code was ever written. So for ten
+days this ADR was accepted, documented, and inert: every build still spawned
+a worker per task. The default is now `host`, as decision 1 says. A project
+that genuinely wants a worker per task sets `"execution": "worker"`
+explicitly. Found while reconciling the user manual against the code.
 
 Two corrections were made while implementing, both found by running the new
 code against the real `gk-trial2` spec rather than only against fixtures:

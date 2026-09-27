@@ -50,11 +50,18 @@ class JobTestCase(unittest.TestCase):
             self._env_keys.append(key)
 
     def write_config(self, **backend_overrides) -> None:
+        """A config whose builds spawn workers, for the tests that exercise them.
+
+        `execution` is named explicitly: since ADR-0013 was applied to
+        `config.DEFAULTS`, an absent key means `host` and nothing would be
+        spawned at all. Tests about host execution use `host_config()`.
+        """
         backend = {"argv": [sys.executable, str(FAKE_WORKER)], "enabled": True}
         backend.update(backend_overrides)
         cfg = {
             "worker": {"default": "fake", "backends": {"fake": backend}},
-            "build": {"max_retries": 2, "parallel": 2, "task_timeout_s": 60},
+            "build": {"max_retries": 2, "parallel": 2, "task_timeout_s": 60,
+                      "execution": "worker"},
         }
         (self.root / ".gatekit" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
 
@@ -1733,6 +1740,14 @@ class TestHostExecution(JobTestCase):
         (self.root / ".gatekit" / "config.json").write_text(
             json.dumps(cfg), encoding="utf-8")
 
+    def worker_config(self) -> None:
+        cfg = {"build": {"execution": "worker", "max_retries": 2, "parallel": 3,
+                         "task_timeout_s": 60},
+               "worker": {"default": "fake", "backends": {"fake": {
+                   "argv": [sys.executable, str(FAKE_WORKER)], "enabled": True}}}}
+        (self.root / ".gatekit" / "config.json").write_text(
+            json.dumps(cfg), encoding="utf-8")
+
     def test_host_mode_prepares_the_job_without_spawning(self) -> None:
         self.host_config()
         self.write_tasks(self.simple_task())
@@ -1802,7 +1817,12 @@ class TestHostExecution(JobTestCase):
             jobs.complete_task(self.root, "nope", job_id=job["job_id"])
 
     def test_worker_mode_is_unchanged(self) -> None:
-        self.write_config()   # no execution key -> worker
+        """An explicit `execution: worker` still spawns, exactly as before.
+
+        The default flipped to `host` (ADR-0013 decision 1, applied to
+        `config.DEFAULTS`), so this has to name the mode to test it.
+        """
+        self.worker_config()
         self.write_tasks(self.simple_task())
         self.set_env(FAKE_WORKER_OUT="src/note.txt")
         job = jobs.start(self.root)
@@ -1830,15 +1850,27 @@ class TestHostExecution(JobTestCase):
         self.assertEqual(st["state"], "passed")
         self.assertIn("preflight", st["detail"])
 
-    def test_an_existing_config_without_the_key_keeps_spawning(self) -> None:
-        """A project written before ADR-0013 must not change behaviour silently.
+    def test_a_config_without_the_key_runs_in_session(self) -> None:
+        """An absent `execution` key means `host` (ADR-0013 decision 1).
 
-        `config.DEFAULTS` carries execution=worker, so a config file that
-        predates the key merges to `worker`. Only a project whose owner writes
-        `execution: host` — or a fresh project once the default flips — runs
-        in-session.
+        `config.DEFAULTS` used to carry `worker` so that projects predating
+        the ADR kept spawning; that hedge left the measured decision
+        unapplied for every project that never edited its config. The
+        default now merges to `host`, and a project that genuinely wants a
+        spawned worker per task says so explicitly.
         """
-        self.write_config()   # no execution key, as every pre-0.8 project has
+        cfg_without_key = {"build": {"max_retries": 2, "parallel": 2,
+                                     "task_timeout_s": 60},
+                           "worker": {"default": "fake", "backends": {"fake": {
+                               "argv": [sys.executable, str(FAKE_WORKER)],
+                               "enabled": True}}}}
+        (self.root / ".gatekit" / "config.json").write_text(
+            json.dumps(cfg_without_key), encoding="utf-8")
+        cfg = config.load(self.root)
+        self.assertEqual(jobs.execution_mode(cfg), "host")
+
+    def test_an_explicit_worker_key_still_wins(self) -> None:
+        self.worker_config()
         cfg = config.load(self.root)
         self.assertEqual(jobs.execution_mode(cfg), "worker")
 

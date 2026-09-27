@@ -483,9 +483,11 @@ through this counter, `start` refuses before the run's third consecutive
 `e2e-full-flow` failure — the real run's other seven attempts never happen.
 
 **ADR-0013 — who implements a task.** `build.execution` is `host` or `worker`
-(`jobs.execution_mode`; an unset or unrecognised value means `host`, but
-`config.DEFAULTS` carries `worker` so a project written before the ADR keeps
-its behaviour). Under `worker`, `start` runs as described above. Under `host`,
+(`jobs.execution_mode`; an unset or unrecognised value means `host`, and
+`config.DEFAULTS` carries `host` too — the hedge that kept `worker` as the
+default, so projects predating the ADR would not change behaviour, left the
+measured decision unapplied for every project that never edited its config,
+and was dropped). Under `worker`, `start` runs as described above. Under `host`,
 `start` prepares the job dir, runs preflight, writes `job.json.execution` and
 `job.json.plan` — one `{id, round, parallel_candidate}` row per task, in wave
 order, `parallel_candidate` true when its round holds ≥ `HOST_PARALLEL_HANDOFF`

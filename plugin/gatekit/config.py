@@ -53,11 +53,18 @@ DEFAULTS: Dict[str, Any] = {
         },
     },
     # ADR-0013: `execution` names who implements a task — "host" (the
-    # session running the build) or "worker" (a spawned backend). The
-    # default stays "worker" so a project written before the ADR keeps its
-    # behaviour; `/gatekit:setup` writes "host" into new projects.
+    # session running the build) or "worker" (a spawned backend). "host" is
+    # the default: a worker is a cold session of the same model, paying a
+    # fresh project discovery per task to buy a second opinion from the
+    # model already present. On the `gk-trial2` run that measured this, 26
+    # minutes of real work took 4.5 hours across 35 spawns. Spawn a worker
+    # when the model must actually differ (adversarial verification, a
+    # Codex host delegating to Claude) or when a round holds enough
+    # independent tasks for parallelism to pay — both decided per round,
+    # not by this default. A project that wants the old behaviour sets
+    # `"execution": "worker"` explicitly.
     "build": {"max_retries": 2, "parallel": 3, "task_timeout_s": 900,
-              "execution": "worker"},
+              "execution": "host"},
     "questions": {"interview_max_calls": 2, "items_per_call": 4},
     # Who grades in /gatekit:verify: "agent" spawns a read-only subagent of
     # the host; a backend name runs that CLI with its read_only_argv, so the
