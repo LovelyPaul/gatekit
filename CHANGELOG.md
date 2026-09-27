@@ -4,6 +4,47 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.11.1 — 2026-09-27
+
+0.11.0 met the Codex host for the first time. Two things it got wrong there,
+both found in a real session rather than by reading the code.
+
+### Fixed
+
+- **A bare `"1"` no longer switches the output language to English.** The
+  prompt gate refreshed `output_lang` from any prompt containing a
+  non-space character, and `lang.detect` returns `en` whenever it finds no
+  letters at all — so answering a numbered list with `1` overwrote a stored
+  `ko`. That is the *normal* path under Codex, which has no
+  `AskUserQuestion` and asks its options as numbered plain chat: a Korean
+  interview flipped to English on the first answer and re-confirmed English
+  on every later number, ignoring requests to switch back. The session
+  ledger from that run shows eight one-character prompts and
+  `output_lang: en`.
+
+  `lang.carries_signal()` now separates "no evidence" from "evidence of
+  English" — `detect` alone cannot, since it has to return one of the two
+  either way — and the gate keeps the stored language unless the prompt
+  actually carries a signal. Numbers and bare paths keep it; real words in
+  either language still switch it. Verified on a follow-up Codex run:
+  thirteen one-character answers, `output_lang` still `ko`.
+
+- **Domain research no longer routes around a missing search tool.**
+  `interview` declares `WebSearch` in `allowed-tools`, which the Codex layer
+  copies verbatim, and the research step says to run it. Codex has no such
+  tool, so it spawned a subagent to "research" from memory instead (the
+  ledger records `spawn_unscoped`, task `research_review`). A proposal with
+  no source is exactly what that step exists to prevent. The generated skill
+  and `AGENTS.md` now tell the model to say the tool is missing and ask
+  whether to skip the step or take findings the user pastes.
+
+### Changed
+
+- Both host-parity tables gain rows for the domain-research behaviour above
+  and for the `compact` gate, which the Codex layer has never installed (no
+  `PreCompact`-equivalent event is known for Codex) and which neither README
+  mentioned.
+
 ## 0.11.0 — 2026-09-27
 
 Four real projects went through the pipeline (`gk-trial2`, `gk-todo`,
