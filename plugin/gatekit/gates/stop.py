@@ -100,6 +100,12 @@ def _finish(led: "ledger.Ledger", final: str, reasons: Optional[List[str]] = Non
 def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Run the contract when a build/verify pipeline is active and judge it."""
     root = hookio.event_root(event)
+    # The plugin installs globally, so this hook fires in every project the
+    # user opens. A project with no `.gatekit/` never asked gatekit to govern
+    # it: stand down without creating state there.
+    if not paths.state_dir(root).is_dir():
+        return hookio.allow()
+
     led = ledger.Ledger.load(root, hookio.session_id(event))
     lang = led.output_lang
 

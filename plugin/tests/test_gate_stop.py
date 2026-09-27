@@ -383,3 +383,21 @@ class TestCodexHostOutput(StopProject):
         payload = json.loads(proc.stdout)
         self.assertIs(payload["continue"], False)
         self.assertIn("bad-crit", payload["stopReason"])
+
+
+class TestUnmanagedProject(unittest.TestCase):
+    """No `.gatekit/` means no contract to run and no state left behind."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(os.path.realpath(self._tmp.name))
+        (self.root / ".git").mkdir()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_stop_allows_and_leaves_no_state(self) -> None:
+        event = {"session_id": "u", "cwd": str(self.root),
+                 "hook_event_name": "Stop"}
+        self.assertIsNone(stop_gate.handle(event))
+        self.assertFalse((self.root / ".gatekit").exists())

@@ -4,6 +4,32 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.11.2 — 2026-09-27
+
+gatekit installs globally but was acting locally in the wrong places: its
+gates ran in projects that had never asked for them.
+
+### Fixed
+
+- **Gates no longer act in projects gatekit does not manage.** The plugin
+  installs globally, so its hooks fire in every project the user opens — but
+  no gate checked whether the project had ever run a gatekit command. The
+  spawn gate was the visible damage: it denied *every* subagent in every
+  unrelated project, demanding a `gatekit-scope` fence for work gatekit was
+  never asked to govern. Observed in a `knowledge-base` project, where three
+  consecutive Explore agents were refused before one got through.
+
+  Three more gates were quieter about it: `prompt`, `question` and `stop`
+  each created a `.gatekit/` directory and a session ledger in whatever
+  project they landed in, and the prompt gate injected its
+  `output_lang=… | pipeline=none | no gate spec` context line into every
+  prompt of every unrelated project.
+
+  All four now stand down when the project has no `.gatekit/` directory:
+  they allow without reading further and write nothing. Enforcement inside a
+  real gatekit project is unchanged. `docs/ARCHITECTURE.md` §3 states the
+  precondition for every gate.
+
 ## 0.11.1 — 2026-09-27
 
 0.11.0 met the Codex host for the first time. Two things it got wrong there,

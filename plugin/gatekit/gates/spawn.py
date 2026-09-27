@@ -30,7 +30,7 @@ else:
 
     ensure_package_path()
 
-from gatekit import hookio, ledger  # noqa: E402
+from gatekit import hookio, ledger, paths  # noqa: E402
 
 FENCE_NAME = "gatekit-scope"
 
@@ -150,6 +150,13 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     tool_input = event.get("tool_input") or {}
     prompt = tool_input.get("prompt") if isinstance(tool_input, dict) else ""
     prompt = prompt if isinstance(prompt, str) else ""
+
+    # The plugin installs globally, so this hook fires in every project the
+    # user opens. A project with no `.gatekit/` never asked gatekit to govern
+    # it: stand down without touching it, rather than denying spawns (and
+    # creating a ledger) in work gatekit has nothing to say about.
+    if not paths.state_dir(root).is_dir():
+        return hookio.allow()
 
     led = ledger.Ledger.load(root, session)
     lang = led.output_lang

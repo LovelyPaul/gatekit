@@ -195,6 +195,12 @@ def _live_build(root) -> str:
 def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Refresh the ledger from this prompt and return the context payload."""
     root = hookio.event_root(event)
+    # The plugin installs globally, so this hook fires in every project the
+    # user opens. A project with no `.gatekit/` never asked gatekit to govern
+    # it: stand down without creating state there.
+    if not paths.state_dir(root).is_dir():
+        return hookio.allow()
+
     session = hookio.session_id(event)
     text = event.get("prompt")
     text = text if isinstance(text, str) else ""

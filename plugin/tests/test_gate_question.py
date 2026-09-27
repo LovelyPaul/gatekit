@@ -372,3 +372,29 @@ class TestUnrealized(ADR0012Project):
     def test_a_write_event_never_blocks(self) -> None:
         self.set_pipeline("interview")
         self.assertIsNone((question_gate.handle(self.write_event()) or {}).get("decision"))
+
+
+class TestUnmanagedProject(unittest.TestCase):
+    """No `.gatekit/` means no counting and no state left behind."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(os.path.realpath(self._tmp.name))
+        (self.root / ".git").mkdir()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_question_leaves_no_state(self) -> None:
+        event = {"session_id": "u", "cwd": str(self.root),
+                 "hook_event_name": "PostToolUse",
+                 "tool_name": "AskUserQuestion", "tool_input": {}}
+        self.assertIsNone(question_gate.handle(event))
+        self.assertFalse((self.root / ".gatekit").exists())
+
+    def test_write_leaves_no_state(self) -> None:
+        event = {"session_id": "u", "cwd": str(self.root),
+                 "hook_event_name": "PostToolUse",
+                 "tool_name": "Write", "tool_input": {"file_path": "a.txt"}}
+        self.assertIsNone(question_gate.handle(event))
+        self.assertFalse((self.root / ".gatekit").exists())

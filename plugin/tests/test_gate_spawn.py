@@ -287,3 +287,42 @@ class TestCodexSpawnTool(unittest.TestCase):
             "tool_input": {"prompt": "no fence here"},
         }
         self.assertIsNotNone(spawn_gate.handle(event))
+
+
+class TestUnmanagedProject(unittest.TestCase):
+    """A project gatekit does not manage is none of the gate's business.
+
+    The plugin installs globally, so this hook fires in every project the
+    user opens. Denying a spawn there blocks work gatekit was never asked
+    to govern; the scope fence only means something once `.gatekit/` exists.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(os.path.realpath(self._tmp.name))
+        (self.root / ".git").mkdir()  # a git repo, but not a gatekit project
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def event(self, prompt: str) -> dict:
+        return {
+            "session_id": "unmanaged", "hook_event_name": "PreToolUse",
+            "cwd": str(self.root), "tool_name": "Agent",
+            "tool_input": {"prompt": prompt, "description": "Locate harness"},
+        }
+
+    def test_fenceless_spawn_is_allowed(self) -> None:
+        self.assertIsNone(spawn_gate.handle(self.event("find the harness project")))
+
+    def test_invalid_fence_is_allowed(self) -> None:
+        bad = scope_fence({"write_scope": [], "stop_when": "done"})
+        self.assertIsNone(spawn_gate.handle(self.event(bad)))
+
+    def test_nothing_is_written_to_an_unmanaged_project(self) -> None:
+        spawn_gate.handle(self.event("find the harness project"))
+        self.assertFalse((self.root / ".gatekit").exists())
+
+    def test_managed_project_still_denies(self) -> None:
+        (self.root / ".gatekit").mkdir()
+        self.assertIsNotNone(spawn_gate.handle(self.event("no fence here")))

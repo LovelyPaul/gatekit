@@ -44,7 +44,7 @@ else:
 
     ensure_package_path()
 
-from gatekit import config, hookio, ledger  # noqa: E402
+from gatekit import config, hookio, ledger, paths  # noqa: E402
 
 #: The only pipeline with a question ceiling.
 BUDGETED_PIPELINE = "interview"
@@ -199,6 +199,12 @@ WRITE_TOOLS = frozenset({"Write", "Edit", "MultiEdit", "NotebookEdit"})
 def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Count a question, or note a write. Never blocks."""
     root = hookio.event_root(event)
+    # The plugin installs globally, so this hook fires in every project the
+    # user opens. A project with no `.gatekit/` never asked gatekit to govern
+    # it: stand down without creating state there.
+    if not paths.state_dir(root).is_dir():
+        return hookio.allow()
+
     if event.get("tool_name") in WRITE_TOOLS:
         note_write(root, hookio.session_id(event))
         return hookio.allow()

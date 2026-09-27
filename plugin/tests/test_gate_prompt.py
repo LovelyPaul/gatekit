@@ -433,3 +433,30 @@ class TestBuildStateInContext(unittest.TestCase):
         self.make_job({("task-with-a-long-name-%02d" % i): "queued" for i in range(30)})
         text = prompt_gate.build_context(self.root, self.led)
         self.assertLessEqual(len(text), hookio.MAX_CONTEXT_CHARS)
+
+
+class TestUnmanagedProject(unittest.TestCase):
+    """A project with no `.gatekit/` never asked gatekit to govern it.
+
+    The plugin installs globally, so this hook fires everywhere. It must
+    inject no context and leave no state behind in unrelated work.
+    """
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(os.path.realpath(self._tmp.name))
+        (self.root / ".git").mkdir()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def test_no_context_is_injected(self) -> None:
+        event = {"session_id": "u", "cwd": str(self.root),
+                 "hook_event_name": "UserPromptSubmit", "prompt": "안녕 도와줘"}
+        self.assertIsNone(prompt_gate.handle(event))
+
+    def test_no_state_is_created(self) -> None:
+        event = {"session_id": "u", "cwd": str(self.root),
+                 "hook_event_name": "UserPromptSubmit", "prompt": "hello"}
+        prompt_gate.handle(event)
+        self.assertFalse((self.root / ".gatekit").exists())
