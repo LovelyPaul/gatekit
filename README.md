@@ -184,10 +184,12 @@ defaults.
 
 ## Documentation
 
-- `docs/manual/` — the user manual (Korean): install, concepts, the eight
+- `docs/manual/` — the user manual (Korean): install, concepts, the
   commands, the spec files, the gates, the CLI, a worked example,
   troubleshooting, and the design decisions. Start at
-  `docs/manual/00-index.md`.
+  `docs/manual/00-index.md`, or jump straight to the "first 30 minutes"
+  walkthrough in `docs/manual/01-what-and-why.md` and run the loop once
+  before reading the concepts.
 - `docs/QUICKSTART.md` — the short path from install to a first run.
 - `docs/ARCHITECTURE.md` — the binding contract every module must satisfy.
 - `docs/decisions/` — the architectural decision records.
