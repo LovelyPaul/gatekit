@@ -60,6 +60,16 @@ _SKILL_NOTES = """
 
 - Where the command says `AskUserQuestion`, ask the same options as a
   numbered list in plain chat and wait for the answer; Codex has no such tool.
+  **Answering such a list with a bare number is the normal path here**, so it
+  never changes the output language — keep replying in the language the
+  conversation started in.
+- Where the command says to run `WebSearch` (the domain research in
+  `$gatekit-interview`), use whatever web search this session actually has.
+  **If it has none, say so plainly and ask the user whether to skip that
+  step or paste findings themselves** — do not route around it by spawning a
+  subagent to "research" from memory. A proposal with no source is exactly
+  what that step exists to avoid, and the command records a source line for
+  every item it keeps.
 - Where the command says to spawn an `Agent` with a ```gatekit-scope fence,
   keep the fence in the prompt you give the subagent; the spawn gate reads it.
 - Commands are invoked as `$gatekit-<name>`, not `/gatekit:<name>`.
@@ -91,7 +101,12 @@ the gatekit plugin by `python3 "{launcher}" install --host codex`.
 - Verdict words are exactly `ok / warn / fail / unverified`. `unverified` is
   never rounded to a pass or a failure.
 - Codex has no `AskUserQuestion` tool: where a command calls for it, ask the
-  same options as a numbered list in plain chat.
+  same options as a numbered list in plain chat. A bare number in reply is a
+  normal answer, not a switch to English — keep the conversation's language.
+- A command that calls for web search (`$gatekit-interview`'s domain
+  research) needs a real source. If this session has no web search, say so
+  and ask whether to skip the step or have the user paste findings; never
+  substitute a subagent recalling from memory.
 - Do not claim a task is done; the gates and `contract run` decide.
 - `jobs start`, `jobs redelegate` and `jobs evaluate` launch another agent
   CLI that needs the user's login and network; the Codex sandbox hides those

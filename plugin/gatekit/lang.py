@@ -62,14 +62,10 @@ def prose_only(text: str) -> str:
     return " ".join(kept)
 
 
-def detect(text: Optional[str]) -> str:
-    """Return ``"ko"`` or ``"en"`` for *text*.
-
-    Korean when Hangul letters are at least 30% of all letters. Empty text, or
-    text with no letters at all, is English.
-    """
+def _letter_counts(text: Optional[str]) -> tuple:
+    """Return ``(hangul, letters)`` for the prose part of *text*."""
     if not text:
-        return EN
+        return (0, 0)
 
     hangul = 0
     letters = 0
@@ -84,7 +80,34 @@ def detect(text: Optional[str]) -> str:
             letters += 1
         elif "LATIN" in unicodedata.name(char, ""):
             letters += 1
+    return (hangul, letters)
 
+
+def carries_signal(text: Optional[str]) -> bool:
+    """Whether *text* says anything about which language the user is writing in.
+
+    `"1"`, `"2."`, `"ok 3"` and a bare path carry none: they are the same
+    keystrokes in either language. Answering a numbered list that way is the
+    *normal* path under Codex, which has no `AskUserQuestion` and asks its
+    options as plain-chat numbers — so treating those replies as an English
+    signal silently switched a Korean session to English mid-interview
+    (observed on a real Codex run, 2026-09-27).
+
+    A caller that refreshes a stored language must ask this first; `detect`
+    alone cannot tell "no evidence" from "evidence of English", because it
+    has to return one of the two either way.
+    """
+    return _letter_counts(text)[1] > 0
+
+
+def detect(text: Optional[str]) -> str:
+    """Return ``"ko"`` or ``"en"`` for *text*.
+
+    Korean when Hangul letters are at least 30% of all letters. Empty text, or
+    text with no letters at all, is English — callers that must not overwrite
+    a known language with that fallback check :func:`carries_signal` first.
+    """
+    hangul, letters = _letter_counts(text)
     if letters == 0:
         return EN
     return KO if (hangul / letters) >= HANGUL_THRESHOLD else EN

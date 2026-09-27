@@ -86,6 +86,24 @@ class TestLanguageDetection(PromptProject):
         prompt_gate.handle(self.event(""))
         self.assertEqual(self.led().data["output_lang"], "ko")
 
+    def test_answering_a_numbered_list_keeps_the_language(self) -> None:
+        """A bare "1" is the same keystroke in either language.
+
+        Under Codex this is the normal way to answer a command's options —
+        there is no `AskUserQuestion`, so they arrive as numbered plain chat.
+        Treating the reply as English evidence flipped a real Korean
+        interview to English and kept it there (observed 2026-09-27).
+        """
+        prompt_gate.handle(self.event("로그인 화면을 만들어줘"))
+        for reply in ("1", "2.", "3 ", "1 2"):
+            prompt_gate.handle(self.event(reply))
+            self.assertEqual(self.led().data["output_lang"], "ko", reply)
+
+    def test_a_real_english_sentence_still_switches(self) -> None:
+        prompt_gate.handle(self.event("로그인 화면을 만들어줘"))
+        prompt_gate.handle(self.event("option 2 please"))
+        self.assertEqual(self.led().data["output_lang"], "en")
+
     def test_context_reports_the_language(self) -> None:
         result = prompt_gate.handle(self.event("hello"))
         self.assertIn("en", self.context_of(result))

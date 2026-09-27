@@ -70,8 +70,10 @@ python3 "gatekit/plugin/bin/gatekit.py" install --host codex
 | prompt 게이트 (`active_pipeline`, 언어) | ok | ok — `$gatekit-<name>` 호출 인식 |
 | spawn 게이트 (서브에이전트 범위 펜스) | ok | warn — `collaborationspawn_agent`는 프롬프트를 훅에 숨겨 펜스를 검사할 수 없음. 서브에이전트의 쓰기는 write·bash 게이트를 그대로 거침(관측됨) |
 | question 게이트 (질문 예산) | ok | n/a — Codex에 `AskUserQuestion` 없음, 질문은 평문이라 세지 않음 |
+| compact 게이트 (압축 직전 빌드 상태 기록) | ok | 설치 안 됨 — Codex에 `PreCompact` 상당 이벤트가 알려져 있지 않아 레이어는 훅 7개가 아니라 6개를 설치함. 빌드 상태 자체는 잡 디렉터리와 `spec/PROGRESS.md`에 그대로 남고, 서사 기록만 빠짐 |
 | 커맨드의 `AskUserQuestion` | 기본 선택 UI | 평문 번호 선택지 |
 | `/gatekit:design` 라이브 사이트 분기 (`WebFetch`, Chrome 도구) | ok | unverified — 실제 Codex 세션에서 아직 관측되지 않음. 이 경우 커맨드는 URL로 추측하지 않고 로컬 캡처를 요청함 |
+| `/gatekit:interview` 도메인 리서치 (`WebSearch`) | ok | warn — 관측: `WebSearch`가 없자 Codex가 서브에이전트를 띄워 기억에서 "조사"하는 식으로 우회함. 이제 스킬이 그럴 때 없다고 말하고 사용자에게 묻도록 지시함 — 출처 없는 제안은 이 단계의 존재 이유를 무너뜨림 |
 | 빌드 워커를 다른 CLI로 | ok (`codex`) | ok (`claude`) |
 | 평가자를 다른 CLI로 | ok (`workers set-evaluator codex`) | ok (`workers set-evaluator claude`) |
 

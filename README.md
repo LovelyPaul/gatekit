@@ -74,8 +74,10 @@ beyond `python3` is required.
 | prompt gate (`active_pipeline`, language) | ok | ok — `$gatekit-<name>` invocation |
 | spawn gate (subagent scope fence) | ok | warn — `collaborationspawn_agent` hides the prompt from hooks, so the fence cannot be checked; the subagent's own writes still meet the write and bash gates (observed) |
 | question gate (question budget) | ok | n/a — Codex has no `AskUserQuestion`; questions are plain chat and uncounted |
+| compact gate (stamp build state before a summary) | ok | not installed — no `PreCompact`-equivalent event is known for Codex, so the layer ships six hooks rather than seven. Build state still lives in the job dir and `spec/PROGRESS.md`; only the narrative stamp is missing |
 | `AskUserQuestion` in commands | native picker | numbered options in plain chat |
 | `/gatekit:design` live-site branch (`WebFetch`, Chrome tools) | ok | unverified — not yet observed in a real Codex session; the command asks for local captures instead of guessing from the URL |
+| `/gatekit:interview` domain research (`WebSearch`) | ok | warn — observed: with no `WebSearch`, Codex routed around the step by spawning a subagent to "research" from memory. The skill now tells it to say so and ask instead; a proposal with no source defeats the step |
 | Build worker can be the other CLI | ok (`codex`) | ok (`claude`) |
 | Evaluator can be the other CLI | ok (`workers set-evaluator codex`) | ok (`workers set-evaluator claude`) |
 

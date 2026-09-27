@@ -201,11 +201,17 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
     led = ledger.Ledger.load(root, session)
 
-    # An empty prompt carries no language signal, so keep what we had. A
-    # slash command's tag body is not the user's words either: only the
-    # <command-args> content counts, and empty args keep the stored language.
+    # Keep the stored language unless this prompt actually says something
+    # about which language the user is writing in. An empty prompt carries no
+    # signal; neither does "1", "2." or a bare path, which are the same
+    # keystrokes in either language. That last case is not an edge case under
+    # Codex: with no `AskUserQuestion` there, commands ask their options as
+    # numbered plain chat, so a Korean interview answered "1" used to flip to
+    # English and stay there (observed on a real Codex run, 2026-09-27).
+    # A slash command's tag body is not the user's words either: only the
+    # <command-args> content counts.
     signal = language_signal(text)
-    if signal.strip():
+    if lang.carries_signal(signal):
         led.set_output_lang(lang.detect(signal))
 
     apply_command(led, text)
