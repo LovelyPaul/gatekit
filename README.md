@@ -37,6 +37,19 @@ that matter into things a hook enforces:
   delegating to Claude) or when a round is wide enough for parallelism to
   pay. The Claude CLI is the default backend; Codex is opt-in.
 
+## Requirements
+
+- **Claude Code** on a paid plan (Claude Code is not part of the free tier),
+  or the Codex CLI — see [Codex CLI](#codex-cli) below.
+- **Python 3.9 or newer, reachable as `python3`.** The hooks in
+  `plugin/hooks/hooks.json` invoke `python3` by name, so an interpreter
+  installed only as `python` does not satisfy them. Nothing else is needed:
+  gatekit is standard library only, with no `pip install` step.
+- **On Windows, run gatekit inside WSL.** Claude Code itself runs natively
+  on Windows, but a native Windows Python installs as `python`, not
+  `python3`, so every gate fails there. Under WSL (Ubuntu ships `python3`)
+  it behaves like any other Linux host.
+
 ## Install
 
 ```
@@ -46,6 +59,11 @@ that matter into things a hook enforces:
 
 Restart Claude Code after installing so the hooks in `plugin/hooks/hooks.json`
 are picked up.
+
+The plugin installs globally, so its hooks are loaded in every project you
+open. They stand down in any project that has no `.gatekit/` directory:
+no gate acts and no state is written there. A project becomes gatekit's
+business the first time you run a `/gatekit:` command in it.
 
 ### Codex CLI
 

@@ -34,6 +34,19 @@ gatekit은 [Claude Code](https://claude.com/claude-code)에서 AI 보조 개발�
   Codex 호스트가 Claude에 위임) 병렬성이 값을 할 만큼 작업이 많을 때만
   띄웁니다. 기본 백엔드는 Claude CLI이고 Codex는 선택입니다.
 
+## 요구 사항
+
+- **유료 플랜의 Claude Code** — Claude Code는 무료 플랜에 포함되지 않습니다.
+  또는 Codex CLI([Codex CLI](#codex-cli) 참고).
+- **`python3`로 실행되는 Python 3.9 이상.** `plugin/hooks/hooks.json`의 훅이
+  `python3`라는 이름으로 인터프리터를 호출하므로, `python`으로만 설치된
+  환경에서는 훅이 동작하지 않습니다. 그 외에 필요한 것은 없습니다 —
+  gatekit은 표준 라이브러리만 쓰고 `pip install` 단계가 없습니다.
+- **Windows에서는 WSL 안에서 쓰십시오.** Claude Code 자체는 Windows에서
+  네이티브로 돌지만, Windows용 Python은 명령 이름이 `python3`가 아니라
+  `python`이라서 게이트가 전부 실패합니다. WSL(우분투에는 `python3`가
+  기본 포함)에서는 다른 리눅스 호스트와 똑같이 동작합니다.
+
 ## 설치
 
 ```
@@ -43,6 +56,11 @@ gatekit은 [Claude Code](https://claude.com/claude-code)에서 AI 보조 개발�
 
 설치 후 Claude Code를 재시작해야 `plugin/hooks/hooks.json`의 훅이
 반영됩니다.
+
+플러그인은 전역으로 설치되므로 훅은 여는 모든 프로젝트에서 로드됩니다.
+다만 `.gatekit/` 디렉터리가 없는 프로젝트에서는 게이트가 물러납니다 —
+아무것도 막지 않고 상태 파일도 만들지 않습니다. 그 프로젝트에서 `/gatekit:`
+커맨드를 처음 실행하는 순간부터 gatekit이 관여합니다.
 
 ### Codex CLI
 
