@@ -77,10 +77,19 @@ The rest of the evaluator's prompt says, in `output_lang`:
   that image file and judge it, in addition to the criterion's own pass:
   does it match the design direction on record (a chosen preset, or a
   pattern in `spec/02-design.md`)? Does it show any pattern listed in
-  `${CLAUDE_PLUGIN_ROOT}/spec-kit/design-antipatterns.json` (an unstated
-  purple-to-blue gradient hero, one sans-serif used for every text role, a
-  page of identical cards, decorative emoji standing in for icons,
-  centered-everything with no deliberate asymmetry)? Report this as its own
+  `${CLAUDE_PLUGIN_ROOT}/spec-kit/design-antipatterns.json`? **Read that
+  file rather than working from this sentence** — it is the list, and it
+  grows. It covers two kinds of failure: a screen that looks *generic* (an
+  unstated gradient hero, one sans-serif for every text role, a page of
+  identical cards, emoji standing in for icons, centered-everything), and a
+  screen that looks *unfinished* — content locked to a narrow centered
+  column while a wide window sits empty either side, blocks stopping short
+  and leaving a bare band below, a failed load rendering as real figures
+  (`0` with a trend arrow) so an error is indistinguishable from an empty
+  result, an "overview" holding only a table, and the loading/empty/error
+  states simply absent. The unfinished kind only shows up once something is
+  actually rendered, which is why it is judged here and not in review of the
+  spec. Report this as its own
   verdict, on a criterion id suffixed `-visual` (e.g.
   `task-one-screenshot-visual`), separate from the capture criterion's own
   `ok`/`fail` — the screenshot existing and the screenshot looking right

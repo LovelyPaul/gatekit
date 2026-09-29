@@ -58,5 +58,48 @@ class TestDesignAntipatterns(unittest.TestCase):
         self.assertGreaterEqual(len(observed), 1)
 
 
+    def test_evidence_names_a_source_kind(self) -> None:
+        """Evidence is the field that separates this list from an opinion.
+
+        Every row says where the pattern came from, and the prefix says how
+        strong that is: `seed:` a reviewed conversation, `observed:` a
+        gatekit trial whose own screenshot showed it, `reported:` a failure
+        seen in another project's review and described to this one rather
+        than reproduced here. Keeping `reported:` distinct from `observed:`
+        is the point — a pattern this repo has never rendered for itself
+        must not claim it did. A row with no prefix is an assertion nobody
+        can audit, which is what the evidence field exists to prevent.
+        """
+        for pattern in self.data["patterns"]:
+            self.assertRegex(
+                pattern["evidence"],
+                r"^(seed|observed|reported):\S",
+                f"evidence must be seed:/observed:/reported: {pattern}",
+            )
+
+    def test_observed_evidence_carries_a_date(self) -> None:
+        """An observation without a date cannot be traced back to the run
+        that produced it, and this list grows by citing runs. The same holds
+        for a `reported:` row: the review it came from has a date."""
+        for pattern in self.data["patterns"]:
+            if pattern["evidence"].startswith(("observed:", "reported:")):
+                self.assertRegex(
+                    pattern["evidence"],
+                    r"\d{4}-\d{2}-\d{2}$",
+                    f"observed evidence must end in a date: {pattern}",
+                )
+
+    def test_rules_are_specific_enough_to_check(self) -> None:
+        """A rule is read by an evaluator judging one screenshot. "Looks
+        generic" is not checkable; a sentence naming what is on the screen
+        is. Length is a crude proxy, but it catches a one-word placeholder.
+        """
+        for pattern in self.data["patterns"]:
+            self.assertGreater(
+                len(pattern["rule"]), 40,
+                f"rule is too vague to judge a screenshot against: {pattern}",
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

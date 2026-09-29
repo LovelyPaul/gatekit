@@ -66,6 +66,23 @@ notes on decisions this document left underspecified:
   `gk-todo`'s own real, observed failure. It grows the same way presets do
   going forward: a new trial names a new pattern, it gets added with its
   evidence tag.
+- **2026-09-29: five rows added (`AP7`-`AP11`) under a third evidence
+  prefix, `reported:`.** They came from a design review done in another
+  project of its own agent-built screens, not from a gatekit trial, so
+  tagging them `observed:` would claim this repo rendered something it
+  never rendered — hence the separate prefix, and a test that keeps the
+  three apart. The rows themselves are a different *kind* of failure from
+  `AP1`-`AP5`: those describe a screen that looks generic, these describe
+  one that looks **unfinished** — a narrow centered column leaving a wide
+  window empty at both sides, blocks stopping short above a bare band, an
+  error state rendering `0` with a trend arrow so a failed load is
+  indistinguishable from a real zero, an "overview" that is only a table,
+  and loading/empty/error states simply not built. The reason they belong
+  in *this* file rather than in spec review is that none of them is visible
+  in the spec: each one is a property of what actually rendered, which is
+  exactly what the `-visual` verdict reads. No code was taken from that
+  project — these are judgement criteria, not an implementation, and the
+  clean-room rule in `CLAUDE.md` stands.
 - **Decision 10's three seed presets tag their `source` as `seed:<origin>`,
   a new convention this preset system did not previously need** (existing
   code only ever wrote `preset:<name>` for an *observed* preset's origin
