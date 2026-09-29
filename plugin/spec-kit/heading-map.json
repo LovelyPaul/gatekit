@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "Canonical H2 headings per spec file per language. spec.validate requires every heading listed here to be present in the corresponding file, and requires that no heading belonging to the other language's set appears in it. Order is not enforced; presence is. Files listed in absent_ok are optional stages: their absence produces no finding at all. 02-screens.md is deliberately NOT in absent_ok: its absence is a plain missing_optional warn by default, escalated to a fail against 04-tasks.md by spec.py's _check_screens_required (ADR-0017) whenever 01-prd.md is UI-bearing (no [non-ui] marker) — a conditional rule that a static list cannot express.",
+  "note": "Canonical H2 headings per spec file per language. spec.validate requires every heading listed here to be present in the corresponding file, and requires that no heading belonging to the other language's set appears in it. Order is not enforced; presence is. Files listed in absent_ok are optional stages: their absence produces no finding at all. 02-screens.md is deliberately NOT in absent_ok: its absence is a plain missing_optional warn by default, escalated to a fail against 04-tasks.md by spec.py's _check_screens_required (ADR-0017) whenever 01-prd.md is UI-bearing (no [non-ui] marker) — a conditional rule that a static list cannot express. 05-gate.md is not in required_files (ADR-0018): /gatekit:gate writes it, so before that stage its absence is a missing_optional warn; the approval check, the write gate and the contract run are what stop a build without an approved gate.",
   "files": [
     "00-discovery.md",
     "01-prd.md",
@@ -13,8 +13,7 @@
     "PROGRESS.md"
   ],
   "required_files": [
-    "01-prd.md",
-    "05-gate.md"
+    "01-prd.md"
   ],
   "ko": {
     "00-discovery.md": [

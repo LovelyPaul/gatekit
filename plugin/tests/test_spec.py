@@ -201,7 +201,9 @@ class MissingFileTests(unittest.TestCase):
             report = spec.validate(root)
             self.assertEqual(report["verdict"], "fail")
             self.assertEqual(verdicts_for(report, "01-prd.md"), ["fail"])
-            self.assertEqual(verdicts_for(report, "05-gate.md"), ["fail"])
+            # ADR-0018 decision 2: the gate file is written by /gatekit:gate;
+            # before that stage its absence is "not yet", not a failure.
+            self.assertEqual(verdicts_for(report, "05-gate.md"), ["warn"])
             # optional files only warn
             self.assertEqual(verdicts_for(report, "PROGRESS.md"), ["warn"])
             self.assertEqual(verdicts_for(report, "RECOVERY.md"), ["warn"])
