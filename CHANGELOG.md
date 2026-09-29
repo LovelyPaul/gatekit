@@ -4,6 +4,31 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+Three defects found by running the whole pipeline for a new project from a
+session opened in another folder (ADR-0018).
+
+### Fixed
+
+- **The documented token-gate command now runs.** `task-gates.md` tells
+  `/gatekit:tasks` to write `python3 "${CLAUDE_PLUGIN_ROOT}/gatekit/gates/tokens.py" …`,
+  but task gates and completion criteria run without a shell, so the token
+  reached Python literally and every such gate failed with exit 2
+  (`can't open file '<project>/${CLAUDE_PLUGIN_ROOT}/…'`). gatekit now
+  replaces that one token with the plugin directory before running a gate or
+  criterion; nothing else is expanded, and the stored fence stays portable.
+- **A missing `05-gate.md` is a `warn` until `/gatekit:gate` writes it.**
+  `spec validate` reported it as a `fail` from `/gatekit:discover` onward —
+  four stages before the one that creates it. Code stays locked by the
+  approval check and the write gate exactly as before.
+- **The spec-before-code write gate no longer blocks paths outside its
+  project.** While a project's gate was unapproved, every write anywhere
+  else on disk was denied — a session's scratch files, and a new project's
+  own folder and `spec/` files — so the user had to run those commands by
+  hand. The rule now governs only targets inside the project root. A worker
+  running a task is still refused every write outside the root.
+
 ## 0.11.2 — 2026-09-27
 
 gatekit installs globally but was acting locally in the wrong places: its
