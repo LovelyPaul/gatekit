@@ -5,6 +5,8 @@ Two independent rules, either of which can deny a write:
 **(a) spec before code.** While ``enforce_spec_before_code`` is on and a
 ``spec/`` directory exists, code stays locked until a human has approved
 ``spec/05-gate.md`` (a hash-anchored approval, see :mod:`gatekit.approval`).
+Only targets inside the project root are governed (ADR-0018): another folder
+on disk is not this project's code.
 Documentation and the spec set itself stay writable throughout, otherwise there
 would be no way to produce the spec that unlocks the gate.
 
@@ -301,7 +303,9 @@ def decide_path(root: pathlib.Path, raw_path: str, lang: str) -> Optional[Dict[s
         return hookio.allow()
     if not paths.spec_dir(root).is_dir():
         return hookio.allow()
-    if relpath is not None and in_allowlist(relpath):
+    # ADR-0018 decision 3: rule (a) keeps *this project's* code waiting for
+    # its approved gate; a file outside the project root is not that code.
+    if relpath is None or in_allowlist(relpath):
         return hookio.allow()
 
     status = approval.check(root, GATE_TARGET)

@@ -292,6 +292,18 @@ class TestSpecBeforeCode(BashGateProject):
         self.assertIsNone(bash_gate.handle(self.event("ls -la src | grep ts > /dev/null")))
         self.assertIsNone(bash_gate.handle(self.event("git status && cat src/x.ts")))
 
+    def test_write_outside_project_root_allowed_before_approval(self) -> None:
+        # ADR-0018 decision 3: another folder is not this project's code.
+        with tempfile.TemporaryDirectory() as other:
+            target = os.path.realpath(other)
+            self.assertIsNone(bash_gate.handle(self.event(f"mkdir -p {target}/app && cp spec/01-prd.md {target}/app/")))
+            self.assertIsNone(bash_gate.handle(self.event(f"cat > {target}/scratch.js")))
+
+    def test_mixed_inside_and_outside_still_judges_inside(self) -> None:
+        with tempfile.TemporaryDirectory() as other:
+            target = os.path.realpath(other)
+            self.assertIsNotNone(bash_gate.handle(self.event(f"cat > {target}/a.js && cat > src/x.ts")))
+
     def test_opaque_write_denied_before_approval(self) -> None:
         for cmd in ("git apply p.diff", "python3 -c \"open('x','w')\"", 'eval "$c"'):
             result = bash_gate.handle(self.event(cmd))

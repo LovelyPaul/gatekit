@@ -103,6 +103,16 @@ class TestSpecBeforeCode(WriteGateProject):
     def test_allowlist_root_markdown(self) -> None:
         self.assertIsNone(write_gate.handle(self.event(str(self.root / "CHANGELOG.md"))))
 
+    def test_target_outside_project_root_is_not_governed(self) -> None:
+        # ADR-0018 decision 3: rule (a) guards this project's code only.
+        with tempfile.TemporaryDirectory() as other:
+            outside = pathlib.Path(os.path.realpath(other)) / "src" / "app.ts"
+            self.assertIsNone(write_gate.handle(self.event(str(outside))))
+
+    def test_dotdot_escape_is_outside_and_not_governed(self) -> None:
+        escape = str(self.root / ".." / (self.root.name + "-sibling") / "app.ts")
+        self.assertIsNone(write_gate.handle(self.event(escape)))
+
     def test_nested_markdown_is_not_allowlisted(self) -> None:
         # only *.md at the ROOT is allowlisted, not markdown anywhere
         self.assertIsNotNone(write_gate.handle(self.event(str(self.root / "src" / "notes.md"))))
