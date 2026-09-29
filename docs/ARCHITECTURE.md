@@ -229,7 +229,9 @@ changed design input makes the contract stale exactly as a changed
 `05-gate.md` does, and the fix is the same: re-derive, then re-approve.
 
 `gatekit contract run [--json]` executes each criterion with `subprocess.run`
-(no shell), `cwd` = project root, per-criterion timeout = `min(timeout_s, remaining)`
+(no shell), `cwd` = project root, after `paths.expand_argv` replaces the literal
+`${CLAUDE_PLUGIN_ROOT}` in each argv element with the plugin directory — the
+only expansion performed; `contract.json` keeps the unexpanded text (ADR-0018), per-criterion timeout = `min(timeout_s, remaining)`
 within a run-wide budget. That budget defaults to 45 s and may be raised by a
 single optional fence in `spec/05-gate.md`, capped at 600 s:
 
@@ -283,7 +285,8 @@ the progress write leaves a file that reports the state before the tasks
 finished.
 
 A task gate is an `argv` command like any other in `gates`, run by
-`jobs.py` after the worker exits (§10) — distinct from the hook-driven gates
+`jobs.py` after the worker exits (§10), with `${CLAUDE_PLUGIN_ROOT}` expanded
+exactly as for criteria (§5, ADR-0018) — distinct from the hook-driven gates
 in §3, which fire during the session rather than after a task. One ships in
 the plugin: `plugin/gatekit/gates/tokens.py [--root DIR] [--lang ko|en]
 [--json] GLOB...` (ADR-0008), which scans the files matching the given
@@ -751,6 +754,7 @@ def project_root(cwd: str | None = None) -> pathlib.Path
 def state_dir(root: pathlib.Path) -> pathlib.Path      # root / ".gatekit"
 def spec_dir(root: pathlib.Path) -> pathlib.Path       # root / "spec"
 def plugin_root() -> pathlib.Path                      # directory containing plugin.json (parent of gatekit/)
+def expand_argv(argv: list[str]) -> list[str]           # copy with "${CLAUDE_PLUGIN_ROOT}" → plugin_root() (ADR-0018)
 
 # config.py
 DEFAULTS: dict

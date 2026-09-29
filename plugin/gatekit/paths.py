@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import os
 import pathlib
-from typing import Optional
+from typing import List, Optional
 
 #: Directory names that mark a project root, in priority order. ``.gatekit``
 #: comes first so a gatekit-managed subproject inside a larger git repository
@@ -101,6 +101,22 @@ def plugin_root() -> pathlib.Path:
             return candidate
     # Fall back to the package's parent: gatekit/paths.py -> gatekit/ -> plugin/
     return here.parents[1]
+
+
+#: The one variable gatekit expands inside a criterion or task-gate argv.
+PLUGIN_ROOT_TOKEN = "${CLAUDE_PLUGIN_ROOT}"
+
+
+def expand_argv(argv: List[str]) -> List[str]:
+    """Return a copy of *argv* with ``${CLAUDE_PLUGIN_ROOT}`` made concrete.
+
+    Criteria and task gates run with no shell (ADR-0018), so the token that
+    ``spec-kit/task-gates.md`` documents would otherwise reach the program
+    literally. Nothing else is expanded: no other ``$VAR``, no ``~``, no
+    globs — the fence stays portable and the argv stays shell-free.
+    """
+    root = str(plugin_root())
+    return [str(a).replace(PLUGIN_ROOT_TOKEN, root) for a in argv]
 
 
 def ensure_dir(path: pathlib.Path) -> pathlib.Path:

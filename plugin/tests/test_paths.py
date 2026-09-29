@@ -85,6 +85,24 @@ class TestDerivedDirs(TempProject):
         found = paths.plugin_root()
         self.assertTrue((found / ".claude-plugin" / "plugin.json").is_file())
 
+    def test_expand_argv_replaces_plugin_root_token(self) -> None:
+        # ADR-0018 decision 1: argv runs without a shell, so gatekit expands
+        # the one token task-gates.md documents before subprocess.run sees it.
+        root = str(paths.plugin_root())
+        out = paths.expand_argv(
+            ["python3", "${CLAUDE_PLUGIN_ROOT}/gatekit/gates/tokens.py", "src/**"]
+        )
+        self.assertEqual(out, ["python3", root + "/gatekit/gates/tokens.py", "src/**"])
+
+    def test_expand_argv_touches_nothing_else(self) -> None:
+        argv = ["echo", "$HOME", "~/x", "${OTHER}", "*.ts"]
+        self.assertEqual(paths.expand_argv(argv), argv)
+
+    def test_expand_argv_returns_a_new_list(self) -> None:
+        argv = ["${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py"]
+        paths.expand_argv(argv)
+        self.assertEqual(argv, ["${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py"])
+
     def test_ensure_dir_is_idempotent(self) -> None:
         target = self.root / "x" / "y"
         paths.ensure_dir(target)

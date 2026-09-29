@@ -152,6 +152,19 @@ class TestExecute(TempProject):
         self.assertEqual(result["criteria"][0]["exit"], 0)
         self.assertIn("hi", result["criteria"][0]["stdout_tail"])
 
+    def test_plugin_root_token_in_argv_is_expanded(self) -> None:
+        # ADR-0018 decision 1: the documented token-gate form must run.
+        self.write_gate({
+            "id": "tokens-help",
+            "argv": [PY, "${CLAUDE_PLUGIN_ROOT}/gatekit/gates/tokens.py", "--help"],
+            "timeout_s": 20,
+        })
+        contract.derive(self.root)
+        stored = json.loads((self.root / ".gatekit" / "contract.json").read_text())
+        self.assertIn("${CLAUDE_PLUGIN_ROOT}", stored["criteria"][0]["argv"][1])
+        result = contract.execute(self.root)
+        self.assertEqual(result["criteria"][0]["verdict"], "ok", result["criteria"][0])
+
     def test_failing_exit_code_is_fail(self) -> None:
         self.write_gate({"id": "bad", "argv": [PY, "-c", "raise SystemExit(3)"], "timeout_s": 20})
         contract.derive(self.root)

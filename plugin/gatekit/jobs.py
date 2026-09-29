@@ -565,7 +565,7 @@ def run_gates(root, task: dict) -> dict:
         started = time.time()
         try:
             proc = subprocess.run(
-                [str(a) for a in argv],
+                paths.expand_argv(argv),
                 cwd=str(root),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,

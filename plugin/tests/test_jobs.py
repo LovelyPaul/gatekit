@@ -402,6 +402,13 @@ class TestRunGates(JobTestCase):
         self.assertEqual(result["verdict"], verdict.FAIL)
         self.assertEqual(result["gates"][0]["verdict"], verdict.FAIL)
 
+    def test_plugin_root_token_in_gate_argv_is_expanded(self) -> None:
+        # ADR-0018 decision 1: the token gate exactly as task-gates.md writes it.
+        result = jobs.run_gates(self.root, {"gates": [
+            {"name": "tokens", "argv": [
+                sys.executable, "${CLAUDE_PLUGIN_ROOT}/gatekit/gates/tokens.py", "--help"]}]})
+        self.assertEqual(result["gates"][0]["verdict"], verdict.OK, result["gates"][0])
+
     def test_gate_stdout_and_stderr_tails_are_captured(self) -> None:
         result = jobs.run_gates(self.root, {"gates": [
             {"name": "exists", "argv": [sys.executable, str(GATE_EXISTS), "nope.txt"]}]})
