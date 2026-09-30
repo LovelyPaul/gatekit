@@ -185,8 +185,17 @@ class TestLogError(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_creates_runs_dir(self) -> None:
+        (self.root / ".gatekit").mkdir()
         hookio.log_error(self.root, "Stop", RuntimeError("boom"))
         self.assertTrue((self.root / ".gatekit" / "runs" / "hook-errors.log").is_file())
+
+    def test_unmanaged_project_gets_no_state_from_an_error(self) -> None:
+        # A gate that fails in a project with no .gatekit/ must not create one:
+        # once it exists, every later gate treats the project as managed
+        # (observed 2026-09-30: an import-time NameError did exactly that to
+        # the gatekit repository itself, and test ledgers followed).
+        hookio.log_error(self.root, "Stop", RuntimeError("boom"))
+        self.assertFalse((self.root / ".gatekit").exists())
 
     def test_never_raises_on_unwritable_root(self) -> None:
         # A path that cannot be created must not propagate out of a gate.

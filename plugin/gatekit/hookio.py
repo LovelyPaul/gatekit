@@ -187,6 +187,10 @@ def log_error(root: pathlib.Path, event_name: str, err: BaseException) -> None:
     log one record per line.
     """
     try:
+        # A project with no .gatekit/ never asked to be governed; creating the
+        # directory here would make every later gate treat it as managed.
+        if not paths.state_dir(root).is_dir():
+            return
         message = f"{type(err).__name__}: {err}".replace("\r", " ").replace("\n", " ")
         stamp = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
         target = paths.hook_error_log(root)
