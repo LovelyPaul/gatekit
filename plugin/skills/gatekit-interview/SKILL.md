@@ -15,3 +15,7 @@ output language from it.
 
 If the user already has a Figma file, HTML, or screenshots, route to
 `/gatekit:mockup` instead.
+
+Under a host without slash commands (Codex), `/gatekit:interview` does not exist:
+read `commands/interview.md` two directories above this skill's folder and follow
+it, applying `policy/codex.md` from the same plugin.

@@ -16,3 +16,7 @@ output language from it.
 
 If the user already names one real person and what that person struggles
 with, route to `/gatekit:interview` instead.
+
+Under a host without slash commands (Codex), `/gatekit:discover` does not exist:
+read `commands/discover.md` two directories above this skill's folder and follow
+it, applying `policy/codex.md` from the same plugin.

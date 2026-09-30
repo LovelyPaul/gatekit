@@ -174,6 +174,22 @@ class TestCli(HostProject):
 
 
 class TestDoctorAxis(HostProject):
+    def setUp(self) -> None:
+        super().setUp()
+        # Isolate from the developer's real ~/.codex, where a gatekit plugin
+        # install (ADR-0019) would otherwise change this axis's verdict.
+        self._codex_home = tempfile.TemporaryDirectory()
+        self._old_codex_home = os.environ.get("CODEX_HOME")
+        os.environ["CODEX_HOME"] = self._codex_home.name
+
+    def tearDown(self) -> None:
+        if self._old_codex_home is None:
+            os.environ.pop("CODEX_HOME", None)
+        else:
+            os.environ["CODEX_HOME"] = self._old_codex_home
+        self._codex_home.cleanup()
+        super().tearDown()
+
     def test_doctor_has_host_axis(self) -> None:
         from gatekit import doctor
 

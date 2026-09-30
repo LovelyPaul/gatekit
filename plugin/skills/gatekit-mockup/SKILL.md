@@ -14,3 +14,7 @@ to it.
 
 If the user wants the design implemented as working code rather than specified,
 this is not the right skill.
+
+Under a host without slash commands (Codex), `/gatekit:mockup` does not exist:
+read `commands/mockup.md` two directories above this skill's folder and follow
+it, applying `policy/codex.md` from the same plugin.

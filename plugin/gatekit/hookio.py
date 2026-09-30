@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import os
 import pathlib
 import re
 import sys
@@ -120,8 +121,13 @@ def add_context(text: str) -> Optional[Dict[str, Any]]:
 # --------------------------------------------------------------------------
 # host adaptation
 # --------------------------------------------------------------------------
-def host_from_argv(argv: Optional[list] = None) -> str:
-    """Read ``--host <name>`` from *argv* (default: the process argv)."""
+def host_from_argv(argv: Optional[list] = None, env: Optional[dict] = None) -> str:
+    """Read ``--host <name>`` from *argv* (default: the process argv).
+
+    With no flag, the environment decides (ADR-0019): Codex runs a plugin's
+    hooks with ``PLUGIN_ROOT`` set, which Claude Code does not set, so the one
+    ``hooks.json`` shipped in ``plugin/`` answers each host in its dialect.
+    """
     args = list(sys.argv[1:] if argv is None else argv)
     for index, item in enumerate(args):
         if item == "--host" and index + 1 < len(args):
@@ -129,6 +135,9 @@ def host_from_argv(argv: Optional[list] = None) -> str:
         if item.startswith("--host="):
             value = item.split("=", 1)[1]
             return value if value in HOSTS else DEFAULT_HOST
+    environ = os.environ if env is None else env
+    if environ.get("PLUGIN_ROOT"):
+        return "codex"
     return DEFAULT_HOST
 
 

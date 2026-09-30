@@ -13,3 +13,7 @@ instruction; this file only routes to it.
 Two things the command enforces and this shim must not undercut: the main
 session never edits a task's files while its job runs, and a worker's own
 report never decides a verdict. The gates decide.
+
+Under a host without slash commands (Codex), `/gatekit:build` does not exist:
+read `commands/build.md` two directories above this skill's folder and follow
+it, applying `policy/codex.md` from the same plugin.

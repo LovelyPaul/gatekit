@@ -13,3 +13,7 @@ is the execution instruction; this file only routes to it.
 
 Producer is never evaluator: the command spawns a separate read-only agent, and
 `unverified` stays `unverified` in the report.
+
+Under a host without slash commands (Codex), `/gatekit:verify` does not exist:
+read `commands/verify.md` two directories above this skill's folder and follow
+it, applying `policy/codex.md` from the same plugin.

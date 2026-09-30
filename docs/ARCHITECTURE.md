@@ -120,7 +120,9 @@ cannot be evidence for the spec.
 Claude Code passes a JSON object on stdin. Codex CLI passes the same object
 (same field names) to hooks registered in `.codex/hooks.json`; the gates
 serve both hosts from one script, learning the host from `--host <name>` on
-their own argv (`hookio.host_from_argv`, default `claude`). Only the Stop
+their own argv (`hookio.host_from_argv`); with no flag, a non-empty
+`PLUGIN_ROOT` in the environment — set by Codex for plugin hooks, not by
+Claude Code — means `codex`, otherwise `claude` (ADR-0019). Only the Stop
 block differs between the two dialects and `hookio.adapt_output` renders it
 (`{"decision":"block","reason"}` for Claude Code, `{"continue":false,"stopReason"}`
 for Codex); deny and additionalContext payloads are identical. Codex edits
@@ -154,9 +156,9 @@ would record no verdict and no log line. Tests pin `hooks.json` to
 `STOP_HOOK_TIMEOUT_S` and the cap to at least 30 s below it.
 
 Registered hooks (plugin/hooks/hooks.json): UserPromptSubmit→`gates/prompt.py`,
-PreToolUse `Write|Edit|MultiEdit|NotebookEdit`→`gates/write.py`,
+PreToolUse `Write|Edit|MultiEdit|NotebookEdit|apply_patch`→`gates/write.py`,
 PreToolUse `Bash`→`gates/bash.py` (ADR-0004),
-PreToolUse `Agent|Task`→`gates/spawn.py`, PostToolUse `AskUserQuestion`→`gates/question.py`,
+PreToolUse `Agent|Task|collaborationspawn_agent`→`gates/spawn.py` (the Codex tool names are there so the same file serves a Codex plugin install, ADR-0019; a name that does not exist in a host never matches), PostToolUse `AskUserQuestion`→`gates/question.py`,
 Stop→`gates/stop.py`.
 
 Gate behaviour:
@@ -651,7 +653,7 @@ runs `check` and the user confirms.
 5 contract freshness (`source_sha256` matches);
 6 workers (default backend `check`);
 7 python version ≥ 3.9;
-8 host layer: a generated `.codex/hooks.json` (§15), when present, must point at gate scripts that exist (`fail` otherwise); absent is `ok`, since a Claude Code project needs none. Each axis returns `{axis, verdict, detail, fix}` where
+8 host layer: a generated `.codex/hooks.json` (§15), when present, must point at gate scripts that exist (`fail` otherwise); absent is `ok`, since a Claude Code project needs none. A gatekit installed as a Codex plugin whose hooks have no `hooks.state` trust entry in `$CODEX_HOME/config.toml` is `warn` with the terminal `codex` → `/hooks` fix (ADR-0019); doctor never writes trust. Each axis returns `{axis, verdict, detail, fix}` where
 `fix` is a copy-pasteable command or empty. Exit 1 iff any `fail`.
 
 ## 15. Host layers (`hosts.py`, ADR-0006)
@@ -682,6 +684,19 @@ are gated; `collaborationspawn_agent` hides the prompt, so the spawn gate
 allows and records `spawn_unscoped` (the subagent's own writes are still
 gated); there is no `AskUserQuestion`, so the question gate has nothing to
 count.
+
+**Codex plugin install (ADR-0019).** Codex also installs `plugin/` itself as
+a plugin from this repository's marketplace (it accepts the Claude-format
+manifests). No generated layer is involved: the plugin's `hooks/hooks.json`
+serves both hosts (Codex tool names in the matchers, host from
+`PLUGIN_ROOT`), and each `skills/gatekit-*/SKILL.md` shim tells a host
+without slash commands to read `commands/<name>.md` two directories up and
+apply `policy/codex.md` — which carries the Codex differences and the rule
+that `${CLAUDE_PLUGIN_ROOT}` in command text means that plugin directory.
+Plugin hooks run only after the user trusts them in a terminal `codex`
+session (`/hooks`); the desktop app cannot record trust today
+(openai/codex#47283). `gatekit install --host codex` remains for projects
+already using the generated layer.
 
 ## 13. Testing convention
 
@@ -785,7 +800,7 @@ def run(argv: list[str]) -> int
 # hookio.py
 HOSTS: tuple[str, ...]                                 # ("claude", "codex")
 def read_event() -> dict
-def host_from_argv(argv: list[str] | None = None) -> str   # "--host <name>", default "claude"
+def host_from_argv(argv: list[str] | None = None, env: dict | None = None) -> str   # "--host <name>"; else PLUGIN_ROOT set → "codex"; else "claude"
 def adapt_output(payload: dict | None, host: str) -> dict | None   # render the Stop block / command names per host
 def run(handler, stdin=None, exit_process=True, host: str | None = None) -> int   # never raises; always exit 0
 def deny(reason: str) -> dict                          # PreToolUse deny payload

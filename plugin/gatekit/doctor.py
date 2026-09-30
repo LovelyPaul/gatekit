@@ -279,9 +279,22 @@ def axis_host_layer(root) -> dict:
     """
     from gatekit import hosts
 
+    # ADR-0019: a gatekit installed as a Codex plugin runs no gate until the
+    # user trusts its hooks, and nothing else would say so.
+    plugin_trust = hosts.codex_plugin_trust()
     result = hosts.status(root, "codex")
+    if result["verdict"] != verdict.FAIL and plugin_trust is False:
+        return _axis(
+            "host layer",
+            verdict.WARN,
+            "codex plugin installed but its hooks are not trusted: no gate runs under Codex",
+            hosts.CODEX_PLUGIN_TRUST_FIX,
+        )
     if result["verdict"] == verdict.UNVERIFIED:
-        return _axis("host layer", verdict.OK, "no Codex host layer (Claude Code plugin serves this project)", "")
+        detail = "no Codex host layer (Claude Code plugin serves this project)"
+        if plugin_trust:
+            detail = "codex plugin hooks trusted; no per-project Codex host layer needed"
+        return _axis("host layer", verdict.OK, detail, "")
     return _axis("host layer", result["verdict"], "codex: " + result["detail"], result.get("fix", ""))
 
 

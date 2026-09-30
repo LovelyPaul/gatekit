@@ -13,3 +13,7 @@ execution instruction; this file only routes to it.
 
 Exit code 0 means nothing failed, not that everything was checked. An
 `unverified` axis was not checked; report it that way.
+
+Under a host without slash commands (Codex), `/gatekit:doctor` does not exist:
+read `commands/doctor.md` two directories above this skill's folder and follow
+it, applying `policy/codex.md` from the same plugin.

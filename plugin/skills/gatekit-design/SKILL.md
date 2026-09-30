@@ -15,3 +15,7 @@ routes to it.
 If the user wants a screen-by-screen spec with flows and per-screen states,
 use `gatekit-mockup` instead. If the user wants the design implemented as
 working code, this is not the right skill.
+
+Under a host without slash commands (Codex), `/gatekit:design` does not exist:
+read `commands/design.md` two directories above this skill's folder and follow
+it, applying `policy/codex.md` from the same plugin.

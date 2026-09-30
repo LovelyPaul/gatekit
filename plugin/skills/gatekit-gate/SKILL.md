@@ -12,3 +12,7 @@ execution instruction; this file only routes to it.
 
 Approval is always the user's action, taken through the command's
 `AskUserQuestion` step. Never record an approval without it.
+
+Under a host without slash commands (Codex), `/gatekit:gate` does not exist:
+read `commands/gate.md` two directories above this skill's folder and follow
+it, applying `policy/codex.md` from the same plugin.

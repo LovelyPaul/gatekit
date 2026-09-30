@@ -14,3 +14,7 @@ the execution instruction; this file only routes to it.
 Enabling a backend is the user's decision, taken through the command's
 `AskUserQuestion` step after it explains what the sandbox does. Never enable one
 ahead of that answer.
+
+Under a host without slash commands (Codex), `/gatekit:setup` does not exist:
+read `commands/setup.md` two directories above this skill's folder and follow
+it, applying `policy/codex.md` from the same plugin.

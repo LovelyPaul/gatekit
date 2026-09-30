@@ -13,3 +13,7 @@ instruction; this file only routes to it.
 
 The command requires `spec/01-prd.md` to exist. If it does not, route to
 `/gatekit:interview` first.
+
+Under a host without slash commands (Codex), `/gatekit:tasks` does not exist:
+read `commands/tasks.md` two directories above this skill's folder and follow
+it, applying `policy/codex.md` from the same plugin.

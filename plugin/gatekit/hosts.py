@@ -267,6 +267,35 @@ def codex_hooks_trusted(root: pathlib.Path) -> bool:
     return any(key.startswith(prefix) for key in _trusted_hook_keys(text))
 
 
+def codex_plugin_trust() -> Optional[bool]:
+    """Whether Codex has recorded trust for an installed gatekit *plugin*.
+
+    ADR-0019. ``None`` when no gatekit plugin is in Codex's plugin cache (the
+    question does not arise). Otherwise ``True`` when some ``hooks.state``
+    key names a ``hooks.json`` inside that cache, ``False`` when none does or
+    the config cannot be read — "could not tell" is not "trusted".
+    """
+    cache = _codex_home() / "plugins" / "cache" / "gatekit" / "gatekit"
+    hook_files = sorted(cache.glob("*/hooks/hooks.json")) if cache.is_dir() else []
+    if not hook_files:
+        return None
+    try:
+        text = (_codex_home() / "config.toml").read_text(encoding="utf-8")
+    except OSError:
+        return False
+    prefixes = []
+    for hook_file in hook_files:
+        prefixes.append(str(hook_file) + ":")
+        prefixes.append(str(hook_file.resolve()) + ":")
+    return any(key.startswith(tuple(prefixes)) for key in _trusted_hook_keys(text))
+
+
+CODEX_PLUGIN_TRUST_FIX = (
+    "open a terminal, run `codex`, type /hooks, review and trust the gatekit "
+    "hooks, then start a new session"
+)
+
+
 def install(
     root: pathlib.Path,
     host: str,
