@@ -37,15 +37,16 @@ gatekit은 [Claude Code](https://claude.com/claude-code)에서 AI 보조 개발�
 ## 요구 사항
 
 - **유료 플랜의 Claude Code** — Claude Code는 무료 플랜에 포함되지 않습니다.
-  또는 Codex CLI([Codex CLI](#codex-cli) 참고).
-- **`python3`로 실행되는 Python 3.9 이상.** `plugin/hooks/hooks.json`의 훅이
-  `python3`라는 이름으로 인터프리터를 호출하므로, `python`으로만 설치된
-  환경에서는 훅이 동작하지 않습니다. 그 외에 필요한 것은 없습니다 —
-  gatekit은 표준 라이브러리만 쓰고 `pip install` 단계가 없습니다.
-- **Windows에서는 WSL 안에서 쓰십시오.** Claude Code 자체는 Windows에서
-  네이티브로 돌지만, Windows용 Python은 명령 이름이 `python3`가 아니라
-  `python`이라서 게이트가 전부 실패합니다. WSL(우분투에는 `python3`가
-  기본 포함)에서는 다른 리눅스 호스트와 똑같이 동작합니다.
+  또는 Codex 앱·CLI([Codex](#codex-앱과-cli) 참고).
+- **Python 3.9 이상**, `python3`·`python`·`py -3` 중 하나로 실행되면
+  됩니다 — 훅이 이 순서로 차례대로 시도합니다. 그 외에 필요한 것은
+  없습니다 — gatekit은 표준 라이브러리만 쓰고 `pip install` 단계가 없습니다.
+- **Windows (미리보기).** 같은 릴리스에서 네이티브 Windows를 지원하지만,
+  아직 실제 세션을 끝까지 돌려본 사용자가 없습니다. CI는 `windows-latest`에서
+  파이썬 코드가 도는 것까지만 증명하고, 호스트가 훅을 실제로 부르는지는
+  증명하지 못합니다. Claude Code에서는 Git for Windows를 설치하십시오
+  (그러면 Claude Code가 Git Bash로 훅을 실행합니다). WSL에서도 리눅스와
+  똑같이 동작합니다. 실제 Windows 사용 보고를 환영합니다.
 
 ## 설치
 
@@ -57,15 +58,37 @@ gatekit은 [Claude Code](https://claude.com/claude-code)에서 AI 보조 개발�
 설치 후 Claude Code를 재시작해야 `plugin/hooks/hooks.json`의 훅이
 반영됩니다.
 
+**Claude 데스크톱 앱.** 앱에서도 플러그인이 동작하고, 훅도 CLI와 똑같이
+실행됩니다. **+ → Plugins → Add plugin**을 눌러 마켓플레이스
+`https://github.com/LovelyPaul/gatekit`를 추가하고 `gatekit`을 설치한 뒤,
+*자기 프로젝트 폴더*를 여십시오. 터미널에서 사용자 범위로 설치한 플러그인은
+앱에서도 그대로 보이고, 그 반대도 같습니다. gatekit 저장소 자체를 앱의
+프로젝트로 여는 것은 설치가 아닙니다 — 모델이 커맨드 파일을 읽을 수는 있지만
+훅이 등록되지 않아 게이트가 하나도 돌지 않습니다.
+
 플러그인은 전역으로 설치되므로 훅은 여는 모든 프로젝트에서 로드됩니다.
 다만 `.gatekit/` 디렉터리가 없는 프로젝트에서는 게이트가 물러납니다 —
 아무것도 막지 않고 상태 파일도 만들지 않습니다. 그 프로젝트에서 `/gatekit:`
 커맨드를 처음 실행하는 순간부터 gatekit이 관여합니다.
 
-### Codex CLI
+### Codex (앱과 CLI)
 
-Codex에는 플러그인 형식이 없으므로, 이 저장소를 클론한 뒤 gatekit이
-프로젝트 안에 호스트 층을 생성합니다.
+Codex도 같은 마켓플레이스에서 같은 플러그인을 설치합니다.
+
+```
+codex plugin marketplace add LovelyPaul/gatekit
+codex plugin add gatekit@gatekit
+```
+
+스킬은 `$gatekit-discover`, `$gatekit-interview` 등으로 나타납니다
+(`gatekit:gatekit-<이름>`으로 표시). **플러그인 훅을 신뢰하기 전까지 게이트는
+돌지 않습니다.** 그리고 Codex 데스크톱 앱은 지금 그 신뢰를 기록하지 못합니다
+(openai/codex#47283). 터미널을 한 번 열어 `codex`를 실행하고 `/hooks`에서
+gatekit 훅을 검토·신뢰한 뒤, 앱이나 CLI에서 새 세션을 시작하십시오. 신뢰는
+훅 내용 단위라서 gatekit을 업그레이드할 때마다 다시 해야 합니다. 그 전까지는
+`$gatekit-doctor`가 플러그인 훅을 `warn`으로 알려줍니다.
+
+예전 방식(생성된 호스트 층)으로 설정한 프로젝트는 그대로 동작합니다.
 
 ```
 git clone https://github.com/LovelyPaul/gatekit
@@ -73,9 +96,7 @@ python3 "gatekit/plugin/bin/gatekit.py" install --host codex
 ```
 
 `.codex/hooks.json`, 커맨드별 스킬 `.agents/skills/gatekit-*`, `AGENTS.md`의
-관리 블록이 생깁니다. Codex가 물으면 프로젝트의 `.codex/` 층을 신뢰하고 새
-세션을 연 뒤 `$gatekit-interview`, `$gatekit-build`처럼 호출합니다. `python3`
-외에 필요한 것은 없습니다.
+관리 블록을 씁니다. Codex가 물으면 프로젝트의 `.codex/` 층을 신뢰하십시오.
 
 ### 호스트 동등성
 

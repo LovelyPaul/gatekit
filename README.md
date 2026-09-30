@@ -40,15 +40,16 @@ that matter into things a hook enforces:
 ## Requirements
 
 - **Claude Code** on a paid plan (Claude Code is not part of the free tier),
-  or the Codex CLI — see [Codex CLI](#codex-cli) below.
-- **Python 3.9 or newer, reachable as `python3`.** The hooks in
-  `plugin/hooks/hooks.json` invoke `python3` by name, so an interpreter
-  installed only as `python` does not satisfy them. Nothing else is needed:
-  gatekit is standard library only, with no `pip install` step.
-- **On Windows, run gatekit inside WSL.** Claude Code itself runs natively
-  on Windows, but a native Windows Python installs as `python`, not
-  `python3`, so every gate fails there. Under WSL (Ubuntu ships `python3`)
-  it behaves like any other Linux host.
+  or Codex (app or CLI) — see [Codex](#codex-app-and-cli) below.
+- **Python 3.9 or newer**, reachable as `python3`, `python` or `py -3` —
+  each hook tries them in that order. Nothing else is needed: gatekit is
+  standard library only, with no `pip install` step.
+- **Windows (preview).** Native Windows is supported in the same release,
+  but no participant has run a full session on it yet; CI proves the Python
+  code on `windows-latest`, not that a host calls the hooks there. For
+  Claude Code, install Git for Windows (Claude Code then runs hooks through
+  Git Bash). WSL also works and behaves like any Linux host. A report from a
+  real Windows session is welcome.
 
 ## Install
 
@@ -60,26 +61,46 @@ that matter into things a hook enforces:
 Restart Claude Code after installing so the hooks in `plugin/hooks/hooks.json`
 are picked up.
 
+**Claude desktop app.** Plugins work there too, and hooks run as in the CLI:
+click **+ → Plugins → Add plugin**, add the marketplace
+`https://github.com/LovelyPaul/gatekit`, install `gatekit`, then open *your
+own project folder*. A plugin installed at user scope in the terminal is
+already available in the app, and the other way round. Opening the gatekit
+repository itself as the app's project is not an install: the model can read
+the command files, but no hook is registered, so no gate runs.
+
 The plugin installs globally, so its hooks are loaded in every project you
 open. They stand down in any project that has no `.gatekit/` directory:
 no gate acts and no state is written there. A project becomes gatekit's
 business the first time you run a `/gatekit:` command in it.
 
-### Codex CLI
+### Codex (app and CLI)
 
-Codex has no plugin format, so gatekit generates its layer into your project
-from a clone of this repository:
+Codex installs this same plugin from the same marketplace:
+
+```
+codex plugin marketplace add LovelyPaul/gatekit
+codex plugin add gatekit@gatekit
+```
+
+The skills appear as `$gatekit-discover`, `$gatekit-interview` and so on
+(listed as `gatekit:gatekit-<name>`). **The gates do not run until you trust
+the plugin's hooks**, and the Codex desktop app cannot record that trust
+today (openai/codex#47283): open a terminal once, run `codex`, type
+`/hooks`, review and trust the gatekit hooks, then start a new session in the
+app or the CLI. Trust is per hook content, so repeat it after each gatekit
+upgrade. `$gatekit-doctor` reports the plugin's hooks as `warn` until then.
+
+Projects set up with the older generated layer keep working:
 
 ```
 git clone https://github.com/LovelyPaul/gatekit
 python3 "gatekit/plugin/bin/gatekit.py" install --host codex
 ```
 
-This writes `.codex/hooks.json`, one skill per command under
-`.agents/skills/gatekit-*`, and a managed block in `AGENTS.md`. Trust the
-project's `.codex/` layer when Codex asks, start a new session, and invoke
-the pipeline as `$gatekit-interview`, `$gatekit-build` and so on. Nothing
-beyond `python3` is required.
+writes `.codex/hooks.json`, one skill per command under
+`.agents/skills/gatekit-*`, and a managed block in `AGENTS.md`; trust the
+project's `.codex/` layer when Codex asks.
 
 ### Host parity
 
