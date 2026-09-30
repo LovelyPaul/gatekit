@@ -138,7 +138,11 @@ def codex_hooks(plugin_root: pathlib.Path) -> Dict[str, Any]:
         entry["hooks"] = [
             {
                 "type": "command",
-                "command": 'python3 "%s" --host codex' % (gates / script),
+                # ADR-0019: python3 → python → py -3, valid in sh and CMD.
+                "command": " || ".join(
+                    '%s "%s" --host codex' % (py, gates / script)
+                    for py in ("python3", "python", "py -3")
+                ),
                 "timeout": timeout if timeout is not None else stop_timeout,
             }
         ]

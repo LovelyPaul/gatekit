@@ -1669,8 +1669,44 @@ def status(root, job_id: Optional[str] = None) -> dict:
     }
 
 
+#: ADR-0019. On Windows `os.kill(pid, 0)` is not a probe — it terminates the
+#: process — and `ps`, `SIGKILL` do not exist, so process control branches.
+_IS_WINDOWS = os.name == "nt"
+
+
+def _pid_alive(pid: int) -> bool:
+    """True when a process with *pid* exists, without disturbing it."""
+    if _IS_WINDOWS:
+        try:
+            out = subprocess.run(
+                ["tasklist", "/FI", "PID eq %d" % pid, "/FO", "CSV", "/NH"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5,
+            ).stdout.decode("utf-8", "replace")
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return ('"%d"' % pid) in out
+    try:
+        os.kill(pid, 0)
+    except (OSError, ValueError):
+        return False
+    return True
+
+
 def _process_age_s(pid: int) -> Optional[float]:
     """Seconds since `pid` started, via `ps -o etime=`; None when unknown."""
+    if _IS_WINDOWS:
+        script = (
+            "((Get-Date) - (Get-Process -Id %d).StartTime).TotalSeconds"
+            ".ToString([Globalization.CultureInfo]::InvariantCulture)" % pid
+        )
+        try:
+            out = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=10,
+            ).stdout.decode("utf-8", "replace").strip()
+            return float(out)
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return None
     try:
         out = subprocess.run(["ps", "-o", "etime=", "-p", str(pid)],
                              stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -1707,9 +1743,7 @@ def _parse_etime(text: str) -> Optional[float]:
 
 def _pid_belongs_to_status(pid: int, pid_started_at: float) -> bool:
     """True only when a live process of that pid is as old as the recorded spawn."""
-    try:
-        os.kill(pid, 0)
-    except (OSError, ValueError):
+    if not _pid_alive(pid):
         return False
     age = _process_age_s(pid)
     if age is None:
@@ -1722,6 +1756,17 @@ def _terminate_pid(pid: int, grace_s: Optional[float] = None) -> bool:
     """SIGTERM, wait up to `grace_s`, then SIGKILL. True when a signal was sent."""
     import signal
 
+    if _IS_WINDOWS:
+        # No SIGTERM a console child would honour; end the worker's whole tree.
+        try:
+            proc = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return proc.returncode == 0
+
     grace = STOP_GRACE_S if grace_s is None else float(grace_s)
     try:
         os.kill(pid, signal.SIGTERM)
@@ -1729,9 +1774,7 @@ def _terminate_pid(pid: int, grace_s: Optional[float] = None) -> bool:
         return False
     deadline = time.time() + grace
     while time.time() < deadline:
-        try:
-            os.kill(pid, 0)
-        except OSError:
+        if not _pid_alive(pid):
             return True  # gone
         time.sleep(0.05)
     try:

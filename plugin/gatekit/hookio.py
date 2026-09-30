@@ -51,9 +51,14 @@ def read_event(stream: Optional[TextIO] = None) -> Event:
     Any malformed or non-object payload yields ``{}`` so that a handler sees a
     well-typed dict and can decide to allow rather than crash.
     """
-    source = stream if stream is not None else sys.stdin
     try:
-        raw = source.read()
+        if stream is not None:
+            raw = stream.read()
+        else:
+            # ADR-0019: hosts send UTF-8; the console's locale encoding
+            # (cp949 on Korean Windows) must not decide how a prompt reads.
+            buffer = getattr(sys.stdin, "buffer", None)
+            raw = buffer.read().decode("utf-8", "replace") if buffer else sys.stdin.read()
     except (OSError, ValueError):  # pragma: no cover - closed stdin
         return {}
     if not raw or not raw.strip():
@@ -219,9 +224,14 @@ def run(
         event = read_event(stdin)
         payload = adapt_output(handler(event), host or host_from_argv())
         if payload:
-            sys.stdout.write(json.dumps(payload, ensure_ascii=False))
-            sys.stdout.write("\n")
-            sys.stdout.flush()
+            text = json.dumps(payload, ensure_ascii=False) + "\n"
+            buffer = getattr(sys.stdout, "buffer", None)
+            if buffer is not None:  # UTF-8 regardless of locale (ADR-0019)
+                buffer.write(text.encode("utf-8"))
+                buffer.flush()
+            else:
+                sys.stdout.write(text)
+                sys.stdout.flush()
     except BaseException as err:  # noqa: BLE001 - deliberate catch-all
         try:
             log_error(event_root(event), str(event.get("hook_event_name") or ""), err)

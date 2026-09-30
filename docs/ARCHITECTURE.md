@@ -161,6 +161,20 @@ PreToolUse `Bash`→`gates/bash.py` (ADR-0004),
 PreToolUse `Agent|Task|collaborationspawn_agent`→`gates/spawn.py` (the Codex tool names are there so the same file serves a Codex plugin install, ADR-0019; a name that does not exist in a host never matches), PostToolUse `AskUserQuestion`→`gates/question.py`,
 Stop→`gates/stop.py`.
 
+**Platforms (ADR-0019).** Every hook command is
+`python3 "<script>" || python "<script>" || py -3 "<script>"` — valid in sh,
+Git Bash and CMD — so a host with only `python` or the Windows launcher still
+starts the gate; a gate always exits 0, so the chain only advances when an
+interpreter is missing. `hookio` reads stdin and writes stdout as UTF-8
+through the binary buffers, whatever the console's locale encoding. The
+write and Bash gates read Git Bash's `/c/<dir>/…` as `C:/<dir>/…` on Windows
+(`paths.from_msys`). `paths.expand_argv` also resolves a bare `argv[0]`
+through `shutil.which` (so `npm` finds `npm.cmd`), and `jobs.py` process
+control uses `tasklist` / PowerShell / `taskkill /T /F` on Windows, where
+`os.kill(pid, 0)` would terminate the process instead of probing it.
+Windows is a preview: CI runs the suite on `windows-latest`, but no real host
+session on Windows has been observed yet.
+
 Gate behaviour:
 
 Every gate stands down in a project that has no `.gatekit/` directory. The
@@ -769,7 +783,8 @@ def project_root(cwd: str | None = None) -> pathlib.Path
 def state_dir(root: pathlib.Path) -> pathlib.Path      # root / ".gatekit"
 def spec_dir(root: pathlib.Path) -> pathlib.Path       # root / "spec"
 def plugin_root() -> pathlib.Path                      # directory containing plugin.json (parent of gatekit/)
-def expand_argv(argv: list[str]) -> list[str]           # copy with "${CLAUDE_PLUGIN_ROOT}" → plugin_root() (ADR-0018)
+def expand_argv(argv: list[str]) -> list[str]           # copy with "${CLAUDE_PLUGIN_ROOT}" → plugin_root() (ADR-0018); bare argv[0] via shutil.which (ADR-0019)
+def from_msys(path: str, windows: bool | None = None) -> str   # "/c/x" → "C:/x" on Windows (ADR-0019)
 
 # config.py
 DEFAULTS: dict

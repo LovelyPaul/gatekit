@@ -160,7 +160,7 @@ def relative_target(root: pathlib.Path, raw_path: str) -> Optional[str]:
     inputs are resolved against the root, and symlinks are resolved so a link
     cannot be used to land outside the project.
     """
-    candidate = pathlib.Path(raw_path)
+    candidate = pathlib.Path(paths.from_msys(raw_path))  # Git Bash form (ADR-0019)
     if not candidate.is_absolute():
         candidate = pathlib.Path(root) / candidate
     return paths.relative_to_root(root, candidate)

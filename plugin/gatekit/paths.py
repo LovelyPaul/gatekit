@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import os
 import pathlib
+import re
+import shutil
 from typing import List, Optional
 
 #: Directory names that mark a project root, in priority order. ``.gatekit``
@@ -116,7 +118,31 @@ def expand_argv(argv: List[str]) -> List[str]:
     globs — the fence stays portable and the argv stays shell-free.
     """
     root = str(plugin_root())
-    return [str(a).replace(PLUGIN_ROOT_TOKEN, root) for a in argv]
+    out = [str(a).replace(PLUGIN_ROOT_TOKEN, root) for a in argv]
+    # ADR-0019: without a shell, Windows cannot find `npm` as `npm.cmd`;
+    # shutil.which applies PATHEXT. Only a bare name is looked up, and an
+    # unresolvable one is left as written for the caller to report.
+    if out and not any(sep in out[0] for sep in ("/", "\\")):
+        found = shutil.which(out[0])
+        if found:
+            out[0] = found
+    return out
+
+
+_MSYS_DRIVE_RE = re.compile(r"^/([A-Za-z])(/.*)?$")
+
+
+def from_msys(path: str, windows: Optional[bool] = None) -> str:
+    """``/c/work/app`` → ``C:/work/app`` on Windows (Git Bash's form).
+
+    ADR-0019. Anything else, and every path off Windows, is returned as is.
+    """
+    if not (os.name == "nt" if windows is None else windows):
+        return path
+    match = _MSYS_DRIVE_RE.match(path or "")
+    if not match:
+        return path
+    return "%s:%s" % (match.group(1).upper(), match.group(2) or "/")
 
 
 def ensure_dir(path: pathlib.Path) -> pathlib.Path:

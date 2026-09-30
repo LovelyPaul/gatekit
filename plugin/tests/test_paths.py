@@ -92,11 +92,12 @@ class TestDerivedDirs(TempProject):
         out = paths.expand_argv(
             ["python3", "${CLAUDE_PLUGIN_ROOT}/gatekit/gates/tokens.py", "src/**"]
         )
-        self.assertEqual(out, ["python3", root + "/gatekit/gates/tokens.py", "src/**"])
+        # argv[0] may be resolved to a full path (ADR-0019 decision 3c).
+        self.assertEqual(out[1:], [root + "/gatekit/gates/tokens.py", "src/**"])
 
     def test_expand_argv_touches_nothing_else(self) -> None:
         argv = ["echo", "$HOME", "~/x", "${OTHER}", "*.ts"]
-        self.assertEqual(paths.expand_argv(argv), argv)
+        self.assertEqual(paths.expand_argv(argv)[1:], argv[1:])
 
     def test_expand_argv_returns_a_new_list(self) -> None:
         argv = ["${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py"]

@@ -6,11 +6,17 @@ on:
 
 jobs:
   gates:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         python-version: ["3.9", "3.12"]
+        include:
+          # ADR-0019: Windows support is a preview; this proves the Python
+          # code on Windows, not that a host calls the hooks there.
+          - os: windows-latest
+            python-version: "3.12"
     steps:
       - uses: actions/checkout@v4
 
@@ -20,31 +26,31 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: gate_no_abs_paths
-        run: python3 tools/gate_no_abs_paths.py
+        run: python tools/gate_no_abs_paths.py
 
       - name: gate_skill_size
-        run: python3 tools/gate_skill_size.py
+        run: python tools/gate_skill_size.py
 
       - name: gate_blob_size
-        run: python3 tools/gate_blob_size.py
+        run: python tools/gate_blob_size.py
 
       - name: gate_forbidden_phrases
-        run: python3 tools/gate_forbidden_phrases.py
+        run: python tools/gate_forbidden_phrases.py
 
       - name: gate_manifest
-        run: python3 tools/gate_manifest.py
+        run: python tools/gate_manifest.py
 
       - name: gate_readme_sync
-        run: python3 tools/gate_readme_sync.py
+        run: python tools/gate_readme_sync.py
 
       - name: gate_command_invocations
-        run: python3 tools/gate_command_invocations.py
+        run: python tools/gate_command_invocations.py
 
       - name: gate_manual_accuracy
-        run: python3 tools/gate_manual_accuracy.py
+        run: python tools/gate_manual_accuracy.py
 
       - name: gate_clean_room
-        run: python3 tools/gate_clean_room.py
+        run: python tools/gate_clean_room.py
 
       - name: run_tests
-        run: python3 tools/run_tests.py
+        run: python tools/run_tests.py
