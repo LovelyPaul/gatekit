@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from typing import Optional
 
@@ -89,6 +90,11 @@ STOP_PID_AGE_TOLERANCE_S = 10.0
 #: Seconds `jobs stop` waits after SIGTERM before SIGKILL.
 STOP_GRACE_S = 5.0
 STOP_MARKER = "stop.json"
+
+#: Serialises job.json read-modify-write inside one process: `jobs stop` and
+#: the draining runner can finish the same job from two threads.
+_JOB_JSON_LOCK = threading.Lock()
+
 #: Exit code by which a task gate reports `unverified`: it ran, but it could not
 #: judge (ADR-0008 decision 5 — the token gate uses it when tokens.json is
 #: absent or the task wrote no file it knows how to scan). 0 is `ok`, every
@@ -1604,11 +1610,28 @@ def _merge_job_json(jdir, fields: dict, fallback: Optional[dict] = None) -> dict
     write itself is atomic, so the surviving loser is a lost field, never a
     corrupt file.
     """
-    job = read_json(jdir / "job.json", None)
-    if not isinstance(job, dict):
-        job = dict(fallback or {})
-    job.update(fields)
-    write_json(jdir / "job.json", job)
+    path = pathlib.Path(jdir) / "job.json"
+    with _JOB_JSON_LOCK:
+        job = read_json(path, None)
+        # Windows refuses to open a file while os.replace swaps it in; an
+        # existing file that cannot be read is retried, never replaced by the
+        # caller's stale copy — that is how stopped_at was erased on CI.
+        attempts = 0
+        while not isinstance(job, dict) and path.is_file() and attempts < 40:
+            time.sleep(0.05)
+            attempts += 1
+            job = read_json(path, None)
+        if not isinstance(job, dict):
+            job = dict(fallback or {})
+        job.update(fields)
+        for attempt in range(40):
+            try:
+                write_json(path, job)
+                break
+            except PermissionError:  # the other side is mid-read (Windows)
+                if attempt == 39:
+                    raise
+                time.sleep(0.05)
     return job
 
 

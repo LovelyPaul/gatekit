@@ -11,6 +11,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 # Make the `gatekit` package importable however this suite is discovered:
 # `discover -s plugin/tests` loads tests as top-level modules and puts only
@@ -1225,6 +1226,27 @@ class TestStop(JobTestCase):
                     return st
             _time.sleep(0.05)
         self.fail("task %s never reached %s" % (task_id, state))
+
+    def test_finishing_does_not_erase_stopped_at_when_a_read_fails(self) -> None:
+        # Windows refuses to open a file while os.replace swaps it in; a
+        # merge that then falls back to its own stale copy erased stopped_at
+        # (windows-latest CI). An existing file that cannot be read is retried.
+        jdir = self.root / ".gatekit" / "jobs" / "job-merge"
+        jdir.mkdir(parents=True)
+        jobs.write_json(jdir / "job.json", {"job_id": "job-merge", "stopped_at": "T1"})
+        real = jobs.read_json
+        calls = {"n": 0}
+
+        def flaky(path, default=None):
+            if str(path).endswith("job.json") and calls["n"] == 0:
+                calls["n"] += 1
+                return default
+            return real(path, default)
+
+        with mock.patch.object(jobs, "read_json", side_effect=flaky):
+            merged = jobs._finalise_job(jdir, {"job_id": "job-merge"})
+        self.assertEqual(merged.get("stopped_at"), "T1")
+        self.assertIn("finished_at", merged)
 
     def test_stop_requested_before_the_spawn_still_ends_the_worker(self) -> None:
         # A stop that lands between "running" and the pid has nothing to
