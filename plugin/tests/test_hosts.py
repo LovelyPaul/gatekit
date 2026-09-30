@@ -88,7 +88,7 @@ class TestCodexInstall(HostProject):
         self.install()
         text = (self.root / ".agents" / "skills" / "gatekit-build" / "command.md").read_text(encoding="utf-8")
         self.assertNotIn("${CLAUDE_PLUGIN_ROOT}", text)
-        self.assertIn(str(PLUGIN_DIR / "bin" / "gatekit.py"), text)
+        self.assertIn((PLUGIN_DIR / "bin" / "gatekit.py").as_posix(), text)
         self.assertNotIn("/gatekit:verify", text)
         self.assertIn("$gatekit-verify", text)
 
@@ -298,8 +298,8 @@ class TestCodexHooksTrusted(CodexTrustProject):
     def test_a_matching_pre_tool_use_entry_is_trusted(self) -> None:
         self.install()
         self.write_config(
-            '[hooks.state."%s:pre_tool_use:0:0"]\n'
-            'trusted_hash = "sha256:deadbeef"\n' % self.hooks_json_path()
+            '[hooks.state.%s]\n'
+            'trusted_hash = "sha256:deadbeef"\n' % json.dumps(self.hooks_json_path() + ":pre_tool_use:0:0")
         )
         self.assertTrue(hosts.codex_hooks_trusted(self.root))
 
@@ -310,8 +310,8 @@ class TestCodexHooksTrusted(CodexTrustProject):
         was completed for this file."""
         self.install()
         self.write_config(
-            '[hooks.state."%s:pre_tool_use:1:0"]\n'
-            'trusted_hash = "sha256:deadbeef"\n' % self.hooks_json_path()
+            '[hooks.state.%s]\n'
+            'trusted_hash = "sha256:deadbeef"\n' % json.dumps(self.hooks_json_path() + ":pre_tool_use:1:0")
         )
         self.assertTrue(hosts.codex_hooks_trusted(self.root))
 
@@ -334,8 +334,8 @@ class TestCodexHooksTrusted(CodexTrustProject):
     def test_no_codex_directory_at_all_is_not_trusted(self) -> None:
         # No install() call: .codex/hooks.json does not exist yet.
         self.write_config(
-            '[hooks.state."%s:pre_tool_use:0:0"]\n'
-            'trusted_hash = "sha256:deadbeef"\n' % self.hooks_json_path()
+            '[hooks.state.%s]\n'
+            'trusted_hash = "sha256:deadbeef"\n' % json.dumps(self.hooks_json_path() + ":pre_tool_use:0:0")
         )
         self.assertFalse(hosts.codex_hooks_trusted(self.root))
 
@@ -360,8 +360,8 @@ class TestCodexTrustFallbackParser(CodexTrustProject):
     def test_fallback_matches_a_trusted_hook(self) -> None:
         self.install()
         self.write_config(
-            '[hooks.state."%s:pre_tool_use:0:0"]\n'
-            'trusted_hash = "sha256:deadbeef"\n' % self.hooks_json_path()
+            '[hooks.state.%s]\n'
+            'trusted_hash = "sha256:deadbeef"\n' % json.dumps(self.hooks_json_path() + ":pre_tool_use:0:0")
         )
         self.assertTrue(self.with_fallback(lambda: hosts.codex_hooks_trusted(self.root)))
 

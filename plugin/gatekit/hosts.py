@@ -165,7 +165,8 @@ def _frontmatter_field(text: str, key: str) -> str:
 
 def rewrite_command(text: str, plugin_root: pathlib.Path) -> str:
     """The command body as Codex must read it."""
-    out = text.replace("${CLAUDE_PLUGIN_ROOT}", str(pathlib.Path(plugin_root)))
+    # Forward slashes, as Claude Code substitutes on Windows (ADR-0019).
+    out = text.replace("${CLAUDE_PLUGIN_ROOT}", pathlib.Path(plugin_root).as_posix())
     names = sorted((p.stem for p in (pathlib.Path(plugin_root) / "commands").glob("*.md")), key=len, reverse=True)
     if names:
         # Only real command names, not preceded by a URL path character and

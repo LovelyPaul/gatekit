@@ -20,6 +20,7 @@ import unittest
 # `plugin/tests` on sys.path, so `plugin/` has to be added explicitly.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from tests._stubs import echo_stub_body, make_python_stub  # noqa: E402
 from gatekit import doctor, paths, verdict
 
 
@@ -65,9 +66,7 @@ class DoctorTestCase(unittest.TestCase):
             (self.home / ".claude" / "settings.json").write_text(json.dumps(settings), encoding="utf-8")
 
     def stub_claude(self) -> None:
-        path = self.bindir / "claude"
-        path.write_text("#!/bin/sh\necho 'claude 1.0.0'\n", encoding="utf-8")
-        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+        make_python_stub(self.bindir, "claude", echo_stub_body("claude 1.0.0"))
 
     def axis(self, report: dict, n: int) -> dict:
         return report["axes"][n - 1]

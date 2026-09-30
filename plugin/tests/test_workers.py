@@ -14,6 +14,7 @@ import unittest
 # `plugin/tests` on sys.path, so `plugin/` has to be added explicitly.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from tests._stubs import echo_stub_body, make_python_stub  # noqa: E402
 from gatekit import config, verdict, workers
 
 
@@ -25,11 +26,8 @@ def write_config(root: pathlib.Path, cfg: dict) -> None:
 
 def make_stub_binary(directory: pathlib.Path, name: str, exit_code: int = 0,
                      body: str = "stub 1.2.3") -> pathlib.Path:
-    """A tiny shell script that prints `body` and exits `exit_code`."""
-    path = directory / name
-    path.write_text("#!/bin/sh\necho '%s'\nexit %d\n" % (body, exit_code), encoding="utf-8")
-    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
-    return path
+    """A tiny program that prints `body` and exits `exit_code` (any OS)."""
+    return make_python_stub(directory, name, echo_stub_body(body, exit_code))
 
 
 class WorkerTestCase(unittest.TestCase):
@@ -232,12 +230,8 @@ class TestProbe(WorkerTestCase):
     its credentials) is caught before a build, not by the build."""
 
     def stub_probe(self, exit_code: int, body: str, sleep: float = 0) -> None:
-        path = self.bindir / "claude"
-        path.write_text(
-            "#!/bin/sh\n/bin/cat >/dev/null\n/bin/sleep %s\necho '%s'\nexit %d\n" % (sleep, body, exit_code),
-            encoding="utf-8",
-        )
-        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+        make_python_stub(self.bindir, "claude",
+                         echo_stub_body(body, exit_code, sleep=sleep, read_stdin=True))
 
     def test_probe_ok_when_backend_answers(self) -> None:
         self.stub_probe(0, "READY")
@@ -261,9 +255,8 @@ class TestProbe(WorkerTestCase):
         self.assertEqual(result["verdict"], verdict.UNVERIFIED)
 
     def test_probe_uses_read_only_argv(self) -> None:
-        path = self.bindir / "claude"
-        path.write_text("#!/bin/sh\n/bin/cat >/dev/null\necho \"$@\"\nexit 0\n", encoding="utf-8")
-        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+        make_python_stub(self.bindir, "claude",
+                         echo_stub_body("", 0, read_stdin=True, echo_args=True))
         result = workers.check(self.root, "claude", probe=True)
         self.assertIn("plan", result["detail"])
         self.assertNotIn("acceptEdits", result["detail"])

@@ -773,7 +773,7 @@ def _spawn_worker(root, backend: dict, task: dict, job_id: str, tdir, timeout_s:
     with open(out_path, "wb") as out_f, open(err_path, "wb") as err_f:
         try:
             proc = subprocess.Popen(
-                list(backend["argv"]),
+                paths.expand_argv(backend["argv"]),  # `claude` → claude.cmd on Windows
                 cwd=str(root),
                 env=env,
                 stdin=subprocess.PIPE,
@@ -814,6 +814,11 @@ def execute_task(root, jdir, job_id: str, task: dict, backend: dict, timeout_s: 
 
     def record_pid(pid, started):
         _set_status(jdir, task_id, pid=int(pid), pid_started_at=float(started))
+        # `jobs stop` may have run between "running" and the spawn, when it
+        # had no pid to signal; honour it now rather than let the worker run
+        # to its timeout unobserved (seen on Windows CI, where spawns are slow).
+        if (pathlib.Path(jdir) / STOP_MARKER).is_file():
+            _terminate_pid(int(pid), grace_s=0)
 
     result = _spawn_worker(root, backend, task, job_id, tdir, timeout_s, on_spawn=record_pid)
     # The worker has been reaped; its pid may be reused by anything now, so

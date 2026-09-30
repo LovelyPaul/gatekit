@@ -1226,6 +1226,21 @@ class TestStop(JobTestCase):
             _time.sleep(0.05)
         self.fail("task %s never reached %s" % (task_id, state))
 
+    def test_stop_requested_before_the_spawn_still_ends_the_worker(self) -> None:
+        # A stop that lands between "running" and the pid has nothing to
+        # signal; the spawn must honour the marker itself.
+        import time as _time
+        self.write_config()
+        self.set_env(FAKE_WORKER_OUT="src/note.txt", FAKE_WORKER_SLEEP=30)
+        jdir = self.root / ".gatekit" / "jobs" / "job-pre-stop"
+        (jdir / "tasks" / "write-note").mkdir(parents=True)
+        (jdir / "tasks" / "write-note" / "prompt.md").write_text("write the note\n", encoding="utf-8")
+        jobs.write_json(jdir / jobs.STOP_MARKER, {"requested_at": "now"})
+        backend = {"name": "fake", "argv": [sys.executable, str(FAKE_WORKER)]}
+        started = _time.time()
+        jobs.execute_task(self.root, jdir, "job-pre-stop", self.simple_task(), backend, timeout_s=60)
+        self.assertLess(_time.time() - started, 20)
+
     def test_stop_ends_the_running_worker_and_marks_queued_tasks_stopped(self) -> None:
         self.write_config()
         first = self.simple_task()
@@ -1235,6 +1250,12 @@ class TestStop(JobTestCase):
         thread, holder = self._start_in_thread()
         latest = lambda: jobs.latest_job_id(self.root)  # noqa: E731
         running = self._wait_for_state(latest, "write-note", "running")
+        # "running" is written before the spawn; the pid follows it.
+        import time as _time
+        deadline = _time.time() + 10
+        while not isinstance(running.get("pid"), int) and _time.time() < deadline:
+            _time.sleep(0.05)
+            running = jobs.read_json(self.task_dir(latest(), "write-note") / "status.json", {}) or {}
         self.assertIsInstance(running.get("pid"), int)
         job_id = latest()
         result = jobs.stop(self.root, job_id)
@@ -2334,8 +2355,8 @@ class TestEvaluatorSandbox(JobTestCase):
             hosts.install(self.root, "codex")
             hooks_path = str((self.root / ".codex" / "hooks.json").resolve())
             pathlib.Path(codex_home.name, "config.toml").write_text(
-                '[hooks.state."%s:pre_tool_use:0:0"]\n'
-                'trusted_hash = "sha256:deadbeef"\n' % hooks_path,
+                '[hooks.state.%s]\n'
+                'trusted_hash = "sha256:deadbeef"\n' % json.dumps(hooks_path + ":pre_tool_use:0:0"),
                 encoding="utf-8",
             )
             # codex isn't actually installed in the sandbox; the spawn itself

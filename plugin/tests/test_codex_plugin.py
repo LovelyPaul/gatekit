@@ -126,7 +126,7 @@ class TestDoctorReportsCodexPluginTrust(unittest.TestCase):
     def test_installed_and_trusted_is_ok(self) -> None:
         hooks = self.install_plugin()
         self.write_config(
-            '[hooks.state."%s:pre_tool_use:0:0"]\ntrusted_hash = "abc"\n' % hooks
+            '[hooks.state.%s]\ntrusted_hash = "abc"\n' % json.dumps(str(hooks) + ":pre_tool_use:0:0")
         )
         self.assertTrue(hosts.codex_plugin_trust())
         self.assertEqual(doctor.axis_host_layer(self.root)["verdict"], verdict.OK)

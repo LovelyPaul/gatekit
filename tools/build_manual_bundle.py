@@ -67,11 +67,14 @@ def build(root: pathlib.Path, out: pathlib.Path, title: str) -> int:
             archive.write(page, f"{title}/{page.name}")
 
     print(f"{out}  ({len(pages)} child pages, {out.stat().st_size // 1024} KB)")
-    print("import: Notion → Import → Markdown & CSV → this file")
+    print("import: Notion -> Import -> Markdown & CSV -> this file")
     return 0
 
 
 def main(argv=None) -> int:
+    # The default title is Korean; a cp1252 Windows console cannot print it.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(errors="backslashreplace")
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--root", default=str(pathlib.Path(__file__).resolve().parent.parent))
     parser.add_argument("--out", default=None, help="output zip (default: dist/<title>.zip)")
