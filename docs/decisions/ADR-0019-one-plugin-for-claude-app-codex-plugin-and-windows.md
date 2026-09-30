@@ -44,7 +44,7 @@ Study participants use three surfaces the plugin was not packaged for:
    which cannot find `npm.cmd`. `jobs.py` uses `os.kill(pid, 0)` as a liveness
    probe — on Windows that call **terminates** the process — plus
    `signal.SIGKILL` and `ps`, neither of which exist there. Git Bash reports
-   paths as `/c/Users/…` while the project root is `C:\Users\…`. CI runs
+   paths as `/c/work/…` while the project root is `C:\work\…`. CI runs
    only on Ubuntu.
 
 The standing constraints apply: one plugin, stdlib only, hooks are the
@@ -92,7 +92,7 @@ enforcement, every hook exits 0 on internal error, the verdict words.
    d. `jobs.py` process control branches on `os.name == "nt"`: liveness and
       age through `tasklist`, termination through `taskkill /T /F`. The
       POSIX path is unchanged.
-   e. The Bash gate normalises MSYS paths (`/c/Users/x` → `C:\Users\x`)
+   e. The Bash gate normalises MSYS paths (`/c/work/app` → `C:\work\app`)
       before comparing a target with the project root.
    f. CI adds `windows-latest`. Windows support is labelled **preview**
       in README and release notes until a participant has run a real
