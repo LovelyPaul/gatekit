@@ -4,6 +4,47 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.12.0 — 2026-10-01
+
+One plugin tree for the Claude desktop app, Codex's plugin system and
+Windows, in the same repository and release (ADR-0019).
+
+### Added
+
+- **Codex plugin install.** `codex plugin marketplace add LovelyPaul/gatekit`
+  then `codex plugin add gatekit@gatekit` installs the same `plugin/` folder
+  Claude Code uses. The hooks also match Codex's tool names (`apply_patch`,
+  `collaborationspawn_agent`) and answer in Codex's dialect when Codex runs
+  them (detected from `PLUGIN_ROOT`); every skill tells a host without slash
+  commands where its command file is, and `policy/codex.md` carries the
+  Codex differences. Codex runs plugin hooks only after the user trusts them
+  in a terminal `codex` → `/hooks` session — the desktop app cannot record
+  that trust today (openai/codex#47283) — and `doctor` now reports an
+  untrusted install as `warn` with that fix. `gatekit install --host codex`
+  keeps working for existing projects.
+- **Windows (preview).** Hooks try `python3`, then `python`, then `py -3`;
+  hook stdio is UTF-8 whatever the console encoding; criteria, task gates
+  and worker spawns find `npm.cmd`/`claude.cmd` through `shutil.which`;
+  `jobs stop` uses `tasklist`/`taskkill` (on Windows `os.kill(pid, 0)` ends
+  the process it was meant to probe); Git Bash's `/c/…` paths are read as
+  `C:/…`. CI now runs the whole suite on `windows-latest`. No real Windows
+  host session has been observed yet, hence "preview".
+- README and the install manual cover the Claude desktop app
+  (**+ → Plugins → Add plugin**; opening the gatekit repository itself is not
+  an install and runs no gate).
+
+### Fixed
+
+- A gate that failed in a project with no `.gatekit/` created one to hold
+  its error log, after which every later gate treated the project as managed.
+  It now logs nothing there.
+- `jobs stop` landing between a task's "running" status and its spawn had no
+  pid to signal and let the worker run to its timeout; the spawn now honours
+  the stop itself.
+- After `jobs stop`, finishing the job could erase `stopped_at` when a read
+  of `job.json` failed mid-replace (seen on Windows); the merge retries.
+- The generated Codex command copy mixed path separators on Windows.
+
 ## 0.11.3 — 2026-09-30
 
 Three defects found by running the whole pipeline for a new project from a
