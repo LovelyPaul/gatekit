@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import pathlib
@@ -454,6 +455,7 @@ def execute(
     root: pathlib.Path,
     total_budget_s: Optional[float] = None,
     cap_s: Optional[float] = None,
+    first: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Run every criterion within *total_budget_s* and aggregate the verdict.
 
@@ -461,6 +463,10 @@ def execute(
     that many seconds. The stop gate uses it so a run never outlives the hook
     timeout Claude Code gives it; a run cut short by the cap is ``unverified``,
     which is honest, where a killed hook would record nothing at all.
+
+    *first* names criterion ids to run before the rest, in their declared
+    order (ADR-0020: the Stop gate puts last run's failures first, so a budget
+    cut lands on criteria that last passed).
 
     Returns ``{"verdict", "criteria", "reasons"}``. ``reasons`` holds short
     human-readable strings naming what failed or went unverified; the stop gate
@@ -497,6 +503,11 @@ def execute(
     if cap_s is not None:
         budget = min(budget, float(cap_s))
     deadline = time.monotonic() + budget
+    if first:
+        wanted = set(first)
+        criteria = [c for c in criteria if c.get("id") in wanted] + [
+            c for c in criteria if c.get("id") not in wanted
+        ]
     results: List[Dict[str, Any]] = []
     for crit in criteria:
         results.append(_run_one(root, crit, deadline - time.monotonic()))
@@ -515,6 +526,100 @@ def execute(
         "total_budget_s": budget,
         "reasons": reasons,
     }
+
+
+# --------------------------------------------------------------------------
+# Stop-gate result reuse (ADR-0020)
+# --------------------------------------------------------------------------
+
+#: Directories whose contents are state or build output that criteria
+#: themselves rewrite; they never decide whether the code changed.
+FINGERPRINT_SKIP_DIRS = frozenset({
+    ".git", ".gatekit", "node_modules", ".next", ".nuxt", ".svelte-kit", ".turbo",
+    ".cache", "dist", "build", "out", "coverage", "test-results",
+    "playwright-report", "__pycache__", ".venv", "venv",
+})
+FINGERPRINT_SKIP_SUFFIXES = (".tsbuildinfo",)
+FINGERPRINT_SKIP_FILES = frozenset({"spec/PROGRESS.md"})
+#: Past this many files the fingerprint is not computed and nothing is reused.
+FINGERPRINT_MAX_FILES = 20000
+LAST_RESULT_NAME = "contract-last.json"
+
+
+def tree_fingerprint(root: pathlib.Path) -> Optional[str]:
+    """sha256 over ``(path, size, mtime_ns)`` of the project's source files.
+
+    ``None`` when it could not be computed (too many files, unreadable tree):
+    the caller then runs the contract, since "could not tell" is not "same".
+    """
+    root = pathlib.Path(root)
+    skip = set(FINGERPRINT_SKIP_FILES)
+    data = load(root) or {}
+    for crit in data.get("criteria") or []:
+        for artifact in crit.get("artifacts") or []:
+            if isinstance(artifact, str):
+                rel = artifact.replace("\\", "/")
+                skip.add(rel[2:] if rel.startswith("./") else rel)
+    entries: List[str] = []
+    try:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = sorted(d for d in dirnames if d not in FINGERPRINT_SKIP_DIRS)
+            rel_dir = os.path.relpath(dirpath, root).replace(os.sep, "/")
+            for name in sorted(filenames):
+                if name.endswith(FINGERPRINT_SKIP_SUFFIXES):
+                    continue
+                rel = name if rel_dir == "." else rel_dir + "/" + name
+                if rel in skip:
+                    continue
+                try:
+                    st = os.stat(os.path.join(dirpath, name))
+                except OSError:
+                    continue
+                entries.append("%s\0%d\0%d" % (rel, st.st_size, st.st_mtime_ns))
+                if len(entries) > FINGERPRINT_MAX_FILES:
+                    return None
+    except OSError:
+        return None
+    return hashlib.sha256("\n".join(entries).encode("utf-8")).hexdigest()
+
+
+def _last_result_path(root: pathlib.Path) -> pathlib.Path:
+    return paths.runs_dir(root) / LAST_RESULT_NAME
+
+
+def load_last(root: pathlib.Path) -> Optional[Dict[str, Any]]:
+    """The Stop gate's last recorded run, or ``None``."""
+    try:
+        raw = json.loads(_last_result_path(root).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return raw if isinstance(raw, dict) else None
+
+
+def save_last(root: pathlib.Path, result: Dict[str, Any]) -> None:
+    """Record *result* with the contract hash and the tree as it is now."""
+    data = load(root) or {}
+    record = {
+        "source_sha256": data.get("source_sha256"),
+        "fingerprint": tree_fingerprint(root),
+        "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        "result": result,
+    }
+    config.write_json_atomic(_last_result_path(root), record)
+
+
+def reusable_last(root: pathlib.Path) -> Optional[Dict[str, Any]]:
+    """The last record when the contract and the tree are both unchanged."""
+    last = load_last(root)
+    data = load(root)
+    if not last or not data or status(root) != verdict.OK:
+        return None
+    if last.get("source_sha256") != data.get("source_sha256"):
+        return None
+    current = tree_fingerprint(root)
+    if not current or current != last.get("fingerprint"):
+        return None
+    return last if isinstance(last.get("result"), dict) else None
 
 
 def run(argv: List[str]) -> int:
@@ -556,6 +661,13 @@ def run(argv: List[str]) -> int:
         return 0 if result == verdict.OK else 1
 
     result = execute(root, total_budget_s=args.budget)
+    if result.get("criteria"):
+        # Recorded so the Stop gate ending this turn can reuse it (ADR-0020);
+        # this command itself never reuses anything.
+        try:
+            save_last(root, result)
+        except OSError:
+            pass
     if args.as_json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:

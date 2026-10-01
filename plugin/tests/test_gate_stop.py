@@ -301,8 +301,8 @@ class TestStopGateCapsDeclaredBudget(StopProject):
         seen = {}
         original = contract.execute
 
-        def recorder(root, total_budget_s=None, cap_s=None):
-            result = original(root, total_budget_s=total_budget_s, cap_s=cap_s)
+        def recorder(root, total_budget_s=None, cap_s=None, first=None):
+            result = original(root, total_budget_s=total_budget_s, cap_s=cap_s, first=first)
             seen["budget"] = result["total_budget_s"]
             return result
 
@@ -401,3 +401,111 @@ class TestUnmanagedProject(unittest.TestCase):
                  "hook_event_name": "Stop"}
         self.assertIsNone(stop_gate.handle(event))
         self.assertFalse((self.root / ".gatekit").exists())
+
+
+class CountingCriteria(StopProject):
+    """Criteria that record how many times they really ran."""
+
+    def counting(self, exit_code: int = 0, crit_id: str = "count-crit") -> dict:
+        # Each run appends one line to a file under test-results/, which the
+        # fingerprint ignores, so the count is the number of real runs.
+        code = (
+            "import pathlib; p = pathlib.Path('test-results/runs.txt'); "
+            "p.parent.mkdir(exist_ok=True); "
+            "p.write_text(p.read_text() + 'x' if p.exists() else 'x'); "
+            "raise SystemExit(%d)" % exit_code
+        )
+        return {"id": crit_id, "argv": [PY, "-c", code], "timeout_s": 20}
+
+    def runs(self) -> int:
+        path = self.root / "test-results" / "runs.txt"
+        return len(path.read_text()) if path.exists() else 0
+
+
+class TestReuseForUnchangedTree(CountingCriteria):
+    """ADR-0020 decision 1: an unchanged tree is not re-proved at every Stop."""
+
+    def test_second_stop_with_unchanged_tree_reuses_the_result(self) -> None:
+        self.write_contract(self.counting())
+        self.set_pipeline("build")
+        self.assertIsNone(stop_gate.handle(self.event()))
+        self.assertIsNone(stop_gate.handle(self.event()))
+        self.assertEqual(self.runs(), 1)
+
+    def test_a_changed_source_file_runs_again(self) -> None:
+        self.write_contract(self.counting())
+        self.set_pipeline("build")
+        stop_gate.handle(self.event())
+        (self.root / "src").mkdir()
+        (self.root / "src" / "app.ts").write_text("export {}\n", encoding="utf-8")
+        stop_gate.handle(self.event())
+        self.assertEqual(self.runs(), 2)
+
+    def test_a_changed_contract_runs_again(self) -> None:
+        self.write_contract(self.counting())
+        self.set_pipeline("build")
+        stop_gate.handle(self.event())
+        self.write_contract(self.counting(), {"id": "extra", "argv": [PY, "-c", "pass"], "timeout_s": 20})
+        stop_gate.handle(self.event())
+        self.assertEqual(self.runs(), 2)
+
+    def test_a_reused_failure_still_blocks_and_says_it_was_reused(self) -> None:
+        self.write_contract(self.counting(exit_code=1))
+        self.set_pipeline("build")
+        first = stop_gate.handle(self.event())
+        second = stop_gate.handle(self.event())
+        self.assertIsNotNone(first)
+        self.assertIsNotNone(second)
+        self.assertEqual(self.runs(), 1)
+        self.assertIn("count-crit", second["reason"])
+        self.assertTrue(any(e["kind"] == "stop_reused" for e in self.led().data["events"]))
+
+    def test_cli_contract_run_never_reuses(self) -> None:
+        self.write_contract(self.counting())
+        self.set_pipeline("build")
+        stop_gate.handle(self.event())
+        contract.execute(self.root)
+        self.assertEqual(self.runs(), 2)
+
+    def test_previously_failing_criteria_run_first(self) -> None:
+        order_file = self.root / "test-results" / "order.txt"
+        def recorder(crit_id: str, exit_code: int) -> dict:
+            code = (
+                "import pathlib; p = pathlib.Path('test-results/order.txt'); "
+                "p.parent.mkdir(exist_ok=True); "
+                "p.write_text((p.read_text() if p.exists() else '') + '%s,'); "
+                "raise SystemExit(%d)" % (crit_id, exit_code)
+            )
+            return {"id": crit_id, "argv": [PY, "-c", code], "timeout_s": 20}
+        self.write_contract(recorder("first-ok", 0), recorder("second-bad", 1))
+        self.set_pipeline("build")
+        stop_gate.handle(self.event())
+        (self.root / "touch.txt").write_text("change\n", encoding="utf-8")
+        order_file.write_text("", encoding="utf-8")
+        stop_gate.handle(self.event())
+        self.assertEqual(order_file.read_text(), "second-bad,first-ok,")
+
+    def test_fingerprint_ignores_build_output_and_declared_artifacts(self) -> None:
+        self.write_contract({"id": "shot", "argv": [PY, "-c", "pass"], "timeout_s": 20,
+                             "artifacts": ["spec/design/build-x.png"]})
+        before = contract.tree_fingerprint(self.root)
+        for rel in ("node_modules/a.js", ".next/b.js", "test-results/c.txt",
+                    "spec/design/build-x.png", "tsconfig.tsbuildinfo", "spec/PROGRESS.md"):
+            path = self.root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("x", encoding="utf-8")
+        self.assertEqual(contract.tree_fingerprint(self.root), before)
+        (self.root / "app.py").write_text("x", encoding="utf-8")
+        self.assertNotEqual(contract.tree_fingerprint(self.root), before)
+
+
+class TestExplicitRunFeedsReuse(CountingCriteria):
+    """A `contract run` (e.g. inside /gatekit:verify) always executes, and the
+    Stop that ends the same turn reuses it instead of running a second time."""
+
+    def test_stop_after_cli_run_on_unchanged_tree_reuses_it(self) -> None:
+        self.write_contract(self.counting())
+        self.set_pipeline("verify")
+        self.assertEqual(contract.run(["run", "--root", str(self.root)]), 0)
+        self.assertIsNone(stop_gate.handle(self.event()))
+        self.assertEqual(self.runs(), 1)

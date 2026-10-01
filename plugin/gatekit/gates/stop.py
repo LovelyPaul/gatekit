@@ -58,6 +58,10 @@ _MESSAGES = {
             "Fix the causes and let the contract run again. "
             "'unverified' means it was never checked — that is not a pass."
         ),
+        "reused": (
+            "  (no file changed since the run at {at}; that result is reused. "
+            "Change the code to run the contract again.)"
+        ),
         "stale": (
             "gatekit: .gatekit/contract.json no longer matches spec/05-gate.md, so "
             "completion cannot be judged (contract_stale). "
@@ -70,6 +74,10 @@ _MESSAGES = {
             "(기준 {total}개 중 {count}개 실패 또는 미검증):\n{reasons}\n"
             "원인을 고친 뒤 계약을 다시 실행하세요. "
             "'unverified' 는 검증하지 않았다는 뜻이며 통과가 아닙니다."
+        ),
+        "reused": (
+            "  ({at} 실행 이후 바뀐 파일이 없어 그 결과를 다시 썼습니다. "
+            "코드를 고치면 계약을 다시 실행합니다.)"
         ),
         "stale": (
             "gatekit: .gatekit/contract.json 이 spec/05-gate.md 와 더 이상 일치하지 "
@@ -97,6 +105,35 @@ def _finish(led: "ledger.Ledger", final: str, reasons: Optional[List[str]] = Non
     led.save()
 
 
+def _judge(root, led: "ledger.Ledger") -> Dict[str, Any]:
+    """Run the contract, or reuse the last result for an unchanged tree.
+
+    ADR-0020: a Stop with no file changed since the last run judges that run
+    again instead of re-proving it; any change runs the contract, last run's
+    failures first. Only this gate reuses; `contract run` always executes.
+    """
+    last = contract.reusable_last(root)
+    if last is not None:
+        result = dict(last["result"])
+        result["reused_from"] = last.get("recorded_at")
+        led.append_event("stop_reused", {"recorded_at": last.get("recorded_at"),
+                                         "verdict": result.get("verdict")})
+        return result
+    previous = contract.load_last(root) or {}
+    data = contract.load(root) or {}
+    first: List[str] = []
+    if previous.get("source_sha256") == data.get("source_sha256"):
+        first = [c.get("id") for c in ((previous.get("result") or {}).get("criteria") or [])
+                 if c.get("verdict") in (verdict.FAIL, verdict.UNVERIFIED)]
+    result = contract.execute(root, cap_s=STOP_BUDGET_CAP_S, first=first)
+    if result.get("criteria"):
+        try:
+            contract.save_last(root, result)
+        except OSError:  # a missing record only costs a re-run next time
+            pass
+    return result
+
+
 def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Run the contract when a build/verify pipeline is active and judge it."""
     root = hookio.event_root(event)
@@ -119,7 +156,7 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
     # Already inside a stop-hook continuation: never block again.
     if bool(event.get("stop_hook_active")):
-        result = contract.execute(root, cap_s=STOP_BUDGET_CAP_S)
+        result = _judge(root, led)
         _finish(led, result["verdict"], result["reasons"])
         return hookio.allow()
 
@@ -131,7 +168,7 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     except (TypeError, ValueError):
         block_count = 0
 
-    result = contract.execute(root, cap_s=STOP_BUDGET_CAP_S)
+    result = _judge(root, led)
     outcome = result["verdict"]
 
     if outcome == verdict.OK:
@@ -161,6 +198,8 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if item.get("verdict") in (verdict.FAIL, verdict.UNVERIFIED)
     ]
     reasons_text = "\n".join(f"  - {line}" for line in result["reasons"]) or "  - (no detail)"
+    if result.get("reused_from"):
+        reasons_text += "\n" + _message(lang, "reused", at=result["reused_from"])
     return hookio.block_stop(
         _message(
             lang,
