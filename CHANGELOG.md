@@ -4,6 +4,33 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.13.0 — 2026-10-01
+
+Verification stops costing minutes per turn (ADR-0020). Found on a real
+10-task build whose Stop gate ran a 26-criterion contract nine times in one
+session, each run up to 570 s.
+
+### Changed
+
+- **The Stop gate reuses its last result when nothing changed.** Each run is
+  recorded with the contract's hash and a fingerprint of the project tree
+  taken after the run (ignoring `node_modules`, build output, `test-results`,
+  `*.tsbuildinfo`, `spec/PROGRESS.md` and declared artifacts). A Stop with
+  both unchanged judges that result again and says so; any change runs the
+  contract, last run's failing and unverified criteria first. `contract run`
+  always executes, and records its result so the Stop ending a
+  `/gatekit:verify` turn does not repeat it.
+- **`/gatekit:gate` derives criteria by runner invocation, not per task.**
+  One E2E suite criterion on a single viewport, one wiring criterion, one
+  screenshot criterion listing every UI task's `build-<task-id>.png`, plus
+  the cheap static checks. For a Next.js app that is about three Playwright
+  processes instead of twenty-one cold `next dev` starts. The rules also say
+  to measure a `contract run` before declaring a budget and to boot the app
+  once. They now live in `plugin/spec-kit/gate-criteria.md`.
+
+Existing `spec/05-gate.md` files are not rewritten; the new derivation
+applies the next time `/gatekit:gate` runs.
+
 ## 0.12.0 — 2026-10-01
 
 One plugin tree for the Claude desktop app, Codex's plugin system and
