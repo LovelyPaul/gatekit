@@ -35,59 +35,11 @@ send the user to `/gatekit:tasks`.
 When writing `spec/05-gate.md`, fill its YAML frontmatter block (`title`/
 `date`/`status`) at the top along with the rest of the template.
 
-One criterion per acceptance criterion in 01, plus one per task in 04 whose
-completion is not already covered. Each is a ` ```gatekit-criterion ` fence:
-
-```json
-{"id": "task-one-works", "argv": ["python3", "-m", "unittest", "discover", "-k", "task_one"],
- "expect": {"exit": 0}, "timeout_s": 30, "artifacts": []}
-```
-
-Requirements:
-
-- `id` unique, and containing the task id it verifies so traceability holds
-- `argv` a non-empty list of strings, run without a shell — no `&&`, no pipes,
-  no redirection. Chain steps by adding more criteria instead.
-- `timeout_s` realistic. The run-wide budget defaults to 45 seconds; if the
-  criteria together need more, add one `gatekit-budget` fence declaring
-  `total_budget_s` (ceiling 600). Measure first, then declare — never raise a
-  budget to hide a slow test you have not looked at
-- `artifacts` only for files the command genuinely produces. A declared
-  artifact that does not appear is a `fail`, so do not declare aspirational ones.
-- `expect` beyond `exit` when the exit code alone can lie. A test runner that
-  reports skips still exits 0, so pin it: `"expect": {"exit": 0,
-  "stdout_not_contains": ["skipped", "SKIP"]}`. `stdout_contains`,
-  `stdout_regex` and the `stderr_*` forms exist too; every unknown key is a
-  derive error, so spell them exactly.
-
-**The screenshot criterion (ADR-0017 decision 9).** For every task in 04
-whose `write_scope` touched a UI surface, add one more criterion whose
-`argv` runs the project's E2E runner (`npx playwright test` unless
-`spec/03-architecture.md` names a different one already in use) against a
-spec that navigates to the task's screen and saves
-`spec/design/build-<task-id>.png`, and whose `artifacts` names that same
-path:
-
-```json
-{"id": "task-one-screenshot", "argv": ["npx", "playwright", "test", "e2e/screenshot-task-one.spec.ts"],
- "expect": {"exit": 0}, "timeout_s": 30, "artifacts": ["spec/design/build-task-one.png"]}
-```
-
-Write the actual Playwright spec file this `argv` runs — like every other
-criterion it must be runnable here right now, not a guess. If the project
-has no E2E runner at all, that setup is the task's own responsibility; do
-not derive a criterion whose `argv` cannot run yet. **Never substitute an
-MCP browser tool call for the `argv`** — `contract.py` runs criteria with
-`subprocess.run`, and `mcp__*` tools exist only inside an agent session. On
-a host with no browser the `argv` fails to launch and `contract.py` reports
-`unverified`, never a fabricated pass; that is the correct outcome.
-
-Every criterion must be **runnable in this repository right now**. Run each
-one before writing it in — an unexecuted criterion is a guess, and the Stop
-hook will run it for real. Read the output, not only the exit code:
-`node --test <directory>` and `gates/tokens.py <directory>` both "run" and
-both are wrong (the first loads the directory as a module, the second scans
-zero files and exits 3). Use glob patterns (`tests/rules/*.test.js`).
+**Read `${CLAUDE_PLUGIN_ROOT}/spec-kit/gate-criteria.md` and follow it.** It
+covers deriving by runner invocation rather than by task (ADR-0020), the
+fence fields and their requirements, measuring before declaring a budget,
+booting the app once, the single screenshot criterion (ADR-0017 decision
+9), and why every criterion must run here before it is written in.
 
 ## Step 3 — write the "not counted as done" section
 
