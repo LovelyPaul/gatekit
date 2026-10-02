@@ -52,7 +52,8 @@ gatekit/
 │   │   ├── ledger.py      per-session run ledger
 │   │   ├── lang.py        output_lang detection
 │   │   ├── verdict.py     4-state vocabulary + aggregation
-│   │   ├── contract.py    completion contract derive/validate/run
+│   │   ├── contract.py    completion contract derive/validate/run/baseline
+│   │   ├── runcheck.py    "ran no tests" signatures, missing-path extraction, scope ownership (ADR-0022)
 │   │   ├── approval.py    hash-anchored approvals
 │   │   ├── spec.py        spec set validation
 │   │   ├── jobs.py        job runner (job dir, atomic writes, spawn, gates, redelegate)
@@ -63,7 +64,8 @@ gatekit/
 │   │   └── gates/         hook entry points: prompt.py write.py bash.py spawn.py question.py compact.py stop.py
 │   ├── spec-kit/
 │   │   ├── templates/{ko,en}/01-prd.md … 05-gate.md, RECOVERY.md, PROGRESS.md
-│   │   └── heading-map.json             # canonical headings per file per language
+│   │   ├── heading-map.json             # canonical headings per file per language
+│   │   └── no-tests-signatures.json     # per-runner "ran no tests" patterns (ADR-0022)
 │   ├── policy/language.md questioning.md verification.md   # loaded at runtime by commands
 │   └── tests/                           # unittest, run with: cd plugin && python3 -m unittest discover -s tests
 ├── tools/                               # CI gates (stdlib)
@@ -93,6 +95,7 @@ gatekit/
     ├── config.json             # committed. see §9
     ├── approvals.json          # committed. see §7
     ├── contract.json           # derived from 05-gate.md by `gatekit contract derive`
+    ├── baseline.json           # `gatekit contract baseline` at gate time (ADR-0022); never read by the Stop gate
     ├── runs/<session_id>.json  # ignored. ledger (§4)
     ├── runs/hook-errors.log    # ignored
     ├── attempts.json           # committed. per-task consecutive-failure counts + last failure fingerprint (ADR-0014, ADR-0021)
@@ -275,6 +278,29 @@ error and a `spec validate` `fail` — both call `contract.validate_expect`, so
 they cannot disagree. This is how "no test was skipped" becomes a criterion
 (`{"exit": 0, "stdout_not_contains": ["skipped", "SKIP"]}`) instead of prose.
 Timeout or budget exhaustion → `unverified`, never `ok`. Missing artifact → `fail`.
+**Ran no tests → `unverified` (ADR-0022).** A criterion that would be `ok`
+(or, for a signature whose exit list holds it, exits non-zero with `expect.exit`
+0) is `unverified` with `detail = "ran no tests (<id>)"` when
+`runcheck.ran_no_tests(stdout, stderr, exit)` names a signature from
+`plugin/spec-kit/no-tests-signatures.json`: some signature's anchored
+multiline `pattern` matches the full output with the exit code in its
+`exits`, and **no** signature's `positive` pattern (a non-zero count) matches
+anywhere. Exits are `[0]` except pytest and unittest (`[0, 5]`, their
+documented "no tests ran" code). An unreadable signature file means no
+signatures. `jobs.run_gates` applies the same rule to task gates.
+
+`gatekit contract baseline [--json] [--budget S]` (ADR-0022) runs the fresh
+contract once via `execute` (same budget; it never writes
+`runs/contract-last.json`) and classifies each criterion: `already_passes`
+(`ok`), `not_yet_runnable` (a missing path, or a could-not-execute program
+path, that a `spec/04-tasks.md` `write_scope` covers), `command_error`
+(`jobs.classify_gate_result` says so, or a could-not-execute program no task
+writes), `unverified` (timeout, budget, ran no tests) and `fails` (anything
+else). It writes `.gatekit/baseline.json` — `{"version": 1, "recorded_at",
+"source_sha256", "total_budget_s", "elapsed_s", "criteria": [{"id", "class",
+"verdict", "exit", "elapsed_s", "detail"}]}` — prints one line per criterion
+plus the total, and exits 0, or 4 when any criterion is `command_error`, or 1
+when the contract is absent or stale.
 Artifact paths must be relative, must not contain `..`, and after
 `os.path.realpath` must stay inside the project root (symlink escape → `fail`).
 If `source_sha256` no longer matches `05-gate.md`, the run verdict is
@@ -591,8 +617,8 @@ ADR-0009 adds four rules to the runner:
   under its `write_scope` the detail also carries `warn: gate passed before
   any work existed …` and the line is listed in `job.json.preflight_warnings`
   (a gate that passes on an empty tree is the signature of one that always
-  passes). `jobs.classify_gate_result(gate, argv)` sorts every failing gate
-  into three kinds. `command_error` — the job is refused with
+  passes). `jobs.classify_gate_result(gate, argv, root=None, tasks=None)`
+  sorts every failing gate into four kinds (ADR-0022 adds the fourth). `command_error` — the job is refused with
   `GatePreflightError` (CLI exit 4) naming the task and gate before any
   worker runs — only when the exit code is 126 or 127, or a line matching
   `COMMAND_ERROR_PATTERNS` (`Cannot find module`, `can't open file`, `No such
@@ -606,6 +632,23 @@ ADR-0009 adds four rules to the runner:
   other failure, and always for `ok`/`unverified` results. `--dry-run` skips
   preflight. Refusal is reserved for the named-argument and 126/127 cases;
   everything ambiguous starts.
+  **ADR-0022 — `not_yet_runnable`.** After the 126/127 check,
+  `runcheck.missing_paths(text)` extracts paths from `ENOENT: no such file or
+  directory, <op> '<p>'`, `No such file or directory: '<p>'`, `<p>: No such
+  file or directory` and `can't open file '<p>'` (never `No module named`);
+  `runcheck.relativize(raw, root)` strips the root (string and realpath,
+  either slash, case-insensitive drive) or keeps a relative path, and returns
+  `None` outside the root. `runcheck.scope_owner(rel, tasks)` returns the
+  first task whose `write_scope` glob matches under `gates/write.py:matches`.
+  An owned path → `not_yet_runnable`: silent start, and the gate's entry in
+  `preflight.json` gains `"preflight": "not_yet_runnable"` and
+  `"preflight_detail": "needs <path>, which task <id> writes"`. No owner and
+  npm's `Could not read package.json` → `command_error`; no owner and an argv
+  token named → `command_error`; both refusal messages then name the missing
+  path and say no task in this job writes it. Otherwise ADR-0009's rules
+  apply unchanged. `tasks` is the job's task list; without it nothing is owned.
+  A gate whose result is `unverified` for "ran no tests" (§5) is not `ok`, so
+  preflight never skips its task.
 - **Dependency gating.** A task runs only when every `depends_on` id that
   is part of the same job is `passed`; otherwise it stays `queued` with
   `detail = "waiting on <id> (<state>)"` (the state is suffixed `, gates
@@ -776,7 +819,7 @@ task id refused; `--backend` forcing worker mode; a config without
 `build.execution` still spawning; `recheck` passing a task whose gate was
 narrowed, leaving a still-failing one `failed`, reading the current task file
 rather than the job snapshot, naming tasks missing from it, and being
-idempotent; and `_positionals` not mistaking an option's value for a task id. `shape` counting tasks and rounds, sharing a round between independent tasks, flagging a dependency with no evidence in the instruction while sparing one named there or named by id, and reporting the pruned round total; a task warned as verification-shaped when it writes only test paths and its **transitive** dependency reach is two or more, and not warned on one direct dependency, a source path in scope, a `read-only` scope, or a cycle; the finding staying a `warn`. The PreCompact hook: recording every task's state, naming the job, creating PROGRESS.md when absent, leaving human content intact, replacing its own block on a second compaction, writing nothing with no job, surviving a corrupt status file and an unwritable spec dir, exiting 0 as a subprocess, and leaving `spec validate` findings unchanged. ADR-0014: a failure incrementing the attempt ledger and a pass clearing it; `blocked`/`stopped` leaving it alone; `redelegate` and `start` both refusing at the budget with exit 3; `--force-retry` clearing exactly one task; `recheck` not counting while `complete_task` does; a corrupt or missing `attempts.json` reading as empty; the status row and table showing the carried count. ADR-0021: `complete_task` refusing past the budget with exit 3 before running any gate, and still running and counting under it; `record_attempt` storing `last_failure_sha` and `repeats`, incrementing `repeats` on identical output, resetting it to 1 on different output, dropping both with no failing-gate output, a pass clearing and `blocked`/`stopped` leaving them, and a pre-ADR-0021 entry still counting; `normalize_gate_output` replacing timestamps, clock times, durations, hex addresses, the project root and trailing whitespace while "3 failed" and "2 failed" still hash differently; `redelegate`, `complete_task` and `start` refusing on `repeats >= 2` with budget left, `max_retries = 0` disabling every refusal, `--force-retry` clearing the repeat; the status table showing `same failure`. Review probes: a duration never spanning a newline (`expected 3\nmin(x)`, `assert 2 == 3\ns`, `count 3\ns = 4` stay distinct), a unit followed by a hyphen not being a duration (`2 us-east`, `10 ms-heavy`), `(1.2 s)` and a tab before the unit still normalizing, `app.js:12:34:56` not being a clock while `12:34:56` is; 200 identical truncated pytest lines ending `in 1.23s` vs `in 12.34s` hashing the same while 199 vs 200 failures do not, and an uncut tail keeping its first line; eight threads recording distinct tasks all surviving, and a concurrent `clear_attempts` dropping no other task. Host execution: `finished_at` absent right after `start`, stamped by `status()` once the last task turns terminal, not stamped while one is still queued, and stamped once (idempotent on repeated calls). ADR-0015: `codex_hooks_trusted`
+idempotent; and `_positionals` not mistaking an option's value for a task id. `shape` counting tasks and rounds, sharing a round between independent tasks, flagging a dependency with no evidence in the instruction while sparing one named there or named by id, and reporting the pruned round total; a task warned as verification-shaped when it writes only test paths and its **transitive** dependency reach is two or more, and not warned on one direct dependency, a source path in scope, a `read-only` scope, or a cycle; the finding staying a `warn`. The PreCompact hook: recording every task's state, naming the job, creating PROGRESS.md when absent, leaving human content intact, replacing its own block on a second compaction, writing nothing with no job, surviving a corrupt status file and an unwritable spec dir, exiting 0 as a subprocess, and leaving `spec validate` findings unchanged. ADR-0014: a failure incrementing the attempt ledger and a pass clearing it; `blocked`/`stopped` leaving it alone; `redelegate` and `start` both refusing at the budget with exit 3; `--force-retry` clearing exactly one task; `recheck` not counting while `complete_task` does; a corrupt or missing `attempts.json` reading as empty; the status row and table showing the carried count. ADR-0022: the study-gallery repro (npm ENOENT on `package.json`) as `not_yet_runnable` with a silent start and the owner named in `preflight.json` when another job task's scope covers it, and as `command_error` naming the path when none does; a path outside the root never owned; a Windows-style message relativized; 126/127 still `command_error`; `No module named` extracting nothing; each `no-tests-signatures.json` signature turning a would-be `ok` into `unverified` and its negative (a positive count) staying `ok`; mixed output with a positive count staying `ok`; pytest and unittest exit 5 as `unverified`; jest exit 1 staying `fail`; preflight not skipping a zero-test task; the contract runner applying the same rule; `contract baseline` producing every class, writing `baseline.json`, exiting 0/4/1, respecting the budget, and leaving `contract-last.json` untouched. ADR-0021: `complete_task` refusing past the budget with exit 3 before running any gate, and still running and counting under it; `record_attempt` storing `last_failure_sha` and `repeats`, incrementing `repeats` on identical output, resetting it to 1 on different output, dropping both with no failing-gate output, a pass clearing and `blocked`/`stopped` leaving them, and a pre-ADR-0021 entry still counting; `normalize_gate_output` replacing timestamps, clock times, durations, hex addresses, the project root and trailing whitespace while "3 failed" and "2 failed" still hash differently; `redelegate`, `complete_task` and `start` refusing on `repeats >= 2` with budget left, `max_retries = 0` disabling every refusal, `--force-retry` clearing the repeat; the status table showing `same failure`. Review probes: a duration never spanning a newline (`expected 3\nmin(x)`, `assert 2 == 3\ns`, `count 3\ns = 4` stay distinct), a unit followed by a hyphen not being a duration (`2 us-east`, `10 ms-heavy`), `(1.2 s)` and a tab before the unit still normalizing, `app.js:12:34:56` not being a clock while `12:34:56` is; 200 identical truncated pytest lines ending `in 1.23s` vs `in 12.34s` hashing the same while 199 vs 200 failures do not, and an uncut tail keeping its first line; eight threads recording distinct tasks all surviving, and a concurrent `clear_attempts` dropping no other task. Host execution: `finished_at` absent right after `start`, stamped by `status()` once the last task turns terminal, not stamped while one is still queued, and stamped once (idempotent on repeated calls). ADR-0015: `codex_hooks_trusted`
 true for a matching `hooks.state` entry (any event, not only `pre_tool_use`),
 false with no config file, no matching entry, malformed TOML, an empty
 `[hooks.state]` table, or project-level `trust_level` alone with no
@@ -873,6 +916,14 @@ def judge_output(expect: dict, stdout: str, stderr: str) -> list[str]   # unmet 
 def derive(root: pathlib.Path) -> dict                 # writes .gatekit/contract.json, returns it
 def status(root: pathlib.Path) -> str                  # ok (fresh) | fail (stale) | unverified (absent)
 def execute(root: pathlib.Path, total_budget_s: float | None = None, cap_s: float | None = None) -> dict   # {"verdict", "criteria":[...], "reasons":[...], "total_budget_s"}; cap_s lowers the applied budget
+def baseline(root: pathlib.Path, total_budget_s: float | None = None) -> dict   # writes .gatekit/baseline.json (ADR-0022)
+
+# runcheck.py (ADR-0022)
+def ran_no_tests(stdout: str, stderr: str, exit_code) -> str | None   # signature id, or None
+def missing_paths(text: str) -> list[str]              # raw paths named as missing
+def relativize(raw: str, root) -> str | None            # POSIX path relative to root, None outside
+def scope_owner(relpath: str, tasks: list[dict]) -> str | None   # first task whose write_scope covers relpath
+def missing_path_owner(gate: dict, root, tasks) -> dict | None   # {"path", "owner", "launcher"} for the first extracted path
 def run(argv: list[str]) -> int
 
 # spec.py
@@ -884,7 +935,7 @@ def run(argv: list[str]) -> int
 def run(argv: list[str]) -> int                        # start / status / wait / results / complete / recheck / redelegate / stop / evaluate / clean
 def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False, no_preflight=False) -> dict   # raises GatePreflightError (ADR-0009)
 def preflight(root, jdir, tasks: list[dict]) -> dict   # {"passed": [ids], "warnings": [str]}; raises GatePreflightError
-def classify_gate_result(gate: dict, argv=None) -> str  # "command_error" | "suspicious" | "expected" (ADR-0009 decision 1)
+def classify_gate_result(gate: dict, argv=None, root=None, tasks=None) -> str  # "command_error" | "not_yet_runnable" | "suspicious" | "expected" (ADR-0009, ADR-0022)
 def looks_like_command_error(gate: dict, argv=None) -> bool   # classify_gate_result(...) == "command_error"
 def stop(root, job_id: str | None = None) -> dict      # {"job_id", "stopped", "signalled", "skipped"}
 def evaluate(root, backend_name=None, prompt_path=None, timeout_s=None, lang="en", force_read_only_evaluator=False) -> dict   # raises EvaluatorSandboxError (ADR-0015)
