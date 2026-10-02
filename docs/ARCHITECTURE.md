@@ -95,7 +95,7 @@ gatekit/
     ├── contract.json           # derived from 05-gate.md by `gatekit contract derive`
     ├── runs/<session_id>.json  # ignored. ledger (§4)
     ├── runs/hook-errors.log    # ignored
-    ├── attempts.json           # committed. per-task consecutive-failure counts (ADR-0014)
+    ├── attempts.json           # committed. per-task consecutive-failure counts + last failure fingerprint (ADR-0014, ADR-0021)
     └── jobs/<job_id>/          # ignored. see §10
 ```
 
@@ -490,7 +490,8 @@ with the failed gate output appended to the prompt, up to `max_retries`.
 resets to 1 on every `jobs start`, so on gk-trial2 one task failed eight times
 across ten jobs and `max_retries` never fired even once — the counter climbed
 to 3 and restarted three separate times. `.gatekit/attempts.json` now holds
-`{"tasks": {id: {"failures", "last_job", "last_gate", "updated_at"}}}`.
+`{"tasks": {id: {"failures", "last_job", "last_gate", "updated_at"}}}`
+(ADR-0021 adds `last_failure_sha` and `repeats`, below).
 `jobs.record_attempt(root, task_id, state, job_id, gate)` folds one terminal
 outcome in: `passed` resets to 0, `failed`/`timeout` increment, `blocked` and
 `stopped` are untouched (neither is a judgement of the work). `execute_task`
@@ -507,6 +508,34 @@ non-zero, so a task at "attempt 1" in a fresh job that has already failed
 elsewhere does not read as untried. Replaying gk-trial2's actual job history
 through this counter, `start` refuses before the run's third consecutive
 `e2e-full-flow` failure — the real run's other seven attempts never happen.
+
+**ADR-0021 — `jobs complete` is budgeted; an identical failure stops early.**
+`complete_task` checks the budget at entry, before any gate runs: carried
+consecutive failures `> max_retries` (read from `job.json`, as `redelegate`
+does; `<= 0` disables) raise `RetryBudgetExceeded`, CLI exit 3, so host
+execution gets the same three attempts by default that a worker gets (one plus
+two redelegations). `execute_task` and `complete_task` pass the gates result to
+`record_attempt(..., gates=)`, which on a failure also stores
+`last_failure_sha` — sha256 of `json.dumps(sort_keys=True)` over the gates
+whose verdict is not `ok`, sorted by name, each as `name`, `verdict`, `exit`,
+and `stdout`/`stderr` from `normalize_gate_output(tail, root)` — and `repeats`,
+the count of consecutive failures with that fingerprint (1 when it changes).
+No failing gate, no gates result, or no output from any failing gate means no
+fingerprint: both fields are dropped. Entries without them (pre-ADR-0021)
+read as "no fingerprint". `normalize_gate_output` is pure and conservative —
+a false "same" stops a converging task — and replaces only the absolute
+project root (`<root>`), ISO-8601 date-times and `YYYYMMDDTHHMMSSZ` stamps
+(`<time>`), `HH:MM:SS` clock times (`<clock>`), a number directly followed by a
+duration unit `ns|us|µs|ms|s|sec|secs|seconds|min|mins|minutes`
+(`<duration>`), `0x` plus six or more hex digits (`0x<addr>`), and trailing
+whitespace; plain integers are kept, so "3 failed" and "2 failed" differ.
+`redelegate`, `complete_task` and `start` all refuse a task with
+`repeats >= 2` (`SAME_FAILURE_LIMIT`) whatever budget remains, unless
+`max_retries <= 0`, with the same exception and exit 3 and a message saying
+the last failures were identical, to fix the gate (`jobs recheck`) or the
+instruction, and that `--force-retry <id>` clears the entry. `status()` rows
+add `repeated_failures`; the table prints `(n consecutive, same failure)` when
+it is 2 or more.
 
 **ADR-0013 — who implements a task.** `build.execution` is `host` or `worker`
 (`jobs.execution_mode`; an unset or unrecognised value means `host`, and
@@ -739,7 +768,7 @@ task id refused; `--backend` forcing worker mode; a config without
 `build.execution` still spawning; `recheck` passing a task whose gate was
 narrowed, leaving a still-failing one `failed`, reading the current task file
 rather than the job snapshot, naming tasks missing from it, and being
-idempotent; and `_positionals` not mistaking an option's value for a task id. `shape` counting tasks and rounds, sharing a round between independent tasks, flagging a dependency with no evidence in the instruction while sparing one named there or named by id, and reporting the pruned round total; a task warned as verification-shaped when it writes only test paths and its **transitive** dependency reach is two or more, and not warned on one direct dependency, a source path in scope, a `read-only` scope, or a cycle; the finding staying a `warn`. The PreCompact hook: recording every task's state, naming the job, creating PROGRESS.md when absent, leaving human content intact, replacing its own block on a second compaction, writing nothing with no job, surviving a corrupt status file and an unwritable spec dir, exiting 0 as a subprocess, and leaving `spec validate` findings unchanged. ADR-0014: a failure incrementing the attempt ledger and a pass clearing it; `blocked`/`stopped` leaving it alone; `redelegate` and `start` both refusing at the budget with exit 3; `--force-retry` clearing exactly one task; `recheck` not counting while `complete_task` does; a corrupt or missing `attempts.json` reading as empty; the status row and table showing the carried count. Host execution: `finished_at` absent right after `start`, stamped by `status()` once the last task turns terminal, not stamped while one is still queued, and stamped once (idempotent on repeated calls). ADR-0015: `codex_hooks_trusted`
+idempotent; and `_positionals` not mistaking an option's value for a task id. `shape` counting tasks and rounds, sharing a round between independent tasks, flagging a dependency with no evidence in the instruction while sparing one named there or named by id, and reporting the pruned round total; a task warned as verification-shaped when it writes only test paths and its **transitive** dependency reach is two or more, and not warned on one direct dependency, a source path in scope, a `read-only` scope, or a cycle; the finding staying a `warn`. The PreCompact hook: recording every task's state, naming the job, creating PROGRESS.md when absent, leaving human content intact, replacing its own block on a second compaction, writing nothing with no job, surviving a corrupt status file and an unwritable spec dir, exiting 0 as a subprocess, and leaving `spec validate` findings unchanged. ADR-0014: a failure incrementing the attempt ledger and a pass clearing it; `blocked`/`stopped` leaving it alone; `redelegate` and `start` both refusing at the budget with exit 3; `--force-retry` clearing exactly one task; `recheck` not counting while `complete_task` does; a corrupt or missing `attempts.json` reading as empty; the status row and table showing the carried count. ADR-0021: `complete_task` refusing past the budget with exit 3 before running any gate, and still running and counting under it; `record_attempt` storing `last_failure_sha` and `repeats`, incrementing `repeats` on identical output, resetting it to 1 on different output, dropping both with no failing-gate output, a pass clearing and `blocked`/`stopped` leaving them, and a pre-ADR-0021 entry still counting; `normalize_gate_output` replacing timestamps, clock times, durations, hex addresses, the project root and trailing whitespace while "3 failed" and "2 failed" still hash differently; `redelegate`, `complete_task` and `start` refusing on `repeats >= 2` with budget left, `max_retries = 0` disabling every refusal, `--force-retry` clearing the repeat; the status table showing `same failure`. Host execution: `finished_at` absent right after `start`, stamped by `status()` once the last task turns terminal, not stamped while one is still queued, and stamped once (idempotent on repeated calls). ADR-0015: `codex_hooks_trusted`
 true for a matching `hooks.state` entry (any event, not only `pre_tool_use`),
 false with no config file, no matching entry, malformed TOML, an empty
 `[hooks.state]` table, or project-level `trust_level` alone with no
@@ -858,7 +887,10 @@ def execution_mode(cfg: dict) -> str                   # "host" | "worker" (ADR-
 def complete_task(root, task_id: str, job_id: str | None = None) -> dict   # host-implemented task -> gates -> status.json
 def recheck(root, task_ids=None, job_id: str | None = None) -> dict        # {"job_id","rechecked","missing"}; gates only, no worker
 def shape(root, task_ids=None) -> dict                 # {tasks, rounds, waves, serial, unevidenced, rounds_if_pruned} (ADR-0013)
-def record_attempt(root, task_id: str, state: str, job_id="", gate="") -> int   # ADR-0014
+def record_attempt(root, task_id: str, state: str, job_id="", gate="", gates=None) -> int   # ADR-0014; gates -> fingerprint (ADR-0021)
+def normalize_gate_output(text: str, root=None) -> str   # strips volatile tokens only (ADR-0021)
+def failure_fingerprint(gates: dict, root=None) -> str | None   # sha256 of failing gates, None without evidence (ADR-0021)
+def repeated_failures(root, task_id: str) -> int     # consecutive identical failures (ADR-0021)
 def consecutive_failures(root, task_id: str) -> int    # ADR-0014
 def clear_attempts(root, task_id: str) -> None         # --force-retry, ADR-0014
 class GatePreflightError(ValueError)
