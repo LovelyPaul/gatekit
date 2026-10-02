@@ -4,6 +4,42 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.14.0 — 2026-10-03
+
+Gates that cannot run yet stop looking broken, a run of zero tests stops
+counting as a pass, and `/gatekit:gate` sees each criterion's state before
+approval (ADR-0022). Found on a real job where 7 of 10 tasks warned about a
+`package.json` the first task was about to create.
+
+### Changed
+
+- **A missing path that a task will write is not an error.** When a failing
+  gate names a missing path (`ENOENT … open '<path>'`, `No such file or
+  directory`, `can't open file`) and some task in the job has it in its
+  `write_scope`, preflight starts silently and `preflight.json` names that
+  task. npm missing a `package.json` that no task writes is refused with
+  exit 4. A refusal for a missing script names the path and says no task
+  writes it. A script that a task does write is no longer refused.
+- **Zero tests is `unverified`.** A gate or criterion whose runner ran no
+  tests is `unverified` with `ran no tests (<runner>)`, not `ok`. This
+  covers pytest, unittest, jest, vitest, Playwright, `node --test`, mocha,
+  `go test` and `cargo test`. It never applies when the output also reports
+  a positive count. pytest's and unittest's exit 5 ("no tests ran") are
+  `unverified` too. Preflight no longer skips such a task, and the Stop gate
+  no longer counts it. The signatures live in
+  `plugin/spec-kit/no-tests-signatures.json`.
+
+### Added
+
+- **`gatekit contract baseline`.** It runs the criteria once before approval
+  and classifies each as `already_passes`, `not_yet_runnable`, `fails`,
+  `command_error` or `unverified`. Results go to `.gatekit/baseline.json`,
+  and the command exits 4 on a `command_error`. `/gatekit:gate` shows the
+  classes in the approval table and flags criteria that pass before any
+  work. The same run is the budget measurement `gate-criteria.md` asks for,
+  so the gate step still costs one contract run. It never writes the Stop
+  gate's `contract-last.json`.
+
 ## 0.13.1 — 2026-10-03
 
 `jobs complete` is held to the retry budget, and a task that fails the same

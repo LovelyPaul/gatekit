@@ -1,6 +1,6 @@
 # gatekit
 
-Status: 0.13.1 — early. License: MIT.
+Status: 0.14.0 — early. License: MIT.
 
 gatekit is a gate-enforced harness for AI-assisted development in
 [Claude Code](https://claude.com/claude-code). It turns the usual prose
@@ -243,7 +243,7 @@ defaults.
 
 ## Status
 
-**0.13.1 — early.** The core gate/ledger/contract/approval kernel, worker
+**0.14.0 — early.** The core gate/ledger/contract/approval kernel, worker
 dispatch (host or a different-model worker), Codex evaluator support, and
 the CI enforcement tooling are all in place; expect rough edges. See
 `CHANGELOG.md` for what shipped and `docs/decisions/` for the architectural
