@@ -917,14 +917,15 @@ def derive(root: pathlib.Path) -> dict                 # writes .gatekit/contrac
 def status(root: pathlib.Path) -> str                  # ok (fresh) | fail (stale) | unverified (absent)
 def execute(root: pathlib.Path, total_budget_s: float | None = None, cap_s: float | None = None) -> dict   # {"verdict", "criteria":[...], "reasons":[...], "total_budget_s"}; cap_s lowers the applied budget
 def baseline(root: pathlib.Path, total_budget_s: float | None = None) -> dict   # writes .gatekit/baseline.json (ADR-0022)
+def run(argv: list[str]) -> int
 
 # runcheck.py (ADR-0022)
 def ran_no_tests(stdout: str, stderr: str, exit_code) -> str | None   # signature id, or None
 def missing_paths(text: str) -> list[str]              # raw paths named as missing
+def is_missing_manifest(text: str) -> bool             # npm "Could not read package.json"
 def relativize(raw: str, root) -> str | None            # POSIX path relative to root, None outside
 def scope_owner(relpath: str, tasks: list[dict]) -> str | None   # first task whose write_scope covers relpath
-def missing_path_owner(gate: dict, root, tasks) -> dict | None   # {"path", "owner", "launcher"} for the first extracted path
-def run(argv: list[str]) -> int
+def missing_path_owner(gate: dict, root, tasks) -> dict | None   # {"path", "owner", "manifest"}: first owned path, else the first extracted one
 
 # spec.py
 def validate(root: pathlib.Path, lang: str | None = None) -> dict      # {"verdict", "findings":[{"file","verdict","message"}], "lang"}

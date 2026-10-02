@@ -75,10 +75,26 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract derive
 
 `spec validate` must not be `fail` before you continue. `contract derive` writes `.gatekit/contract.json` with the source hash of `05-gate.md`.
 
+Then run every criterion once against the current tree (ADR-0022). Skip this
+only if you already ran it while measuring the budget and changed nothing but
+the `gatekit-budget` fence since:
+
+```
+python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract baseline
+```
+
+It prints one line per criterion: `already_passes`, `not_yet_runnable` (a
+missing path some task writes), `fails`, `command_error` or `unverified`
+(including "ran no tests"), and writes `.gatekit/baseline.json`. Exit 4 means
+a `command_error`: fix that criterion and re-run Step 4 before asking for
+approval. Everything else is information for the user, not a block.
+
 ## Step 5 — show the criteria
 
 Present every criterion to the user in `output_lang`, as a table: id, what it
-proves, the exact command. Then state plainly what approval changes:
+proves, the exact command, and its baseline class. Flag each `already_passes`
+as "passes before any work — confirm it tests new behaviour". Then state
+plainly what approval changes:
 
 > Approving pins the hash of this file. From that point the write gate stops
 > blocking edits outside `spec/`, so source files can be written. The Stop hook

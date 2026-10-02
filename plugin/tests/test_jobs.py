@@ -2755,6 +2755,179 @@ class TestStartSameFailure(JobTestCase):
         self.assertNotIn("same failure", out.getvalue())
 
 
+# --------------- ADR-0022: not yet runnable, and zero tests is not a pass
+
+
+def emitting_gate(stdout: str = "", stderr: str = "", code: int = 0) -> list:
+    """A fake runner: prints the given text and exits with *code*. `{root}`
+    in the text becomes the gate's cwd, which is the project root."""
+    script = ("import os, sys\n"
+              "root = os.getcwd()\n"
+              "sys.stdout.write(%r.replace('{root}', root))\n"
+              "sys.stderr.write(%r.replace('{root}', root))\n"
+              "sys.exit(%d)\n" % (stdout, stderr, code))
+    return [sys.executable, "-c", script]
+
+
+NPM_ENOENT_TEXT = (
+    "npm error code ENOENT\n"
+    "npm error syscall open\n"
+    "npm error path {root}/package.json\n"
+    "npm error errno -2\n"
+    "npm error enoent Could not read package.json: Error: ENOENT: no such file or "
+    "directory, open '{root}/package.json'\n"
+    "npm error enoent This is related to npm not being able to find a file.\n"
+)
+
+
+class TestNotYetRunnable(JobTestCase):
+    """study-gallery job 20260929T140930Z-bb7c: 7 of 10 tasks warned because
+    their e2e gate needed the package.json that `shell-login` creates."""
+
+    def host_config(self) -> None:
+        cfg = {"build": {"execution": "host", "max_retries": 2, "parallel": 1,
+                         "task_timeout_s": 60}}
+        (self.root / ".gatekit" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+
+    def shell_task(self) -> dict:
+        return self.simple_task(task_id="shell-login", target="package.json")
+
+    def e2e_task(self, task_id="gallery") -> dict:
+        return self.simple_task(
+            task_id=task_id, target="src/%s.tsx" % task_id,
+            gates=[{"name": "e2e", "argv": emitting_gate(stderr=NPM_ENOENT_TEXT, code=254)}])
+
+    def test_the_repro_starts_silently_and_names_the_owner(self) -> None:
+        self.host_config()
+        self.write_tasks(self.shell_task(), self.e2e_task("gallery"), self.e2e_task("upload"))
+        job = jobs.start(self.root)
+        self.assertEqual(job["preflight_warnings"], [])
+        pre = json.loads((self.task_dir(job["job_id"], "gallery") / "preflight.json").read_text())
+        gate = pre["gates"][0]
+        self.assertEqual(gate["preflight"], "not_yet_runnable")
+        self.assertIn("package.json", gate["preflight_detail"])
+        self.assertIn("shell-login", gate["preflight_detail"])
+
+    def test_classify_says_not_yet_runnable_when_a_task_writes_the_path(self) -> None:
+        gate = {"verdict": verdict.FAIL, "exit": 254, "stdout_tail": "",
+                "stderr_tail": NPM_ENOENT_TEXT.replace("{root}", str(self.root))}
+        argv = ["npm", "run", "e2e", "--", "e2e/login.spec.ts"]
+        self.assertEqual(jobs.classify_gate_result(gate, argv, root=self.root,
+                                                   tasks=[self.shell_task()]),
+                         "not_yet_runnable")
+        # without task scopes, ADR-0009's rules still apply
+        self.assertEqual(jobs.classify_gate_result(gate, argv), "suspicious")
+
+    def test_an_unowned_manifest_refuses_and_names_the_path(self) -> None:
+        self.host_config()
+        self.write_tasks(self.e2e_task("gallery"))
+        with self.assertRaises(jobs.GatePreflightError) as ctx:
+            jobs.start(self.root)
+        message = str(ctx.exception)
+        self.assertIn("package.json", message)
+        self.assertIn("no task in this job writes it", message)
+
+    def test_cli_exits_four_for_an_unowned_manifest(self) -> None:
+        import contextlib, io
+        self.host_config()
+        self.write_tasks(self.e2e_task("gallery"))
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(jobs.run(["start", "--root", str(self.root)]), 4)
+
+    def test_a_named_script_a_task_will_write_is_not_an_error(self) -> None:
+        """ADR-0009 refused this as a command error; it is the work."""
+        self.host_config()
+        runner = self.simple_task(task_id="runner", target="tests/run_e2e.py")
+        user = self.simple_task(task_id="user", target="src/user.txt",
+                                gates=[{"name": "e2e",
+                                        "argv": [sys.executable, "tests/run_e2e.py"]}])
+        self.write_tasks(runner, user)
+        job = jobs.start(self.root)
+        pre = json.loads((self.task_dir(job["job_id"], "user") / "preflight.json").read_text())
+        self.assertEqual(pre["gates"][0]["preflight"], "not_yet_runnable")
+        self.assertIn("runner", pre["gates"][0]["preflight_detail"])
+
+    def test_a_named_script_nobody_writes_is_still_refused_with_the_path(self) -> None:
+        self.host_config()
+        self.write_tasks(self.simple_task(gates=[{"name": "e2e",
+                                                  "argv": [sys.executable, "tests/run_e2e.py"]}]))
+        with self.assertRaises(jobs.GatePreflightError) as ctx:
+            jobs.start(self.root)
+        self.assertIn("tests/run_e2e.py", str(ctx.exception))
+        self.assertIn("no task in this job writes it", str(ctx.exception))
+
+    def test_an_unowned_fixture_path_still_only_warns(self) -> None:
+        """A test's own FileNotFoundError is expected pre-work failure."""
+        self.host_config()
+        text = "FileNotFoundError: [Errno 2] No such file or directory: 'out/report.csv'\n"
+        self.write_tasks(self.simple_task(gates=[{"name": "t",
+                                                  "argv": emitting_gate(stderr=text, code=1)}]))
+        job = jobs.start(self.root)
+        self.assertEqual(len(job["preflight_warnings"]), 1)
+
+    def test_a_path_outside_the_root_is_never_owned(self) -> None:
+        gate = {"verdict": verdict.FAIL, "exit": 1, "stdout_tail": "",
+                "stderr_tail": "cat: /etc/package.json: No such file or directory"}
+        tasks = [{"id": "x", "write_scope": ["**"]}]
+        self.assertNotEqual(jobs.classify_gate_result(gate, ["cat"], root=self.root, tasks=tasks),
+                            "not_yet_runnable")
+
+    def test_a_windows_style_message_is_relativized(self) -> None:
+        win_root = str(self.root).replace("/", "\\")
+        gate = {"verdict": verdict.FAIL, "exit": 254, "stdout_tail": "",
+                "stderr_tail": "npm error enoent Could not read package.json: Error: ENOENT: "
+                               "no such file or directory, open '%s\\package.json'" % win_root}
+        self.assertEqual(jobs.classify_gate_result(gate, ["npm"], root=self.root,
+                                                   tasks=[self.shell_task()]),
+                         "not_yet_runnable")
+
+    def test_exit_127_stays_a_command_error(self) -> None:
+        gate = {"verdict": verdict.FAIL, "exit": 127, "stdout_tail": "",
+                "stderr_tail": NPM_ENOENT_TEXT.replace("{root}", str(self.root))}
+        self.assertEqual(jobs.classify_gate_result(gate, ["npm"], root=self.root,
+                                                   tasks=[self.shell_task()]),
+                         "command_error")
+
+
+class TestZeroTestsIsNotAPass(JobTestCase):
+    def gate_task(self, argv) -> dict:
+        return self.simple_task(gates=[{"name": "tests", "argv": argv}])
+
+    def run_one(self, argv) -> dict:
+        return jobs.run_gates(self.root, self.gate_task(argv))["gates"][0]
+
+    def test_exit_zero_with_no_tests_is_unverified(self) -> None:
+        gate = self.run_one(emitting_gate(stderr="\nRan 0 tests in 0.000s\n\nOK\n"))
+        self.assertEqual(gate["verdict"], verdict.UNVERIFIED)
+        self.assertTrue(gate["detail"].startswith("ran no tests"), gate["detail"])
+        self.assertIn("unittest", gate["detail"])
+
+    def test_pytest_exit_five_is_unverified_not_fail(self) -> None:
+        gate = self.run_one(emitting_gate(stdout="==== no tests ran in 0.01s ====\n", code=5))
+        self.assertEqual(gate["verdict"], verdict.UNVERIFIED)
+
+    def test_jest_exit_one_with_no_tests_stays_fail(self) -> None:
+        gate = self.run_one(emitting_gate(stdout="No tests found, exiting with code 1\n", code=1))
+        self.assertEqual(gate["verdict"], verdict.FAIL)
+
+    def test_a_positive_count_stays_ok(self) -> None:
+        gate = self.run_one(emitting_gate(
+            stdout="running 3 tests\ntest result: ok. 3 passed\n\nrunning 0 tests\n"))
+        self.assertEqual(gate["verdict"], verdict.OK)
+
+    def test_preflight_does_not_skip_a_zero_test_task(self) -> None:
+        cfg = {"build": {"execution": "host", "max_retries": 2, "parallel": 1,
+                         "task_timeout_s": 60}}
+        (self.root / ".gatekit" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+        (self.root / "src" / "note.txt").write_text("exists", encoding="utf-8")
+        self.write_tasks(self.gate_task(emitting_gate(stdout="  0 passing (1ms)\n")))
+        job = jobs.start(self.root)
+        self.assertNotIn("write-note", job.get("preflight_passed") or [])
+        st = json.loads((self.task_dir(job["job_id"], "write-note") / "status.json").read_text())
+        self.assertNotEqual(st["state"], "passed")
+        self.assertEqual(job["preflight_warnings"], [])
+
+
 class TestHostExecutionFinishesJob(JobTestCase):
     """Host execution's `start()` returns immediately after handing back the
     plan, so nothing calls `_finalise_job`. Found via a real gk-trial2 retrial

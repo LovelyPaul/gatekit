@@ -25,7 +25,7 @@ import threading
 import time
 from typing import Optional
 
-from gatekit import config, paths, spec, verdict, workers
+from gatekit import config, paths, runcheck, spec, verdict, workers
 
 STATES = (
     "queued",
@@ -616,6 +616,13 @@ def run_gates(root, task: dict) -> dict:
             gate_verdict, detail = verdict.UNVERIFIED, "exit %d (unverified)" % GATE_UNVERIFIED_EXIT
         else:
             gate_verdict, detail = verdict.FAIL, "exit %d" % proc.returncode
+        if gate_verdict != verdict.UNVERIFIED:
+            # ADR-0022: a runner that found nothing to run has not judged the
+            # work, whatever its exit code says. Never rounds up to `ok`.
+            empty = runcheck.ran_no_tests(out, err, proc.returncode)
+            if empty:
+                gate_verdict = verdict.UNVERIFIED
+                detail = "ran no tests (%s; exit %d)" % (empty, proc.returncode)
         results.append(
             {
                 "name": name,
@@ -652,8 +659,14 @@ def _argv_tokens(argv) -> list:
     return tokens
 
 
-def classify_gate_result(gate: dict, argv=None) -> str:
-    """ADR-0009 decision 1: `command_error`, `suspicious`, or `expected`.
+def classify_gate_result(gate: dict, argv=None, root=None, tasks=None) -> str:
+    """ADR-0009 decision 1: `command_error`, `suspicious`, or `expected`;
+    ADR-0022 adds `not_yet_runnable`.
+
+    With *root* and *tasks* (the job's tasks), a missing path the output names
+    that some task's `write_scope` covers is `not_yet_runnable`: the gate is
+    fine, the work has not happened yet. An uncovered npm manifest is a
+    `command_error`. Without them the ADR-0009 rules below apply unchanged.
 
     `command_error` — refuse the job — only when the failing gate's exit code
     is one of `COMMAND_ERROR_EXITS`, or a `COMMAND_ERROR_PATTERNS` line also
@@ -669,6 +682,12 @@ def classify_gate_result(gate: dict, argv=None) -> str:
     code = gate.get("exit")
     if isinstance(code, int) and code in COMMAND_ERROR_EXITS:
         return "command_error"
+    if root is not None and tasks is not None:
+        found = runcheck.missing_path_owner(gate, root, tasks)
+        if found and found["owner"]:
+            return "not_yet_runnable"
+        if found and found["manifest"]:
+            return "command_error"
     stdout = gate.get("stdout_tail") or ""
     stderr = gate.get("stderr_tail") or ""
     tokens = _argv_tokens(argv)
@@ -746,17 +765,31 @@ def preflight(root, jdir, tasks: list) -> dict:
             continue
         declared = {str(g.get("name") or "gate-%d" % i): g.get("argv")
                     for i, g in enumerate(task.get("gates") or [])}
+        annotated = False
         for gate in gates:
-            kind = classify_gate_result(gate, declared.get(str(gate.get("name"))))
-            if kind == "command_error":
+            kind = classify_gate_result(gate, declared.get(str(gate.get("name"))),
+                                        root=root, tasks=tasks)
+            found = (runcheck.missing_path_owner(gate, root, tasks)
+                     if kind in ("not_yet_runnable", "command_error") else None)
+            if kind == "not_yet_runnable":
+                # ADR-0022: silent start; the record says why it is fine.
+                gate["preflight"] = "not_yet_runnable"
+                gate["preflight_detail"] = "needs %s, which task %s writes" % (
+                    found["path"], found["owner"])
+                annotated = True
+            elif kind == "command_error":
                 tail = _tail((gate.get("stderr_tail") or gate.get("stdout_tail") or ""), 400)
-                broken.append("task %s gate `%s` (%s): %s" % (
-                    task_id, gate.get("name"), gate.get("detail", ""), tail.strip()))
+                missing = ("needs %s and no task in this job writes it; " % found["path"]
+                           if found and not found["owner"] else "")
+                broken.append("task %s gate `%s` (%s): %s%s" % (
+                    task_id, gate.get("name"), gate.get("detail", ""), missing, tail.strip()))
             elif kind == "suspicious":
                 warnings.append(
                     "%s: gate `%s` failed at preflight (%s) in a way that may be the "
                     "command rather than the work; starting anyway — check it if the "
                     "task fails" % (task_id, gate.get("name"), gate.get("detail", "")))
+        if annotated:
+            write_json(_task_dir(jdir, task_id) / "preflight.json", result)
     if broken:
         raise GatePreflightError(
             "gate preflight refused to start the job — the command itself fails, "

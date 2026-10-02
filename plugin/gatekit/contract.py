@@ -33,7 +33,7 @@ import sys
 import time
 from typing import Any, Dict, List, Optional
 
-from . import approval, config, paths, verdict
+from . import approval, config, paths, runcheck, verdict
 
 VERSION = 1
 
@@ -426,7 +426,13 @@ def _run_one(
 
     expect = crit.get("expect", {}) or {}
     expected_exit = expect.get("exit", 0)
+    # ADR-0022: a runner that ran no tests proved nothing, pass or fail.
+    empty = runcheck.ran_no_tests(completed.stdout, completed.stderr, completed.returncode)
+    no_tests = f"ran no tests ({empty}; exit {completed.returncode})" if empty else ""
     if completed.returncode != expected_exit:
+        if no_tests and expected_exit == 0:
+            result["detail"] = no_tests
+            return result  # stays unverified
         result["verdict"] = verdict.FAIL
         return result
 
@@ -447,6 +453,9 @@ def _run_one(
         )
         return result
 
+    if no_tests:
+        result["detail"] = no_tests
+        return result  # stays unverified
     result["verdict"] = verdict.OK
     return result
 
@@ -517,7 +526,7 @@ def execute(
         if item["verdict"] == verdict.FAIL:
             reasons.append(f"{item['id']}: fail (exit {item['exit']})")
         elif item["verdict"] == verdict.UNVERIFIED:
-            detail = item.get("stderr_tail") or "not verified"
+            detail = item.get("detail") or item.get("stderr_tail") or "not verified"
             reasons.append(f"{item['id']}: unverified ({detail.strip().splitlines()[0][:120]})")
 
     return {
@@ -622,10 +631,106 @@ def reusable_last(root: pathlib.Path) -> Optional[Dict[str, Any]]:
     return last if isinstance(last.get("result"), dict) else None
 
 
+# --------------------------------------------------------------------------
+# Gate-time baseline (ADR-0022)
+# --------------------------------------------------------------------------
+
+BASELINE_NAME = "baseline.json"
+BASELINE_CLASSES = ("already_passes", "not_yet_runnable", "fails", "command_error",
+                    "unverified")
+ALREADY_PASSES_NOTE = "passes before any work — confirm it tests new behaviour"
+
+
+def _baseline_tasks(root: pathlib.Path) -> List[Dict[str, Any]]:
+    """Task fences from spec/04-tasks.md, for their write scopes; [] if none."""
+    try:
+        text = (pathlib.Path(root) / "spec" / "04-tasks.md").read_text(encoding="utf-8")
+        return [t for t in parse_fences(text, "gatekit-task") if isinstance(t, dict)]
+    except (OSError, ValueError):
+        return []
+
+
+def _first_line(text: str) -> str:
+    for line in str(text or "").splitlines():
+        if line.strip():
+            return line.strip()[:160]
+    return ""
+
+
+def _classify_baseline(root, item: Dict[str, Any], argv: List[str],
+                       tasks: List[Dict[str, Any]]) -> "tuple[str, str]":
+    from gatekit import jobs  # lazy: jobs pulls in workers and spec
+
+    found_verdict = item.get("verdict")
+    if found_verdict == verdict.OK:
+        return "already_passes", ALREADY_PASSES_NOTE
+    stderr = item.get("stderr_tail") or ""
+    if found_verdict == verdict.UNVERIFIED:
+        if stderr.startswith("could not execute:"):
+            program = str(argv[0]) if argv else ""
+            rel = (runcheck.relativize(program, root)
+                   if ("/" in program or "\\" in program) else None)
+            owner = runcheck.scope_owner(rel, tasks) if rel else None
+            if owner:
+                return "not_yet_runnable", "needs %s, which task %s writes" % (rel, owner)
+            return "command_error", "cannot execute %s and no task writes it" % (program or "argv")
+        return "unverified", item.get("detail") or _first_line(stderr) or "not verified"
+    gate = {"verdict": verdict.FAIL, "exit": item.get("exit"),
+            "stdout_tail": item.get("stdout_tail") or "", "stderr_tail": stderr}
+    kind = jobs.classify_gate_result(gate, argv, root=root, tasks=tasks)
+    found = runcheck.missing_path_owner(gate, root, tasks)
+    if kind == "not_yet_runnable":
+        return kind, "needs %s, which task %s writes" % (found["path"], found["owner"])
+    if kind == "command_error":
+        if found and not found["owner"]:
+            return kind, "needs %s and no task writes it" % found["path"]
+        return kind, "the command itself fails (exit %s): %s" % (
+            item.get("exit"), _first_line(stderr or item.get("stdout_tail")))
+    note = "exit %s" % item.get("exit")
+    if kind == "suspicious":
+        note += "; may be the command rather than the work"
+    return "fails", note
+
+
+def baseline(root: pathlib.Path, total_budget_s: Optional[float] = None) -> Dict[str, Any]:
+    """Run the fresh contract once and classify each criterion (ADR-0022).
+
+    Writes ``.gatekit/baseline.json`` and returns it. Never touches the Stop
+    gate's ``runs/contract-last.json``. Raises ``ValueError`` when there is no
+    fresh contract to run.
+    """
+    data = load(root)
+    if data is None:
+        raise ValueError("no contract: run `gatekit contract derive` first")
+    if status(root) != verdict.OK:
+        raise ValueError(STALE_REASON)
+    started = time.monotonic()
+    result = execute(root, total_budget_s=total_budget_s)
+    elapsed = round(time.monotonic() - started, 3)
+    argv_by_id = {c.get("id"): c.get("argv") or [] for c in data.get("criteria") or []}
+    tasks = _baseline_tasks(root)
+    rows = []
+    for item in result.get("criteria") or []:
+        cls, detail = _classify_baseline(root, item, argv_by_id.get(item["id"], []), tasks)
+        rows.append({"id": item["id"], "class": cls, "verdict": item.get("verdict"),
+                     "exit": item.get("exit"), "elapsed_s": item.get("elapsed_s"),
+                     "detail": detail})
+    record = {
+        "version": VERSION,
+        "recorded_at": _now(),
+        "source_sha256": data.get("source_sha256"),
+        "total_budget_s": result.get("total_budget_s"),
+        "elapsed_s": elapsed,
+        "criteria": rows,
+    }
+    config.write_json_atomic(paths.state_dir(root) / BASELINE_NAME, record)
+    return record
+
+
 def run(argv: List[str]) -> int:
-    """``gatekit contract derive|status|run [--json]``."""
+    """``gatekit contract derive|status|run|baseline [--json]``."""
     parser = argparse.ArgumentParser(prog="gatekit contract", add_help=True)
-    parser.add_argument("action", choices=["derive", "status", "run"])
+    parser.add_argument("action", choices=["derive", "status", "run", "baseline"])
     parser.add_argument("--root", default=None)
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--budget", type=float, default=None,
@@ -659,6 +764,22 @@ def run(argv: List[str]) -> int:
         else:
             print(result)
         return 0 if result == verdict.OK else 1
+
+    if args.action == "baseline":
+        try:
+            record = baseline(root, total_budget_s=args.budget)
+        except ValueError as err:
+            print(f"gatekit: {err}", file=sys.stderr)
+            return 1
+        if args.as_json:
+            print(json.dumps(record, indent=2, ensure_ascii=False))
+        else:
+            for row in record["criteria"]:
+                print(f"  {row['id']:<24} {row['class']:<17} {row['elapsed_s'] or 0:>7.1f}s  {row['detail']}")
+            print(f"baseline: {len(record['criteria'])} criteria in {record['elapsed_s']:.1f}s "
+                  f"(budget {record['total_budget_s']}s) -> .gatekit/{BASELINE_NAME}")
+        broken = any(r["class"] == "command_error" for r in record["criteria"])
+        return 4 if broken else 0
 
     result = execute(root, total_budget_s=args.budget)
     if result.get("criteria"):

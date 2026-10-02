@@ -698,3 +698,151 @@ class TestStatusOutput(TempProject):
             code = contract.run(["status", "--root", str(self.root)])
         self.assertEqual(code, 1)
         self.assertIn("fail", out.getvalue())
+
+
+# ------------------------- ADR-0022: zero tests, and the gate-time baseline
+
+
+def emitting(stdout: str = "", stderr: str = "", code: int = 0, sleep: float = 0) -> list:
+    """A fake runner. `{root}` in the text becomes the cwd (the project root)."""
+    script = ("import os, sys, time\n"
+              "time.sleep(%r)\n"
+              "root = os.getcwd()\n"
+              "sys.stdout.write(%r.replace('{root}', root))\n"
+              "sys.stderr.write(%r.replace('{root}', root))\n"
+              "sys.exit(%d)\n" % (sleep, stdout, stderr, code))
+    return [PY, "-c", script]
+
+
+NPM_ENOENT = ("npm error code ENOENT\nnpm error enoent Could not read package.json: "
+              "Error: ENOENT: no such file or directory, open '{root}/package.json'\n")
+
+
+class TestRanNoTestsCriterion(TempProject):
+    def test_an_exit_zero_with_no_tests_is_unverified(self) -> None:
+        self.write_gate({"id": "unit", "argv": emitting(stdout="  0 passing (1ms)\n")})
+        contract.derive(self.root)
+        result = contract.execute(self.root)
+        item = result["criteria"][0]
+        self.assertEqual(item["verdict"], "unverified")
+        self.assertIn("ran no tests", item["detail"])
+        self.assertEqual(result["verdict"], "unverified")
+        self.assertIn("ran no tests", result["reasons"][0])
+
+    def test_pytest_exit_five_is_unverified(self) -> None:
+        self.write_gate({"id": "py", "argv": emitting(stdout="== no tests ran in 0.01s ==\n", code=5)})
+        contract.derive(self.root)
+        self.assertEqual(contract.execute(self.root)["criteria"][0]["verdict"], "unverified")
+
+    def test_a_real_count_stays_ok(self) -> None:
+        self.write_gate({"id": "unit", "argv": emitting(stdout="  4 passing (9ms)\n")})
+        contract.derive(self.root)
+        self.assertEqual(contract.execute(self.root)["criteria"][0]["verdict"], "ok")
+
+
+class TestBaseline(TempProject):
+    def write_tasks(self, *tasks: dict) -> None:
+        body = "# Tasks\n\n" + "".join(
+            "```gatekit-task\n%s\n```\n" % json.dumps(t) for t in tasks)
+        (self.root / "spec" / "04-tasks.md").write_text(body, encoding="utf-8")
+
+    def shell_task(self) -> dict:
+        return {"id": "shell-login", "title": "Shell", "write_scope": ["package.json", "bin/**"],
+                "instruction": "x", "gates": [{"name": "g", "argv": ["true"]}],
+                "depends_on": [], "round": 1}
+
+    def classes(self, result: dict) -> dict:
+        return {c["id"]: c["class"] for c in result["criteria"]}
+
+    def run_cli(self, *extra: str) -> "tuple[int, str]":
+        out = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(io.StringIO()):
+            code = contract.run(["baseline", "--root", str(self.root), *extra])
+        return code, out.getvalue()
+
+    def test_every_class(self) -> None:
+        self.write_tasks(self.shell_task())
+        self.write_gate(
+            {"id": "passes", "argv": emitting(stdout="ok\n")},
+            {"id": "fails", "argv": emitting(stdout="1 failed\n", code=1)},
+            {"id": "later", "argv": emitting(stderr=NPM_ENOENT, code=254)},
+            {"id": "later-bin", "argv": ["bin/run-e2e"]},
+            {"id": "no-tests", "argv": emitting(stdout="Ran 0 tests in 0.000s\n\nOK\n")},
+            {"id": "slow", "argv": emitting(sleep=5), "timeout_s": 1},
+        )
+        contract.derive(self.root)
+        result = contract.baseline(self.root)
+        self.assertEqual(self.classes(result), {
+            "passes": "already_passes", "fails": "fails", "later": "not_yet_runnable",
+            "later-bin": "not_yet_runnable", "no-tests": "unverified", "slow": "unverified"})
+        by_id = {c["id"]: c for c in result["criteria"]}
+        self.assertIn("shell-login", by_id["later"]["detail"])
+        self.assertIn("ran no tests", by_id["no-tests"]["detail"])
+
+    def test_command_errors(self) -> None:
+        self.write_tasks({**self.shell_task(), "write_scope": ["src/**"]})
+        self.write_gate(
+            {"id": "manifest", "argv": emitting(stderr=NPM_ENOENT, code=254)},
+            {"id": "missing-bin", "argv": ["no-such-binary-gatekit-xyz"]},
+            {"id": "exit-127", "argv": emitting(stderr="sh: foo: command not found\n", code=127)},
+        )
+        contract.derive(self.root)
+        result = contract.baseline(self.root)
+        self.assertEqual(set(self.classes(result).values()), {"command_error"})
+        manifest = {c["id"]: c for c in result["criteria"]}["manifest"]
+        self.assertIn("package.json", manifest["detail"])
+
+    def test_baseline_json_is_written(self) -> None:
+        self.write_gate({"id": "passes", "argv": emitting(stdout="ok\n")})
+        data = contract.derive(self.root)
+        contract.baseline(self.root)
+        saved = json.loads((self.root / ".gatekit" / "baseline.json").read_text(encoding="utf-8"))
+        self.assertEqual(saved["source_sha256"], data["source_sha256"])
+        self.assertEqual(saved["criteria"][0]["class"], "already_passes")
+        self.assertIn("elapsed_s", saved)
+        self.assertIn("recorded_at", saved)
+
+    def test_cli_exit_codes(self) -> None:
+        self.write_gate({"id": "fails", "argv": emitting(code=1)},
+                        {"id": "passes", "argv": emitting(stdout="ok\n")})
+        contract.derive(self.root)
+        code, out = self.run_cli()
+        self.assertEqual(code, 0)
+        self.assertIn("already_passes", out)
+        self.assertIn("passes before any work", out)
+        self.write_gate({"id": "broken", "argv": ["no-such-binary-gatekit-xyz"]})
+        contract.derive(self.root)
+        self.assertEqual(self.run_cli()[0], 4)
+
+    def test_cli_json(self) -> None:
+        self.write_gate({"id": "passes", "argv": emitting(stdout="ok\n")})
+        contract.derive(self.root)
+        code, out = self.run_cli("--json")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["criteria"][0]["class"], "already_passes")
+
+    def test_no_or_stale_contract_exits_one(self) -> None:
+        self.assertEqual(self.run_cli()[0], 1)
+        self.write_gate({"id": "a", "argv": emitting()})
+        contract.derive(self.root)
+        self.write_gate({"id": "a", "argv": emitting(code=1)})
+        self.assertEqual(self.run_cli()[0], 1)
+        self.assertFalse((self.root / ".gatekit" / "baseline.json").exists())
+
+    def test_the_budget_is_respected(self) -> None:
+        import time
+        self.write_gate({"id": "one", "argv": emitting(sleep=0.6), "timeout_s": 5},
+                        {"id": "two", "argv": emitting(sleep=0.6), "timeout_s": 5})
+        contract.derive(self.root)
+        started = time.monotonic()
+        result = contract.baseline(self.root, total_budget_s=0.3)
+        self.assertLess(time.monotonic() - started, 1.2)
+        self.assertEqual(set(self.classes(result).values()), {"unverified"})
+
+    def test_the_stop_gate_record_is_untouched(self) -> None:
+        self.write_gate({"id": "passes", "argv": emitting(stdout="ok\n")})
+        contract.derive(self.root)
+        contract.baseline(self.root)
+        self.run_cli()
+        self.assertIsNone(contract.load_last(self.root))
+        self.assertIsNone(contract.reusable_last(self.root))

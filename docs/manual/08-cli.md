@@ -67,6 +67,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" spec validate [--root PATH] [--js
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract derive [--root PATH] [--json]
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract status [--root PATH]
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract run [--root PATH] [--json] [--budget SECONDS]
+python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract baseline [--root PATH] [--json] [--budget SECONDS]
 ```
 
 | 동작 | 하는 일 |
@@ -74,14 +75,16 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract run [--root PATH] [--jso
 | `derive` | `05-gate.md`의 펜스를 `.gatekit/contract.json`으로 파생. 소스 해시와 예산을 함께 기록 |
 | `status` | `ok`(최신) / `fail`(stale) / `unverified`(없음) 중 하나를 출력 |
 | `run` | 각 기준을 실행하고 집계 판정을 낸다 |
+| `baseline` | 승인 전에 기준을 한 번 실행해 `already_passes`(작업 전부터 통과) / `not_yet_runnable`(어떤 태스크가 만들 경로가 아직 없음) / `fails` / `command_error` / `unverified`(테스트를 하나도 돌리지 않음 포함)로 분류하고 `.gatekit/baseline.json`에 기록한다. Stop 게이트의 기록은 건드리지 않는다(ADR-0022) |
 
 `--budget`은 계약에 선언된 예산을 덮어쓴다.
 
 | 종료 코드 | 뜻 |
 |---|---|
-| 0 | `derive` 성공, 또는 `status`/`run`이 `ok` |
-| 1 | `derive` 실패, 또는 `status`/`run`이 `ok`가 아님 |
+| 0 | `derive` 성공, `status`/`run`이 `ok`, 또는 `baseline`에 `command_error`가 없음 |
+| 1 | `derive` 실패, `status`/`run`이 `ok`가 아님, 또는 `baseline`할 최신 계약이 없음 |
 | 2 | 인자 오류 |
+| 4 | `baseline`에서 명령 자체가 오류인 기준이 있음 |
 
 ## approve
 
@@ -114,7 +117,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs clean [--all]
 
 `results --compact`는 태스크당 한 줄로 `id state gates_passed/total`을 출력한다. `clean`은 기본적으로 가장 최근 잡을 남기고, `--all`은 전부 지운다. `evaluate`는 `verify.evaluator`(또는 `--backend`)가 가리키는 백엔드를 평가자로 쓴다. Codex 백엔드는 신뢰된 프로젝트 훅이 있으면 `--sandbox workspace-write`로(쓰기 게이트가 실제 보호막), 없으면 정확한 해결 명령과 함께 거부한다 — `--force-read-only-evaluator`는 이 거부 대신 예전처럼 `--sandbox read-only`로 강행한다(ADR-0015). `.gatekit/jobs/<잡>/evaluate/`에 기록하고 응답 꼬리(판정표)를 출력한다. 상태가 `passed`가 아니면 모든 기준이 `unverified`다.
 
-`start`는 워커를 띄우기 전에 태스크마다 게이트를 한 번 먼저 돌린다(ADR-0009). 이미 통과하면 워커 없이 `passed`로 기록하고, 쓰기 범위에 파일이 하나도 없는데 통과했다면 `warn`을 붙인다(항상 통과하는 게이트일 수 있다). 게이트 명령 자체가 오류이면(종료 코드 126·127, 또는 `Cannot find module`·`No such file or directory` 같은 출력이 게이트 인자 중 하나를 직접 가리킬 때) 잡을 시작하지 않고 종료 코드 4로 태스크와 게이트 이름을 알린다. 종료 코드 2 이상이나 인자를 가리키지 않는 비슷한 출력은 의심만 하고 경고를 남긴 채 시작한다. `--no-preflight`는 이 단계를 건너뛴다. 이미 `max_retries`에 도달한 태스크가 있으면 `--force-retry <task_id>`로 그 태스크의 연속 실패 카운터(`.gatekit/attempts.json`)를 초기화하지 않는 한 시작을 거부한다(종료 코드 3, ADR-0014). `redelegate`는 현재 `spec/04-tasks.md`에서 태스크를 다시 읽고, 게이트·지시·쓰기 범위가 바뀌었으면 상태 줄에 `task re-read … (gates changed)`라고 적으며, 같은 카운터를 확인해 소진됐으면 마찬가지로 거부한다. `stop`은 이 잡이 띄운 워커만 종료하고(pid와 시작 시각을 함께 확인한다) 실행 중·대기 중 태스크를 `stopped`로 기록한다.
+`start`는 워커를 띄우기 전에 태스크마다 게이트를 한 번 먼저 돌린다(ADR-0009). 이미 통과하면 워커 없이 `passed`로 기록하고, 쓰기 범위에 파일이 하나도 없는데 통과했다면 `warn`을 붙인다(항상 통과하는 게이트일 수 있다). 게이트 명령 자체가 오류이면(종료 코드 126·127, 또는 `Cannot find module`·`No such file or directory` 같은 출력이 게이트 인자 중 하나를 직접 가리킬 때) 잡을 시작하지 않고 종료 코드 4로 태스크와 게이트 이름을 알린다. 종료 코드 2 이상이나 인자를 가리키지 않는 비슷한 출력은 의심만 하고 경고를 남긴 채 시작한다. 단, 출력이 가리키는 없는 경로(예: `Could not read package.json`)를 같은 잡의 어떤 태스크가 `write_scope`로 만들게 되어 있으면 아직 실행할 수 없을 뿐이므로 경고 없이 시작하고 `preflight.json`에 그 태스크 이름을 남긴다. 아무 태스크도 만들지 않는 `package.json`이 없으면 종료 코드 4로 거부한다(ADR-0022). 테스트를 하나도 돌리지 않고 통과한 게이트(`No tests found`, `Ran 0 tests` 등)는 `unverified`라서 미리 통과로 처리하지 않는다. `--no-preflight`는 이 단계를 건너뛴다. 이미 `max_retries`에 도달한 태스크가 있으면 `--force-retry <task_id>`로 그 태스크의 연속 실패 카운터(`.gatekit/attempts.json`)를 초기화하지 않는 한 시작을 거부한다(종료 코드 3, ADR-0014). `redelegate`는 현재 `spec/04-tasks.md`에서 태스크를 다시 읽고, 게이트·지시·쓰기 범위가 바뀌었으면 상태 줄에 `task re-read … (gates changed)`라고 적으며, 같은 카운터를 확인해 소진됐으면 마찬가지로 거부한다. `stop`은 이 잡이 띄운 워커만 종료하고(pid와 시작 시각을 함께 확인한다) 실행 중·대기 중 태스크를 `stopped`로 기록한다.
 
 태스크 상태는 `queued` / `running` / `gating` / `passed` / `failed` / `timeout` / `redelegated` / `stopped` / `blocked`다. `blocked`는 같은 잡 안의 의존 태스크가 `passed`가 아니어서 실행하지 않은 것이다. `stopped`와 `blocked`는 종료 상태이며 완료가 아니다.
 

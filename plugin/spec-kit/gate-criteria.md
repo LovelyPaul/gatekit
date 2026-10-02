@@ -42,10 +42,11 @@ Requirements:
   no redirection. Chain steps by adding more criteria instead.
 - `timeout_s` realistic. The run-wide budget defaults to 45 seconds; if the
   criteria together need more, add one `gatekit-budget` fence declaring
-  `total_budget_s` (ceiling 600). **Measure first**: run
-  `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract run` once and read
-  each criterion's `elapsed_s`, then declare — never raise a budget to hide a
-  slow test you have not looked at
+  `total_budget_s` (ceiling 600). **Measure first**: after `contract derive`,
+  run `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract baseline --budget 600`
+  once and read each criterion's elapsed time (the same run is the gate
+  command's baseline), then declare — never raise a budget to hide a slow
+  test you have not looked at
 - **Boot the app once, not once per criterion.** Prefer a server that compiles
   once (`next build && next start`, or the runner's `reuseExistingServer`
   against a server you start before the run) over a cold `next dev` in every
