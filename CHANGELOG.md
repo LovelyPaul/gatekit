@@ -4,6 +4,41 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.13.1 — 2026-10-03
+
+`jobs complete` is held to the retry budget, and a task that fails the same
+way twice stops early (ADR-0021).
+
+### Fixed
+
+- **`jobs complete` refuses past `build.max_retries`.** Host execution, the
+  default, counted every failure but never refused one, so a session could
+  fail a task indefinitely inside one job. It now refuses before running any
+  gate, with exit 3 and the same pointer to `spec/RECOVERY.md` and
+  `jobs start --force-retry <id>` that `redelegate` gives.
+- **The `spec/RECOVERY.md` template states the limit the code enforces:**
+  three consecutive failures of one task by default (the first attempt plus
+  `max_retries` retries), not three redelegations.
+- **Parallel tasks no longer lose each other's attempt records.** Workers in
+  one wave wrote `attempts.json` without a lock, so concurrent failures or a
+  pass could overwrite one another. The read-modify-write is now serialised
+  within a process; the cross-process case is an open question in ADR-0021.
+
+### Added
+
+- **Identical failures stop early.** `.gatekit/attempts.json` records a hash
+  of the failing gates' output (`last_failure_sha`) and how many consecutive
+  failures shared it (`repeats`). Timestamps, clock times, durations, hex
+  addresses, the project root and trailing whitespace are ignored; numbers
+  are not, so "3 failed" and "2 failed" differ. Two identical failures in a
+  row make `redelegate`, `complete` and `start` refuse with exit 3 whatever
+  budget is left, pointing at whether the gate or the instruction is wrong.
+  `build.max_retries: 0` still disables every refusal; `--force-retry` still
+  clears the task. `jobs status` shows `(n consecutive, same failure)`.
+
+Existing `attempts.json` files keep working; their entries simply have no
+fingerprint until the next failure.
+
 ## 0.13.0 — 2026-10-01
 
 Verification stops costing minutes per turn (ADR-0020). Found on a real
