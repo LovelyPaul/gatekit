@@ -11,6 +11,7 @@ directory read concurrently never sees a half-written file.
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import os
 import pathlib
@@ -868,7 +869,7 @@ def execute_task(root, jdir, job_id: str, task: dict, backend: dict, timeout_s: 
 
     # ADR-0014: the count follows the task across jobs.
     record_attempt(root, task_id, state, job_id=job_id,
-                   gate=_first_failing_gate(gates))
+                   gate=_first_failing_gate(gates), gates=gates)
     return _set_status(
         jdir,
         task_id,
@@ -1202,6 +1203,16 @@ def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False,
                 max(consecutive_failures(root, t) for t in exhausted),
                 retry_limit)
         )
+    # ADR-0021: two identical consecutive failures stop a task whatever budget
+    # remains — a new job would retry it unchanged.
+    repeated = [
+        str(t.get("id")) for t in tasks
+        if retry_limit > 0
+        and repeated_failures(root, str(t.get("id"))) >= SAME_FAILURE_LIMIT
+    ]
+    if repeated:
+        raise RetryBudgetExceeded(_same_failure_message(
+            repeated, max(repeated_failures(root, t) for t in repeated)))
 
     mode = execution_mode(cfg)
     if backend_name:
@@ -1319,6 +1330,91 @@ def _attempts_path(root):
     return paths.state_dir(root) / ATTEMPTS_FILE
 
 
+# ------------------------------------------- failure fingerprint (ADR-0021)
+
+#: Consecutive identical failures that stop a task whatever budget remains.
+SAME_FAILURE_LIMIT = 2
+
+#: Volatile tokens only. A false "same" stops a task that is converging, which
+#: is worse than a false "different" (one more attempt), so ordinary integers —
+#: "3 failed" vs "2 failed" — are deliberately left alone.
+_VOLATILE_PATTERNS = (
+    (re.compile(r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?"
+                r"(?:Z|[+-]\d{2}:?\d{2})?"), "<time>"),
+    (re.compile(r"\b\d{8}T\d{6}Z?"), "<time>"),
+    (re.compile(r"\b\d{1,2}:\d{2}:\d{2}(?:[.,]\d+)?\b"), "<clock>"),
+    (re.compile(r"(?<![\w.])\d+(?:\.\d+)?\s?"
+                r"(?:ns|us|\u00b5s|ms|seconds|secs|sec|s|minutes|mins|min)\b"),
+     "<duration>"),
+    (re.compile(r"\b0x[0-9a-fA-F]{6,}\b"), "0x<addr>"),
+)
+
+
+def normalize_gate_output(text, root=None) -> str:
+    """Gate output with clearly volatile tokens replaced (ADR-0021).
+
+    Pure. Replaces the absolute project root, ISO-8601 date-times and compact
+    stamps, clock times, durations, long hex addresses, and trailing
+    whitespace — nothing else.
+    """
+    if not text:
+        return ""
+    text = str(text)
+    if root is not None:
+        variants = {str(root), os.path.realpath(str(root))}
+        for variant in sorted(variants, key=len, reverse=True):
+            if len(variant) > 1:
+                text = text.replace(variant, "<root>")
+    for pattern, placeholder in _VOLATILE_PATTERNS:
+        text = pattern.sub(placeholder, text)
+    return "\n".join(line.rstrip() for line in text.splitlines()).rstrip()
+
+
+def failure_fingerprint(gates, root=None) -> Optional[str]:
+    """sha256 over the failing gates of a gates.json payload, or None.
+
+    None means "no evidence of sameness": no gate failed, or no failing gate
+    printed anything. Passing gates are left out; the rest are sorted by name.
+    """
+    rows = []
+    listed = gates.get("gates") if isinstance(gates, dict) else None
+    for gate in listed if isinstance(listed, list) else []:
+        if not isinstance(gate, dict) or gate.get("verdict") == verdict.OK:
+            continue
+        rows.append({
+            "name": str(gate.get("name", "")),
+            "verdict": str(gate.get("verdict", "")),
+            "exit": gate.get("exit") if isinstance(gate.get("exit"), int) else None,
+            "stdout": normalize_gate_output(gate.get("stdout_tail"), root),
+            "stderr": normalize_gate_output(gate.get("stderr_tail"), root),
+        })
+    if not any(r["stdout"] or r["stderr"] for r in rows):
+        return None
+    rows.sort(key=lambda r: (r["name"], json.dumps(r, sort_keys=True)))
+    blob = json.dumps(rows, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+def _same_failure_message(task_ids, repeats: int) -> str:
+    ids = ", ".join(task_ids)
+    return (
+        "task(s) %s: the last %d consecutive failures produced identical gate "
+        "output, so retrying unchanged will not converge. Decide whether the "
+        "gate or the instruction is wrong: fix the gate in spec/04-tasks.md and "
+        "`jobs recheck <task_id>`, or edit the task; see spec/RECOVERY.md. Once "
+        "something has changed, `jobs start --force-retry %s` clears the count."
+        % (ids, repeats, ",".join(task_ids))
+    )
+
+
+def _refuse_same_failure(root, task_id: str, max_retries: int) -> None:
+    if max_retries <= 0:
+        return
+    repeats = repeated_failures(root, task_id)
+    if repeats >= SAME_FAILURE_LIMIT:
+        raise RetryBudgetExceeded(_same_failure_message([str(task_id)], repeats))
+
+
 def read_attempts(root) -> dict:
     """The attempt ledger; an absent or corrupt file reads as empty."""
     data = read_json(_attempts_path(root), None)
@@ -1340,13 +1436,26 @@ def consecutive_failures(root, task_id: str) -> int:
         return 0
 
 
+def repeated_failures(root, task_id: str) -> int:
+    """Consecutive failures with an identical fingerprint (ADR-0021); 0 when
+    the entry has none, including entries written before ADR-0021."""
+    entry = (read_attempts(root).get("tasks") or {}).get(str(task_id))
+    if not isinstance(entry, dict) or not entry.get("last_failure_sha"):
+        return 0
+    try:
+        return int(entry.get("repeats", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def record_attempt(root, task_id: str, state: str, job_id: str = "",
-                   gate: str = "") -> int:
+                   gate: str = "", gates: Optional[dict] = None) -> int:
     """Fold one terminal outcome into the task's count; returns the new total.
 
     A `passed` clears the entry: the run converged, and what matters is whether
     a task is *currently* looping. Anything that is not a judgement of the work
-    leaves the count alone.
+    leaves the count alone. ADR-0021: a failure given its *gates* result also
+    records `last_failure_sha` and `repeats`; without evidence both are dropped.
     """
     task_id = str(task_id)
     data = read_attempts(root)
@@ -1364,6 +1473,20 @@ def record_attempt(root, task_id: str, state: str, job_id: str = "",
             entry["failures"] = 1
         entry["last_job"] = str(job_id)
         entry["last_gate"] = str(gate)
+        sha = failure_fingerprint(gates, root) if gates else None
+        if sha is None:
+            entry.pop("last_failure_sha", None)
+            entry.pop("repeats", None)
+        else:
+            previous = entry.get("repeats", 0)
+            if entry.get("last_failure_sha") == sha:
+                try:
+                    entry["repeats"] = int(previous or 0) + 1
+                except (TypeError, ValueError):
+                    entry["repeats"] = 1
+            else:
+                entry["repeats"] = 1
+            entry["last_failure_sha"] = sha
     else:
         return consecutive_failures(root, task_id)
 
@@ -1531,12 +1654,27 @@ def complete_task(root, task_id: str, job_id: Optional[str] = None) -> dict:
     if not task:
         raise ValueError("task %r has no task.json in job %s" % (task_id, job_id))
 
+    # ADR-0021: a host attempt is refused exactly where a worker's redelegate
+    # is, before any gate runs. Counting without refusing let a host session
+    # fail one task indefinitely inside a single job.
+    max_retries = int(job.get("max_retries", 2) or 0)
+    carried = consecutive_failures(root, task_id)
+    if max_retries > 0 and carried > max_retries:
+        raise RetryBudgetExceeded(
+            "task %r has failed %d consecutive time(s) across jobs "
+            "(max_retries=%d); `jobs complete` will not run it again. Read "
+            "spec/RECOVERY.md and the failing gate's output; once the cause is "
+            "addressed, `jobs start --force-retry %s`."
+            % (task_id, carried, max_retries, task_id)
+        )
+    _refuse_same_failure(root, task_id, max_retries)
+
     gates = run_gates(root, task)
     write_json(_task_dir(jdir, task_id) / "gates.json", gates)
     passed = gates["total"] > 0 and gates["verdict"] == verdict.OK
     # A host attempt is an attempt: it must count exactly as a worker's does.
     record_attempt(root, task_id, "passed" if passed else "failed",
-                   job_id=job_id, gate=_first_failing_gate(gates))
+                   job_id=job_id, gate=_first_failing_gate(gates), gates=gates)
     return _set_status(
         jdir,
         task_id,
@@ -1659,6 +1797,8 @@ def status(root, job_id: Optional[str] = None) -> dict:
                 "state": st.get("state", "queued"),
                 "attempt": st.get("attempt", 1),
                 "consecutive_failures": carried,
+                # ADR-0021: identical consecutive failures, 0 without evidence.
+                "repeated_failures": repeated_failures(root, task_id),
                 "gates_passed": st.get("gates_passed", 0),
                 "gates_total": st.get("gates_total", 0),
                 "detail": st.get("detail", ""),
@@ -1895,6 +2035,7 @@ def redelegate(root, task_id: str, job_id: Optional[str] = None) -> dict:
             "`jobs start --force-retry %s`."
             % (task_id, max(carried, attempt - 1), attempt, max_retries, task_id)
         )
+    _refuse_same_failure(root, task_id, max_retries)
 
     # ADR-0009 decision 2: the operator may have fixed the task since the job
     # started; re-read it from spec/04-tasks.md rather than the snapshot.
@@ -1981,7 +2122,8 @@ def redelegate(root, task_id: str, job_id: Optional[str] = None) -> dict:
 
 
 class RetryBudgetExceeded(Exception):
-    """Raised when `redelegate` is asked to exceed `build.max_retries`."""
+    """Raised when `redelegate`, `start` or `complete_task` would exceed
+    `build.max_retries`, or retry an identical failure (ADR-0021)."""
 
 
 def clean(root, all_jobs: bool = False) -> list:
@@ -2064,7 +2206,9 @@ def _print_table(payload: dict) -> None:
         # can be a task's third loss elsewhere, and that is exactly the case
         # that was invisible before ADR-0014.
         carried = row.get("consecutive_failures", 0)
-        suffix = " (%d consecutive)" % carried if carried > 0 else ""
+        same = row.get("repeated_failures", 0) >= SAME_FAILURE_LIMIT
+        suffix = (" (%d consecutive%s)" % (carried, ", same failure" if same else "")
+                  if carried > 0 else "")
         print("  %-24s %-12s %d/%d  %s%s" % (
             row["id"], row["state"], row["gates_passed"], row["gates_total"],
             row.get("detail", ""), suffix))

@@ -28,9 +28,14 @@ One step at a time, in order. Do not skip ahead.
 
 | Subject | Limit | On exceeding it |
 |---|---|---|
-| Redelegating one task | 3 | Stop and report to a human. Do not attempt a fourth. |
+| Consecutive failures of one task | 3 (the first attempt plus `build.max_retries` retries, default 2) | `jobs redelegate` and `jobs complete` refuse a fourth attempt with exit 3; `jobs start` already refuses a task with 2. Stop and report to a human. |
+| The same failure twice in a row | 2 | Exit 3 even with retries left: identical gate output means retrying unchanged will not converge. Decide whether the gate or the instruction is wrong. |
 | Stop-hook blocks | 3 | Release the block and record `final_verdict`. Never loop forever. |
 | Re-testing the same hypothesis | 1 | If the same hypothesis fails twice, change the hypothesis. |
+
+The counts follow the task across jobs and are kept in `.gatekit/attempts.json`;
+`build.max_retries: 0` turns both task limits off. Once the cause is fixed,
+`jobs start --force-retry <task_id>` clears that task's count.
 
 Hitting a limit means the diagnosis is wrong. The answer is to redefine the
 problem, not to try harder. The report must say what was attempted and why each

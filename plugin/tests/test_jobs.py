@@ -2242,6 +2242,411 @@ class TestStatusShowsCarriedCount(JobTestCase):
         self.assertNotIn("consecutive", out.getvalue())
 
 
+# ------------- ADR-0021: jobs complete is budgeted; an identical failure stops
+
+
+#: A gate that fails with whatever src/msg.txt says, and logs each run to
+#: src/runs.log so a test can tell whether it ran at all.
+MSG_GATE = [sys.executable, "-c",
+            "import pathlib, sys\n"
+            "p = pathlib.Path('src/msg.txt')\n"
+            "with open('src/runs.log', 'a') as h: h.write('run\\n')\n"
+            "sys.stderr.write(p.read_text() if p.exists() else 'no msg')\n"
+            "sys.exit(1)\n"]
+
+
+def gates_result(*gates) -> dict:
+    """A gates.json payload from (name, verdict, exit, stdout, stderr) rows."""
+    rows = [{"name": n, "verdict": v, "exit": e, "detail": "",
+             "stdout_tail": out, "stderr_tail": err}
+            for (n, v, e, out, err) in gates]
+    return {"verdict": verdict.aggregate([r["verdict"] for r in rows]),
+            "passed": sum(1 for r in rows if r["verdict"] == verdict.OK),
+            "total": len(rows), "gates": rows}
+
+
+def failing(stderr: str, name: str = "g") -> dict:
+    return gates_result((name, verdict.FAIL, 1, "", stderr))
+
+
+class TestNormalizeGateOutput(unittest.TestCase):
+    """Only clearly volatile tokens go: a false "same" stops a task that is
+    converging, which is worse than a false "different"."""
+
+    def same(self, a: str, b: str, root=None) -> None:
+        self.assertEqual(jobs.normalize_gate_output(a, root),
+                         jobs.normalize_gate_output(b, root))
+
+    def differ(self, a: str, b: str, root=None) -> None:
+        self.assertNotEqual(jobs.normalize_gate_output(a, root),
+                            jobs.normalize_gate_output(b, root))
+
+    def test_iso_timestamps_are_stripped(self) -> None:
+        self.same("at 2026-10-03T12:34:56.789Z boom", "at 2025-01-01T00:00:00Z boom")
+        self.same("at 2026-10-03 12:34:56+09:00 boom", "at 2026-10-04 01:02:03+00:00 boom")
+
+    def test_compact_stamps_are_stripped(self) -> None:
+        self.same("job 20260917T142402Z-08de", "job 20261003T000000Z-08de")
+
+    def test_clock_times_are_stripped(self) -> None:
+        self.same("[12:01:02] FAIL x", "[23:59:59] FAIL x")
+
+    def test_durations_are_stripped(self) -> None:
+        self.same("Ran 3 tests in 0.002s", "Ran 3 tests in 12.3s")
+        self.same("done (1.2 s)", "done (40 s)")
+        self.same("took 450ms", "took 9ms")
+        self.same("finished in 3.21s", "finished in 0.5 seconds")
+
+    def test_hex_addresses_are_stripped(self) -> None:
+        self.same("<Foo object at 0x7f3a2b1c9d80>", "<Foo object at 0x10a2b3c4d5>")
+
+    def test_the_project_root_is_replaced(self) -> None:
+        out = jobs.normalize_gate_output("File \"/tmp/proj-a/src/x.py\", line 3",
+                                         "/tmp/proj-a")
+        self.assertIn("<root>/src/x.py", out)
+        self.assertNotIn("/tmp/proj-a", out)
+        self.assertEqual(jobs.normalize_gate_output("/tmp/proj-a/src/x.py", "/tmp/proj-a"),
+                         jobs.normalize_gate_output("/tmp/proj-b/src/x.py", "/tmp/proj-b"))
+
+    def test_trailing_whitespace_is_stripped(self) -> None:
+        self.same("FAIL x   \nline 2\t\n\n", "FAIL x\nline 2")
+
+    def test_ordinary_integers_are_kept(self) -> None:
+        self.differ("3 failed, 1 passed", "2 failed, 2 passed")
+        self.differ("AssertionError: 3 != 4", "AssertionError: 3 != 5")
+        self.differ("line 12", "line 13")
+        self.differ("exit 1", "exit 2")
+
+    def test_short_hex_and_bare_numbers_are_kept(self) -> None:
+        self.differ("flags 0x1", "flags 0x2")
+        self.differ("expected 12 items", "expected 13 items")
+
+    def test_it_is_pure_and_tolerates_none(self) -> None:
+        text = "at 2026-10-03T12:34:56Z in 1.5s"
+        self.assertEqual(jobs.normalize_gate_output(text),
+                         jobs.normalize_gate_output(text))
+        self.assertEqual(jobs.normalize_gate_output(None), "")
+
+
+class TestFailureFingerprint(JobTestCase):
+    def entry(self, task_id: str = "t") -> dict:
+        data = jobs.read_json(self.root / ".gatekit" / "attempts.json", {}) or {}
+        return (data.get("tasks") or {}).get(task_id) or {}
+
+    def test_a_failure_stores_a_sha_and_one_repeat(self) -> None:
+        jobs.record_attempt(self.root, "t", "failed", job_id="j1", gate="g",
+                            gates=failing("missing: src/a.txt"))
+        entry = self.entry()
+        self.assertRegex(entry.get("last_failure_sha", ""), r"^[0-9a-f]{64}$")
+        self.assertEqual(entry.get("repeats"), 1)
+
+    def test_an_identical_failure_increments_repeats(self) -> None:
+        for job in ("j1", "j2", "j3"):
+            jobs.record_attempt(self.root, "t", "failed", job_id=job,
+                                gates=failing("missing: src/a.txt"))
+        self.assertEqual(self.entry().get("repeats"), 3)
+        self.assertEqual(jobs.repeated_failures(self.root, "t"), 3)
+
+    def test_volatile_tokens_do_not_break_the_repeat(self) -> None:
+        jobs.record_attempt(self.root, "t", "failed",
+                            gates=failing("FAIL at 12:00:01 in 1.2s"))
+        jobs.record_attempt(self.root, "t", "failed",
+                            gates=failing("FAIL at 12:09:44 in 3.9s"))
+        self.assertEqual(jobs.repeated_failures(self.root, "t"), 2)
+
+    def test_different_output_resets_repeats_to_one(self) -> None:
+        jobs.record_attempt(self.root, "t", "failed", gates=failing("3 failed"))
+        first = self.entry().get("last_failure_sha")
+        jobs.record_attempt(self.root, "t", "failed", gates=failing("2 failed"))
+        entry = self.entry()
+        self.assertEqual(entry.get("repeats"), 1)
+        self.assertNotEqual(entry.get("last_failure_sha"), first)
+        self.assertEqual(entry.get("failures"), 2)
+
+    def test_a_pass_clears_the_fingerprint(self) -> None:
+        jobs.record_attempt(self.root, "t", "failed", gates=failing("boom"))
+        jobs.record_attempt(self.root, "t", "passed",
+                            gates=gates_result(("g", verdict.OK, 0, "", "")))
+        entry = self.entry()
+        self.assertNotIn("last_failure_sha", entry)
+        self.assertEqual(jobs.repeated_failures(self.root, "t"), 0)
+
+    def test_blocked_and_stopped_leave_the_fingerprint_alone(self) -> None:
+        jobs.record_attempt(self.root, "t", "failed", gates=failing("boom"))
+        jobs.record_attempt(self.root, "t", "failed", gates=failing("boom"))
+        before = self.entry()
+        jobs.record_attempt(self.root, "t", "blocked", gates=failing("other"))
+        jobs.record_attempt(self.root, "t", "stopped", gates=failing("other"))
+        self.assertEqual(self.entry(), before)
+
+    def test_an_entry_from_before_adr_0021_still_works(self) -> None:
+        (self.root / ".gatekit" / "attempts.json").write_text(json.dumps(
+            {"version": 1, "tasks": {"t": {"failures": 1, "last_job": "old",
+                                           "last_gate": "g"}}}), encoding="utf-8")
+        self.assertEqual(jobs.repeated_failures(self.root, "t"), 0)
+        jobs.record_attempt(self.root, "t", "failed", gates=failing("boom"))
+        entry = self.entry()
+        self.assertEqual(entry.get("failures"), 2)
+        self.assertEqual(entry.get("repeats"), 1)
+
+    def test_a_call_without_gates_records_no_fingerprint(self) -> None:
+        jobs.record_attempt(self.root, "t", "failed", gates=failing("boom"))
+        jobs.record_attempt(self.root, "t", "failed", job_id="j2", gate="g")
+        entry = self.entry()
+        self.assertEqual(entry.get("failures"), 2)
+        self.assertNotIn("last_failure_sha", entry)
+        self.assertEqual(jobs.repeated_failures(self.root, "t"), 0)
+
+    def test_failing_gates_with_no_output_are_no_evidence(self) -> None:
+        silent = gates_result(("g", verdict.FAIL, 1, "", "  \n"))
+        jobs.record_attempt(self.root, "t", "failed", gates=silent)
+        jobs.record_attempt(self.root, "t", "failed", gates=silent)
+        self.assertIsNone(jobs.failure_fingerprint(silent))
+        self.assertEqual(jobs.repeated_failures(self.root, "t"), 0)
+
+    def test_passing_gates_and_order_do_not_change_the_fingerprint(self) -> None:
+        a = gates_result(("b", verdict.FAIL, 1, "", "x"), ("a", verdict.OK, 0, "t=1.2s", ""),
+                         ("c", verdict.UNVERIFIED, 3, "y", ""))
+        b = gates_result(("c", verdict.UNVERIFIED, 3, "y", ""), ("a", verdict.OK, 0, "other", ""),
+                         ("b", verdict.FAIL, 1, "", "x"))
+        self.assertEqual(jobs.failure_fingerprint(a), jobs.failure_fingerprint(b))
+
+    def test_exit_code_and_verdict_are_part_of_the_fingerprint(self) -> None:
+        one = gates_result(("g", verdict.FAIL, 1, "", "x"))
+        two = gates_result(("g", verdict.FAIL, 2, "", "x"))
+        unv = gates_result(("g", verdict.UNVERIFIED, 1, "", "x"))
+        self.assertEqual(len({jobs.failure_fingerprint(g) for g in (one, two, unv)}), 3)
+
+    def test_the_project_root_does_not_change_the_fingerprint(self) -> None:
+        here = gates_result(("g", verdict.FAIL, 1, "", "%s/src/x.py: boom" % self.root))
+        there = gates_result(("g", verdict.FAIL, 1, "", "/elsewhere/src/x.py: boom"))
+        self.assertEqual(jobs.failure_fingerprint(here, self.root),
+                         jobs.failure_fingerprint(there, "/elsewhere"))
+
+
+class TestCompleteTaskBudget(JobTestCase):
+    """Host execution is the default, and `complete_task` counted every
+    failure without ever refusing one: a session could fail a task forever
+    inside one job."""
+
+    def host_config(self, max_retries=2) -> None:
+        cfg = {"build": {"execution": "host", "max_retries": max_retries,
+                         "parallel": 1, "task_timeout_s": 60}}
+        (self.root / ".gatekit" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+
+    def start(self, max_retries=2) -> str:
+        self.host_config(max_retries)
+        self.write_tasks(self.simple_task(gates=[{"name": "msg", "argv": MSG_GATE}]))
+        return jobs.start(self.root, no_preflight=True)["job_id"]
+
+    def say(self, text: str) -> None:
+        (self.root / "src" / "msg.txt").write_text(text, encoding="utf-8")
+
+    def gate_runs(self) -> int:
+        log = self.root / "src" / "runs.log"
+        return len(log.read_text().splitlines()) if log.is_file() else 0
+
+    def complete(self, job_id: str, text: str) -> dict:
+        self.say(text)
+        return jobs.complete_task(self.root, "write-note", job_id=job_id)
+
+    def test_under_the_budget_it_still_runs_and_counts(self) -> None:
+        job_id = self.start()
+        for n in (1, 2, 3):
+            st = self.complete(job_id, "%d failed" % (4 - n))
+            self.assertEqual(st["state"], "failed")
+        self.assertEqual(jobs.consecutive_failures(self.root, "write-note"), 3)
+        self.assertEqual(self.gate_runs(), 3)
+
+    def test_past_the_budget_it_refuses_without_running_gates(self) -> None:
+        job_id = self.start()
+        for n in (1, 2, 3):
+            self.complete(job_id, "%d failed" % (4 - n))
+        with self.assertRaises(jobs.RetryBudgetExceeded) as ctx:
+            self.complete(job_id, "0 failed")
+        self.assertEqual(self.gate_runs(), 3)
+        message = str(ctx.exception)
+        for needle in ("write-note", "3", "spec/RECOVERY.md", "--force-retry write-note"):
+            self.assertIn(needle, message)
+        self.assertEqual(jobs.consecutive_failures(self.root, "write-note"), 3)
+
+    def test_cli_complete_exits_three_when_refused(self) -> None:
+        import contextlib, io
+        job_id = self.start()
+        for n in (1, 2, 3):
+            self.complete(job_id, "%d failed" % (4 - n))
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            code = jobs.run(["complete", "write-note", "--root", str(self.root)])
+        self.assertEqual(code, 3)
+        self.assertIn("RECOVERY.md", err.getvalue())
+        self.assertEqual(self.gate_runs(), 3)
+
+    def test_identical_failures_stop_before_the_budget(self) -> None:
+        job_id = self.start(max_retries=5)
+        self.complete(job_id, "AssertionError: 3 != 4 (in 1.2s)")
+        self.complete(job_id, "AssertionError: 3 != 4 (in 0.9s)")
+        with self.assertRaises(jobs.RetryBudgetExceeded) as ctx:
+            self.complete(job_id, "AssertionError: 3 != 4")
+        self.assertEqual(self.gate_runs(), 2)
+        message = str(ctx.exception)
+        self.assertIn("identical", message)
+        self.assertIn("jobs recheck", message)
+        self.assertIn("--force-retry write-note", message)
+
+    def test_cli_complete_exits_three_on_identical_failures(self) -> None:
+        import contextlib, io
+        job_id = self.start(max_retries=5)
+        self.complete(job_id, "boom")
+        self.complete(job_id, "boom")
+        with contextlib.redirect_stderr(io.StringIO()):
+            code = jobs.run(["complete", "write-note", "--root", str(self.root)])
+        self.assertEqual(code, 3)
+
+    def test_changing_output_keeps_the_task_going(self) -> None:
+        job_id = self.start(max_retries=5)
+        for n in (5, 4, 3, 2):
+            st = self.complete(job_id, "%d failed" % n)
+            self.assertEqual(st["state"], "failed")
+        self.assertEqual(self.gate_runs(), 4)
+
+    def test_max_retries_zero_disables_both_refusals(self) -> None:
+        job_id = self.start(max_retries=0)
+        for _ in range(5):
+            self.complete(job_id, "boom")
+        self.assertEqual(self.gate_runs(), 5)
+
+    def test_force_retry_clears_the_refusal(self) -> None:
+        job_id = self.start(max_retries=5)
+        self.complete(job_id, "boom")
+        self.complete(job_id, "boom")
+        jobs.clear_attempts(self.root, "write-note")
+        st = self.complete(job_id, "boom")
+        self.assertEqual(st["state"], "failed")
+        self.assertEqual(self.gate_runs(), 3)
+
+    def test_recheck_is_never_refused(self) -> None:
+        job_id = self.start(max_retries=5)
+        self.complete(job_id, "boom")
+        self.complete(job_id, "boom")
+        jobs.recheck(self.root, job_id=job_id)
+        self.assertEqual(self.gate_runs(), 3)
+        self.assertEqual(jobs.consecutive_failures(self.root, "write-note"), 2)
+
+
+class TestRedelegateSameFailure(JobTestCase):
+    def config(self, max_retries: int) -> None:
+        self.write_config()
+        cfg = json.loads((self.root / ".gatekit" / "config.json").read_text())
+        cfg["build"]["max_retries"] = max_retries
+        (self.root / ".gatekit" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+        self.write_tasks(self.simple_task(gates=[{"name": "msg", "argv": MSG_GATE}]))
+
+    def test_identical_failures_refuse_with_budget_left(self) -> None:
+        self.config(max_retries=5)
+        self.set_env(FAKE_WORKER_OUT="src/msg.txt", FAKE_WORKER_BODY="boom")
+        job = jobs.start(self.root, no_preflight=True)
+        jobs.redelegate(self.root, "write-note", job["job_id"])
+        with self.assertRaises(jobs.RetryBudgetExceeded) as ctx:
+            jobs.redelegate(self.root, "write-note", job["job_id"])
+        self.assertIn("identical", str(ctx.exception))
+        self.assertEqual(jobs.consecutive_failures(self.root, "write-note"), 2)
+
+    def test_changing_output_may_be_redelegated(self) -> None:
+        self.config(max_retries=5)
+        self.set_env(FAKE_WORKER_OUT="src/msg.txt", FAKE_WORKER_BODY="3 failed")
+        job = jobs.start(self.root, no_preflight=True)
+        self.set_env(FAKE_WORKER_BODY="2 failed")
+        jobs.redelegate(self.root, "write-note", job["job_id"])
+        self.set_env(FAKE_WORKER_BODY="1 failed")
+        st = jobs.redelegate(self.root, "write-note", job["job_id"])
+        self.assertEqual(st["attempt"], 3)
+
+    def test_max_retries_zero_disables_the_repeat_refusal(self) -> None:
+        self.config(max_retries=0)
+        self.set_env(FAKE_WORKER_OUT="src/msg.txt", FAKE_WORKER_BODY="boom")
+        job = jobs.start(self.root, no_preflight=True)
+        jobs.redelegate(self.root, "write-note", job["job_id"])
+        st = jobs.redelegate(self.root, "write-note", job["job_id"])
+        self.assertEqual(st["attempt"], 3)
+
+    def test_cli_redelegate_exits_three_on_identical_failures(self) -> None:
+        import contextlib, io
+        self.config(max_retries=5)
+        self.set_env(FAKE_WORKER_OUT="src/msg.txt", FAKE_WORKER_BODY="boom")
+        job = jobs.start(self.root, no_preflight=True)
+        jobs.redelegate(self.root, "write-note", job["job_id"])
+        with contextlib.redirect_stderr(io.StringIO()):
+            code = jobs.run(["redelegate", "write-note", "--root", str(self.root)])
+        self.assertEqual(code, 3)
+
+
+class TestStartSameFailure(JobTestCase):
+    def config(self, max_retries: int) -> None:
+        self.write_config()
+        cfg = json.loads((self.root / ".gatekit" / "config.json").read_text())
+        cfg["build"]["max_retries"] = max_retries
+        (self.root / ".gatekit" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+        self.write_tasks(self.simple_task())
+
+    def repeat(self) -> None:
+        for job in ("j1", "j2"):
+            jobs.record_attempt(self.root, "write-note", "failed", job_id=job,
+                                gates=failing("missing: src/note.txt"))
+
+    def test_start_refuses_a_repeated_failure_with_budget_left(self) -> None:
+        self.config(max_retries=5)
+        self.repeat()
+        with self.assertRaises(jobs.RetryBudgetExceeded) as ctx:
+            jobs.start(self.root, dry_run=True)
+        self.assertIn("identical", str(ctx.exception))
+        self.assertIn("write-note", str(ctx.exception))
+
+    def test_start_allows_two_different_failures_with_budget_left(self) -> None:
+        self.config(max_retries=5)
+        jobs.record_attempt(self.root, "write-note", "failed", gates=failing("3 failed"))
+        jobs.record_attempt(self.root, "write-note", "failed", gates=failing("2 failed"))
+        job = jobs.start(self.root, dry_run=True)
+        self.assertIn("write-note", job["tasks"])
+
+    def test_max_retries_zero_lets_start_proceed(self) -> None:
+        self.config(max_retries=0)
+        self.repeat()
+        job = jobs.start(self.root, dry_run=True)
+        self.assertIn("write-note", job["tasks"])
+
+    def test_cli_force_retry_clears_the_repeat(self) -> None:
+        self.config(max_retries=5)
+        self.repeat()
+        self.set_env(FAKE_WORKER_OUT="src/note.txt")
+        code = jobs.run(["start", "--force-retry", "write-note", "--root", str(self.root)])
+        self.assertEqual(code, 0)
+        self.assertEqual(jobs.repeated_failures(self.root, "write-note"), 0)
+
+    def test_status_table_says_same_failure(self) -> None:
+        import contextlib, io
+        self.config(max_retries=0)
+        self.repeat()
+        job = jobs.start(self.root, dry_run=True)
+        row = jobs.status(self.root, job["job_id"])["tasks"][0]
+        self.assertEqual(row["repeated_failures"], 2)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            jobs.run(["status", "--job", job["job_id"], "--root", str(self.root)])
+        self.assertIn("(2 consecutive, same failure)", out.getvalue())
+
+    def test_status_table_omits_it_for_a_single_failure(self) -> None:
+        import contextlib, io
+        self.config(max_retries=5)
+        jobs.record_attempt(self.root, "write-note", "failed", gates=failing("boom"))
+        job = jobs.start(self.root, dry_run=True)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            jobs.run(["status", "--job", job["job_id"], "--root", str(self.root)])
+        self.assertIn("(1 consecutive)", out.getvalue())
+        self.assertNotIn("same failure", out.getvalue())
+
+
 class TestHostExecutionFinishesJob(JobTestCase):
     """Host execution's `start()` returns immediately after handing back the
     plan, so nothing calls `_finalise_job`. Found via a real gk-trial2 retrial
