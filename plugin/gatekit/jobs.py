@@ -1342,9 +1342,12 @@ _VOLATILE_PATTERNS = (
     (re.compile(r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:[.,]\d+)?)?"
                 r"(?:Z|[+-]\d{2}:?\d{2})?"), "<time>"),
     (re.compile(r"\b\d{8}T\d{6}Z?"), "<time>"),
-    (re.compile(r"\b\d{1,2}:\d{2}:\d{2}(?:[.,]\d+)?\b"), "<clock>"),
-    (re.compile(r"(?<![\w.])\d+(?:\.\d+)?\s?"
-                r"(?:ns|us|\u00b5s|ms|seconds|secs|sec|s|minutes|mins|min)\b"),
+    # Not after a word, dot or colon: `app.js:12:34:56` is a location.
+    (re.compile(r"(?<![\w.:])\d{1,2}:\d{2}:\d{2}(?:[.,]\d+)?(?![\w:])"), "<clock>"),
+    # At most one space or tab before the unit — never a newline — and no
+    # word character or hyphen after it (`2 us-east`, `10 ms-heavy`).
+    (re.compile(r"(?<![\w.])\d+(?:\.\d+)?[ \t]?"
+                r"(?:ns|us|\u00b5s|ms|seconds|secs|sec|s|minutes|mins|min)(?![-\w])"),
      "<duration>"),
     (re.compile(r"\b0x[0-9a-fA-F]{6,}\b"), "0x<addr>"),
 )
@@ -1370,6 +1373,17 @@ def normalize_gate_output(text, root=None) -> str:
     return "\n".join(line.rstrip() for line in text.splitlines()).rstrip()
 
 
+def _drop_cut_line(text) -> str:
+    """A tail at the `TAIL_BYTES` cap was cut mid-output, and where the cut
+    lands moves with the length of any volatile token after it. Drop the
+    partial first line so identical failures still compare equal."""
+    text = str(text or "")
+    if len(text) < TAIL_BYTES:
+        return text
+    newline = text.find("\n")
+    return text[newline + 1:] if newline >= 0 else ""
+
+
 def failure_fingerprint(gates, root=None) -> Optional[str]:
     """sha256 over the failing gates of a gates.json payload, or None.
 
@@ -1385,8 +1399,8 @@ def failure_fingerprint(gates, root=None) -> Optional[str]:
             "name": str(gate.get("name", "")),
             "verdict": str(gate.get("verdict", "")),
             "exit": gate.get("exit") if isinstance(gate.get("exit"), int) else None,
-            "stdout": normalize_gate_output(gate.get("stdout_tail"), root),
-            "stderr": normalize_gate_output(gate.get("stderr_tail"), root),
+            "stdout": normalize_gate_output(_drop_cut_line(gate.get("stdout_tail")), root),
+            "stderr": normalize_gate_output(_drop_cut_line(gate.get("stderr_tail")), root),
         })
     if not any(r["stdout"] or r["stderr"] for r in rows):
         return None
@@ -1413,6 +1427,13 @@ def _refuse_same_failure(root, task_id: str, max_retries: int) -> None:
     repeats = repeated_failures(root, task_id)
     if repeats >= SAME_FAILURE_LIMIT:
         raise RetryBudgetExceeded(_same_failure_message([str(task_id)], repeats))
+
+
+#: Serialises every read-modify-write of attempts.json within this process:
+#: `_run_wave` finishes tasks on parallel threads, and an unlocked update
+#: from one thread erased another's entry. Cross-process writers are not
+#: covered (ADR-0021 open questions).
+_ATTEMPTS_LOCK = threading.RLock()
 
 
 def read_attempts(root) -> dict:
@@ -1458,6 +1479,14 @@ def record_attempt(root, task_id: str, state: str, job_id: str = "",
     records `last_failure_sha` and `repeats`; without evidence both are dropped.
     """
     task_id = str(task_id)
+    # Hash outside the lock: it is pure, and the lock should cover I/O only.
+    sha = (failure_fingerprint(gates, root)
+           if gates and state in ATTEMPT_FAILURE_STATES else None)
+    with _ATTEMPTS_LOCK:
+        return _fold_attempt(root, task_id, state, job_id, gate, sha)
+
+
+def _fold_attempt(root, task_id: str, state: str, job_id, gate, sha) -> int:
     data = read_attempts(root)
     tasks = data.setdefault("tasks", {})
     entry = tasks.get(task_id)
@@ -1473,7 +1502,6 @@ def record_attempt(root, task_id: str, state: str, job_id: str = "",
             entry["failures"] = 1
         entry["last_job"] = str(job_id)
         entry["last_gate"] = str(gate)
-        sha = failure_fingerprint(gates, root) if gates else None
         if sha is None:
             entry.pop("last_failure_sha", None)
             entry.pop("repeats", None)
@@ -1500,10 +1528,11 @@ def record_attempt(root, task_id: str, state: str, job_id: str = "",
 def clear_attempts(root, task_id: str) -> None:
     """Forget one task's failures — `--force-retry`, the operator saying they
     changed something. Per task, never global."""
-    data = read_attempts(root)
-    if str(task_id) in (data.get("tasks") or {}):
-        del data["tasks"][str(task_id)]
-        write_json(_attempts_path(root), data)
+    with _ATTEMPTS_LOCK:
+        data = read_attempts(root)
+        if str(task_id) in (data.get("tasks") or {}):
+            del data["tasks"][str(task_id)]
+            write_json(_attempts_path(root), data)
 
 
 def _dependency_evidence(task: dict, dependency: dict) -> bool:

@@ -10,6 +10,8 @@ import os
 import pathlib
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from unittest import mock
 
@@ -2422,6 +2424,112 @@ class TestFailureFingerprint(JobTestCase):
         there = gates_result(("g", verdict.FAIL, 1, "", "/elsewhere/src/x.py: boom"))
         self.assertEqual(jobs.failure_fingerprint(here, self.root),
                          jobs.failure_fingerprint(there, "/elsewhere"))
+
+
+class TestNormalizationProbes(unittest.TestCase):
+    """Review findings on ADR-0021's first cut: each probe below collided (or
+    was eaten) before the fix. A false "same" stops a converging task."""
+
+    def norm(self, text: str) -> str:
+        return jobs.normalize_gate_output(text)
+
+    def test_a_duration_never_spans_a_newline(self) -> None:
+        for a, b in (("expected 3\nmin(x) wrong", "expected 4\nmin(x) wrong"),
+                     ("assert 2 == 3\ns", "assert 2 == 4\ns"),
+                     ("count 3\ns = 4", "count 4\ns = 4")):
+            self.assertNotEqual(self.norm(a), self.norm(b), (a, b))
+
+    def test_a_unit_followed_by_a_hyphen_is_not_a_duration(self) -> None:
+        self.assertNotEqual(self.norm("2 us-east"), self.norm("3 us-east"))
+        self.assertNotEqual(self.norm("10 ms-heavy"), self.norm("20 ms-heavy"))
+        self.assertIn("us-east", self.norm("2 us-east"))
+
+    def test_one_space_or_tab_before_the_unit_still_counts(self) -> None:
+        self.assertEqual(self.norm("done (1.2 s)"), self.norm("done (40 s)"))
+        self.assertEqual(self.norm("took 3\tms"), self.norm("took 9\tms"))
+
+    def test_a_colon_chained_location_is_not_a_clock(self) -> None:
+        self.assertNotEqual(self.norm("at app.js:12:34:56"),
+                            self.norm("at app.js:12:34:57"))
+        self.assertNotEqual(self.norm("src/a.py:1:22:33 boom"),
+                            self.norm("src/a.py:1:22:34 boom"))
+
+    def test_a_plain_clock_time_is_still_normalized(self) -> None:
+        self.assertEqual(self.norm("at 12:34:56 boom"), self.norm("at 01:02:03 boom"))
+        self.assertEqual(self.norm("[12:34:56.789] x"), self.norm("[23:00:00.001] x"))
+
+
+class TestTruncatedTailFingerprint(unittest.TestCase):
+    """gates.json keeps the last TAIL_BYTES of output; a volatile token whose
+    length changes moves the cut point, so the first, partial line differs."""
+
+    @staticmethod
+    def pytest_output(duration: str, failed: int = 200) -> str:
+        lines = "".join("FAILED tests/test_x.py::test_%d - assert 1 == 2\n" % n
+                        for n in range(failed))
+        return lines + "== %d failed in %s ==\n" % (failed, duration)
+
+    def fingerprint(self, out: str):
+        tail = jobs._tail(out)
+        return jobs.failure_fingerprint(
+            gates_result(("pytest", verdict.FAIL, 1, tail, "")))
+
+    def test_the_repro_is_actually_truncated(self) -> None:
+        self.assertGreater(len(self.pytest_output("1.23s")), jobs.TAIL_BYTES)
+
+    def test_identical_failures_with_a_cut_tail_hash_the_same(self) -> None:
+        self.assertEqual(self.fingerprint(self.pytest_output("1.23s")),
+                         self.fingerprint(self.pytest_output("12.34s")))
+
+    def test_a_cut_tail_still_tells_real_changes_apart(self) -> None:
+        self.assertNotEqual(self.fingerprint(self.pytest_output("1.23s", 200)),
+                            self.fingerprint(self.pytest_output("1.23s", 199)))
+
+    def test_an_uncut_tail_keeps_its_first_line(self) -> None:
+        a = gates_result(("g", verdict.FAIL, 1, "first A\nsame\n", ""))
+        b = gates_result(("g", verdict.FAIL, 1, "first B\nsame\n", ""))
+        self.assertNotEqual(jobs.failure_fingerprint(a), jobs.failure_fingerprint(b))
+
+
+class TestAttemptLedgerConcurrency(JobTestCase):
+    """`_run_wave` runs tasks in threads, and each finishes with a
+    read-modify-write of attempts.json. Unlocked, entries were lost."""
+
+    def slow_reads(self):
+        real = jobs.read_attempts
+
+        def slow(root):
+            data = real(root)
+            time.sleep(0.05)   # widen the read-modify-write window
+            return data
+        return mock.patch.object(jobs, "read_attempts", side_effect=slow)
+
+    def test_concurrent_failures_of_distinct_tasks_all_survive(self) -> None:
+        ids = ["t%d" % n for n in range(8)]
+        with self.slow_reads():
+            threads = [threading.Thread(
+                target=jobs.record_attempt, args=(self.root, i, "failed"),
+                kwargs={"gates": failing("boom %s" % i)}) for i in ids]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        self.assertEqual([jobs.consecutive_failures(self.root, i) for i in ids], [1] * 8)
+
+    def test_a_concurrent_clear_does_not_drop_other_tasks(self) -> None:
+        for i in ("a", "b", "c", "d"):
+            jobs.record_attempt(self.root, i, "failed")
+        with self.slow_reads():
+            threads = [threading.Thread(target=jobs.clear_attempts, args=(self.root, "a"))]
+            threads += [threading.Thread(target=jobs.record_attempt,
+                                         args=(self.root, i, "failed"))
+                        for i in ("b", "c", "d")]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+        self.assertEqual([jobs.consecutive_failures(self.root, i) for i in "abcd"],
+                         [0, 2, 2, 2])
 
 
 class TestCompleteTaskBudget(JobTestCase):

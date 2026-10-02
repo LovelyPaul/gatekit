@@ -53,11 +53,25 @@ task that already has 2. The template's "3" reads as three redelegations.
    conservative, because a false "same" stops a task that is making progress
    and a false "different" only costs one more attempt. It replaces only: the
    absolute project root (with `<root>`), ISO-8601 date-times and compact
-   `YYYYMMDDTHHMMSSZ` stamps, `HH:MM:SS` clock times, durations (a number
-   directly followed by `ns`/`us`/`µs`/`ms`/`s`/`sec`/`secs`/`seconds`/
-   `min`/`mins`/`minutes`), hex addresses of six or more digits after `0x`,
-   and trailing whitespace. Ordinary integers stay: "3 failed" and "2 failed"
-   hash differently.
+   `YYYYMMDDTHHMMSSZ` stamps, `HH:MM:SS` clock times not preceded by a word
+   character, dot or colon (so `app.js:12:34:56` stays a location), durations
+   (a number followed, optionally after one space or tab — never a newline —
+   by `ns`/`us`/`µs`/`ms`/`s`/`sec`/`secs`/`seconds`/`min`/`mins`/`minutes`,
+   with no word character or hyphen after the unit, so `2 us-east` stays),
+   hex addresses of six or more digits after `0x`, and trailing whitespace.
+   Ordinary integers stay: "3 failed" and "2 failed" hash differently.
+
+   `gates.json` keeps only the last `TAIL_BYTES` (4000) characters of each
+   stream, and where that cut lands moves with the length of any volatile
+   token after it. A tail at the cap therefore loses everything up to and
+   including its first newline before it is normalized, so two identical
+   long failures still compare equal. (An untruncated stream of exactly
+   4000 characters loses its first line too; that only removes evidence.)
+
+   The read-modify-write of `attempts.json` in `record_attempt` and
+   `clear_attempts` runs under a module-level lock, since `_run_wave`
+   finishes tasks on parallel threads and an unlocked update erased other
+   tasks' entries. The fingerprint is computed before the lock is taken.
 
 3. **The same failure twice stops early.** `redelegate`, `complete_task` and
    `start` also refuse a task whose `repeats >= 2` — its last two consecutive
@@ -106,8 +120,18 @@ refusal and the same-failure refusal; §13 lists the new tests; §14 gains
 
 ## Open questions
 
+- The lock is per process. Two gatekit processes updating `attempts.json`
+  at once (say, a `jobs complete` while a worker-mode `jobs start` drains)
+  can still lose an update. A cross-process lock (`fcntl` on POSIX,
+  `msvcrt` on Windows, around `.gatekit/attempts.json.lock`) is stdlib but
+  could not be tested on Windows here, so it is left for a change that can.
+- A failure with no evidence — every failing gate silent, a worker exit
+  over passing gates, a gate timeout with no output — never fingerprints, so
+  only the consecutive count stops it.
+- `recheck` runs gates without touching the ledger, so it also sidesteps
+  the host budget: a session can recheck a task any number of times.
 - A worker timeout returns from `execute_task` before `record_attempt` runs, so
   it is not counted, although ADR-0014 lists `timeout` as a failure state.
   Left as found; it predates this ADR.
-- Whether `recheck` passing should clear the ledger entry, since it is
-  evidence the code is right.
+- Whether a passing `recheck` should clear the ledger entry, since it is
+  evidence the code is right. Today it does not.
