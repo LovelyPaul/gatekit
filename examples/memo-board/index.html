@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>메모 보드</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <main class="board">
+      <h1>메모 보드 v2</h1>
+      <p data-testid="note-count" class="count"></p>
+      <form class="add" data-testid="add-form">
+        <input
+          data-testid="note-input"
+          type="text"
+          placeholder="메모를 입력하세요"
+          aria-label="메모"
+          autocomplete="off"
+        />
+        <button data-testid="add-note" type="submit">추가</button>
+      </form>
+      <p data-testid="error-state" class="error" hidden>저장된 메모를 읽지 못했습니다</p>
+      <p data-testid="empty-state" class="empty">메모가 없습니다</p>
+      <ul data-testid="note-list" class="list"></ul>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

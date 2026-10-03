@@ -70,6 +70,7 @@ gatekit/
 │   ├── policy/language.md questioning.md verification.md   # loaded at runtime by commands
 │   └── tests/                           # unittest, run with: cd plugin && python3 -m unittest discover -s tests
 ├── tools/                               # CI gates (stdlib)
+├── examples/<name>/                     # complete sample projects (spec/ + the code a real build produced); copied out to run, never imported by plugin/ or tools/
 ├── docs/ARCHITECTURE.md (this), decisions/ADR-*.md
 ├── .github/workflows/ci.yml
 ├── .github/ISSUE_TEMPLATE/{bug_report,feature_request,config}.yml, .github/PULL_REQUEST_TEMPLATE.md
