@@ -4,6 +4,50 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.16.2 — 2026-10-03
+
+Fixes from a review of 0.16.1 (ADR-0026, amended).
+
+### Fixed
+
+- **A CLI evaluator can write its scratch directory.** The evaluator brief
+  sends scratch files to `.gatekit/eval/`, but a CLI evaluator (`jobs
+  evaluate`, e.g. Codex) runs under `GATEKIT_TASK_ID=evaluate` with a
+  read-only scope, so the write gate denied every Write and Bash target
+  there. The write gate now allows `.gatekit/eval/**` inside the project
+  root for the evaluator only. Every other path stays denied for it,
+  including anything outside the root, and other task ids are unchanged.
+  The brief no longer says the write gate allows paths outside the project
+  for every evaluator; that holds only for the `agent` evaluator.
+- **The spec's language is read from its prose.** A Korean PRD whose first
+  lines were mostly an English metric table and a code block read as
+  English. The spec fallback now counts the first 40 prose lines
+  (headings, paragraphs, list items) and skips YAML frontmatter, fenced
+  code, table rows and inline code. An English PRD that names a Korean
+  product is still English.
+- **A resumed session from before 0.16.1 keeps its language.** Its ledger
+  had no `lang_source`, so a language a prompt had set was replaced by the
+  spec's on the next bare prompt. Such a ledger now counts as
+  prompt-set when it is Korean or has seen a prompt.
+- **The `contract=` scope describes a run on this tree.** After edits the
+  suffix described an older run, `ok (turn tier; …)` read as a pass even
+  when that run had failed, and a record without a scope read as having
+  judged nothing. The suffix now appears only for a record on the current
+  contract and tree that lists its scope, and reads `contract=ok (last run:
+  turn tier, 1 deferred to /gatekit:verify)` (Korean `마지막 실행: turn
+  등급만, 1개는 /gatekit:verify 로 미룸`). It names scope, never a verdict.
+- **Doctor's port probe reads only the `webServer` block.** It reported
+  ports in comments and in later blocks such as `use`, and missed
+  `process.env.PORT || 3000`. It now drops comments, reads the `webServer`
+  value up to its balanced closing brace or bracket, and takes the literal
+  fallback after `||` or `??`.
+- **Descriptions match what the commands do.** The build command and skill
+  said build spawns a worker per task; by default this session implements
+  each task and `jobs complete` runs its gates, with workers on request. The
+  discover skill no longer mentions the removed deepening gates. Doctor is
+  described with its eight axes, including the Codex host layer, in
+  QUICKSTART, the CLI manual page, `commands/doctor.md` and the doctor skill.
+
 ## 0.16.1 — 2026-10-03
 
 Fixes from a real rehearsal of 0.16.0: one `/gatekit:build` on a small Korean
