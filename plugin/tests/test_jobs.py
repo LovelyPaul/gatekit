@@ -2824,7 +2824,7 @@ class TestNotYetRunnable(JobTestCase):
         `runneradmin` and the gate was refused as a command error."""
         argv = ["npm", "run", "e2e", "--", "e2e/login.spec.ts"]
         for root in ("C:\\Users\\runneradmin\\AppData\\Local\\Temp\\tmpab12",
-                     "/home/runneradmin/work/e2etest", "/srv/rerun/e2e_suite"):
+                     "/srv/runneradmin/work/e2etest", "/srv/rerun/e2e_suite"):
             gate = {"verdict": verdict.FAIL, "exit": 254, "stdout_tail": "",
                     "stderr_tail": NPM_ENOENT_TEXT.replace("{root}", root)}
             with self.subTest(root=root):

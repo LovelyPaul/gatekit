@@ -99,8 +99,8 @@ override short of `--no-preflight`.*
 *Amended (2026-10-04, windows-latest CI): "names" means the argument appears
 as a whole name — not preceded or followed by a letter, digit, `_` or `-`.
 Plain substring matching let `run` from `npm run e2e` match inside the
-Windows temp root `C:\Users\runneradmin\…`, refusing a gate that only
-needed a task-written `package.json`. `e2e` still names `/proj/e2e/index.js`
+Windows runner's temp root (`…\runneradmin\AppData\Local\Temp\…`),
+refusing a gate that only needed a task-written `package.json`. `e2e` still names `/proj/e2e/index.js`
 and `e2e.sh`; it no longer names `e2etest` or `e2e_suite`. The same rule
 applies to the program name on a `command not found` line.*
 
