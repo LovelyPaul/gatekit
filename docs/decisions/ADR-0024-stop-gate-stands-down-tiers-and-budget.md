@@ -40,8 +40,9 @@ the explicit, always-fresh, full check that `/gatekit:verify` relies on.
 While `active_pipeline == build`, the Stop gate judges only while the latest
 job is unsettled, and once more after it settles: the handoff check. A job is
 **settled** when every task in it is in a terminal state (`passed`, `failed`,
-`timeout`, `redelegated`, `stopped`, `blocked`). A redelegated task goes back
-to `queued`, which unsettles the job again.
+`timeout`, `redelegated`, `stopped`, `blocked`). Redelegating a task archives
+the attempt that ended and puts a new attempt of the same task in its place,
+in `queued`; that new attempt is not terminal, so the job is unsettled again.
 
 - **No job yet** (the build has not started one): judge every Stop, as
   before.
@@ -137,7 +138,8 @@ elapsed since its run began. A criterion it starts in time runs to its own
 `timeout_s`, bounded as before by the contract's budget and the 570 s cap, so
 the budget is a soft bound on starting, not a kill switch. Criteria it never
 started are listed as "deferred: Stop-gate budget". They are not judged and
-do not block. A `fail` among the criteria that ran still blocks. So does an
+do not block. They are not judged either, so the run is not `ok` (see the
+amendment below). A `fail` among the criteria that ran still blocks. So does an
 `unverified` from a criterion that did run: it timed out, ran no tests, or
 its grading files changed. When the contract's own budget runs out first,
 the next criterion is "budget exhausted" `unverified` as before. That is the
@@ -149,9 +151,10 @@ budget.
 
 **Why this does not round `unverified`.** A deferred criterion is not given a
 verdict by the Stop gate at all: not `ok`, not `unverified`, not `fail`. It
-sits outside the run's `criteria` and outside the aggregate, and the report
-lists it by name as still open for `/gatekit:verify`, which must judge it.
-The Stop gate's verdict covers what it ran and says so. An `unverified` the
+sits outside the run's `criteria`, and the report lists it by name. A
+`verify`-tier deferral stays outside the aggregate: that criterion is
+`/gatekit:verify`'s to judge. A budget deferral does not (amendment below):
+a run that left a turn-tier criterion unjudged is `unverified`, never `ok`. An `unverified` the
 gate did produce (a timeout, a run with no tests) stays `unverified` and
 blocks. Before this ADR the same situation, the budget running out, gave
 "budget exhausted before this criterion ran" `unverified`, which blocked a
@@ -159,13 +162,43 @@ turn over a check nobody had started. That was a correct verdict on the
 wrong question. "Has the slow suite passed?" is verify's question, not every
 turn end's.
 
-**Order.** The ADR-0020 order is kept: criteria that were `fail` or
-`unverified` in the last recorded result run first, then the rest in declared
-order. Budget-deferred criteria are not moved forward next time. A slow
-criterion declared early can therefore leave the ones after it deferred at
-every Stop. The fix is to tier it `verify` or declare it last, and the gate
-guidance says so. The Stop gate never judges a criterion it skipped, so
-whatever the order, nothing is rounded.
+**Order.** Criteria the last recorded run deferred for the budget run first
+(amendment below), then the ADR-0020 order: criteria that were `fail` or
+`unverified` in the last recorded result, then the rest in declared order. A
+slow criterion declared early still costs every Stop its run time, so the
+gate guidance says to tier it `verify` or declare it last.
+
+## Amendment (review, 2026-10-03)
+
+A review reproduced holes in the decisions above. The owner approved these
+changes.
+
+1. **A budget-cut run is not `ok`.** As first written, a Stop cut by
+   `stop.budget_s` aggregated only the criteria that ran. With `slow`
+   (passes) then `broken` (exits 1) and a 1 s budget, the handoff check came
+   back `ok`, recorded `stood_down.verdict: ok` and never judged `broken`.
+   Now `execute` returns `unverified` with the reason
+   `deferred_by_stop_budget: <ids>` when everything that ran passed and a
+   criterion was deferred for the budget; a `fail` or `unverified` that ran
+   keeps its own verdict. The Stop gate allows that run (nothing to fix, so
+   no block, and it does not count toward `MAX_BLOCKS`), records
+   `unverified` and does **not** stand down — not under `stop_hook_active`,
+   not after `MAX_BLOCKS`. The next Stop runs the deferred criteria first,
+   and when the tree, contract and no-tests signatures are those of the last
+   record, keeps that record's verdicts for criteria it did not reach. Every
+   Stop judges at least one criterion the tree has not had judged (the first
+   one always starts), so a tree left alone reaches a full turn-tier verdict
+   within as many Stops as there are turn-tier criteria, and only then
+   stands down. An edit starts the count again; each of those Stops is an
+   allow, so it never traps the session. The prompt hook's context line
+   names the unjudged ids while they are on record, and the stood-down line
+   says what was judged: `turn-tier ok` under `build`, plus `N deferred to
+   /gatekit:verify` when the contract has `verify`-tier criteria.
+2. **`scope` is what was judged.** `save_last` recorded the tier selection,
+   budget-deferred ids included, so the verify-pipeline Stop reused a
+   budget-cut build record as a full judgement. `scope` now holds the ids
+   actually judged, and a record with any budget deferral is never reused,
+   by any caller.
 
 ## Consequences
 

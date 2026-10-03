@@ -36,6 +36,7 @@ gatekit을 쓰다 보면 **막히는 일이 자주 생긴다.** 그게 이 도�
 | 워커 안에서 쓰기가 거부됨 | 그 태스크의 `write_scope` 밖 경로 | `04-tasks.md`의 분해가 잘못된 신호다. 태스크를 다시 자른다 |
 | 전체 예산 초과로 `unverified` | 기준 합계가 45초 기본 예산보다 큼 | 실측한 뒤 `gatekit-budget` 펜스로 `total_budget_s` 선언 (상한 600). 측정 없이 올리지 않는다 |
 | 정지 게이트가 반복 차단 | 계약에 `fail`이나 `unverified` 기준이 있음 | 메시지에 나온 기준의 원인을 고친다. 3회 차단 후에는 자동으로 물러나지만 판정은 실패로 기록된다 |
+| 턴 끝마다 계약이 돌고 컨텍스트 줄에 "Stop 예산 소진으로 판정하지 못한 기준" | `stop.budget_s` 안에 turn 등급 기준을 다 시작하지 못함. 판정 안 한 기준이 있으면 `ok`가 아니므로 물러나지 않는다 | 파일을 그대로 두면 다음 턴 끝들이 미룬 기준부터 실행해 수렴한다. 느린 기준은 `"tier": "verify"`로 옮기거나 맨 뒤에 선언한다. 측정한 뒤 `stop.budget_s`를 올려도 된다 |
 | 한국어로 물었는데 영어로 출력됨 | 프롬프트의 한글 비율이 30% 미만이거나 원장에 `en`이 저장됨 | 한국어 문장으로 다시 프롬프트를 보낸다. `lang` 서브커맨드로 감지 결과를 직접 확인할 수 있다 |
 | CLI 실행 시 `ModuleNotFoundError: gatekit` | 모듈 실행 형식을 썼고, 프로젝트 디렉터리에서는 패키지가 `sys.path`에 없음 | 런처 형식 `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" <sub>` 을 쓴다 |
 | spawn이 거부됨 | 프롬프트에 `gatekit-scope` 펜스가 없거나 JSON이 잘못됨 | 펜스를 추가한다. `write_scope`와 `stop_when`은 필수다 |
@@ -72,7 +73,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" ledger show --session <session_id
 - `scopes` — 어떤 에이전트가 어떤 범위를 잡고 있는가
 - `stop.block_count` / `final_verdict` — 몇 번 차단됐고 최종 판정이 무엇인가
 - `stop.stood_down` — Stop 게이트가 끝난 잡의 판정을 기록하고 물러났는가(ADR-0024). 값이 있으면 이후 턴 끝에서는 계약을 실행하지 않는다. `skipped`는 판정 없이 넘긴 턴 끝 수다. 다시 확인하려면 `/gatekit:verify`
-- `stop.deferred` — 마지막 판정에서 미룬 기준(`tier`: verify 등급, `budget`: `stop.budget_s` 소진)
+- `stop.deferred` — 마지막 판정에서 미룬 기준(`tier`: verify 등급, `budget`: `stop.budget_s` 소진). `budget`이 있으면 그 판정은 `unverified`이고 게이트는 물러나지 않는다
 
 ## 잡 상태 직접 보기
 

@@ -733,8 +733,14 @@ class TestStopBudget(Project):
         self.prompt(BUILD_PROMPT)
         self.assertIsNone(self.stop())
         self.assertEqual(self.runs(), ["slow"])
-        self.assertEqual(self.led().data["stop"]["deferred"],
-                         [{"id": "later", "tier": "turn", "reason": "budget"}])
+        data = self.led().data["stop"]
+        self.assertEqual(data["deferred"], [{"id": "later", "tier": "turn", "reason": "budget"}])
+        # Not judged is not ok: recorded `unverified`, naming the deferred id,
+        # without spending a block.
+        self.assertEqual(data["final_verdict"], verdict.UNVERIFIED)
+        self.assertIn("later", " ".join(data["last_reasons"]))
+        self.assertEqual(data["block_count"], 0)
+        self.assertIsNone(data["stood_down"])
 
     def test_a_fail_before_the_budget_still_blocks(self) -> None:
         self.write_config({"stop": {"budget_s": 0.5}})
@@ -803,7 +809,151 @@ class TestStopBudget(Project):
         result = contract.execute(self.root, start_budget_s=0.3)
         self.assertEqual([c["id"] for c in result["criteria"]], ["slow"])
         self.assertEqual(result["deferred"], [{"id": "later", "tier": "turn", "reason": "budget"}])
-        self.assertEqual(result["verdict"], verdict.OK)
+        # What ran passed, but `later` was never judged: not ok.
+        self.assertEqual(result["verdict"], verdict.UNVERIFIED)
+        self.assertEqual(result["scope"], ["slow"])  # the ids actually judged
+        self.assertIn(contract.BUDGET_DEFERRED_REASON + ": later", result["reasons"])
+
+    def test_a_budget_fail_keeps_its_fail(self) -> None:
+        self.write_contract(counting("bad", exit_code=1), sleeping("slow", 0.6),
+                            counting("later"), budget=60)
+        result = contract.execute(self.root, start_budget_s=0.3)
+        self.assertEqual(result["verdict"], verdict.FAIL)
+
+
+class TestBudgetDeferralIsNotOk(Project):
+    """Review of ADR-0024: a Stop cut by its budget has not judged the
+    contract, so it is never `ok` and never stands the gate down."""
+
+    def handoff(self, *criteria: dict) -> None:
+        self.write_config({"stop": {"budget_s": 0.5}})
+        self.write_contract(*criteria, budget=60)
+        self.prompt(BUILD_PROMPT)
+        self.make_job({"t1": "passed", "t2": "passed"})
+
+    def test_settled_handoff_cut_by_the_budget_does_not_stand_down(self) -> None:
+        self.handoff(sleeping("slow", 1.0), counting("broken", exit_code=1))
+        self.assertIsNone(self.stop())  # deferral does not block
+        data = self.led().data["stop"]
+        self.assertEqual(data["final_verdict"], verdict.UNVERIFIED)
+        self.assertIsNone(data["stood_down"])
+        self.assertEqual(data["block_count"], 0)
+        self.assertEqual(self.events("stop_stood_down"), [])
+        # Same tree: the deferred criterion runs first next time, and blocks.
+        result = self.stop()
+        self.assertEqual(result["decision"], "block")
+        self.assertIn("broken: fail", result["reason"])
+        self.assertEqual(self.runs()[:2], ["slow", "broken"])
+        self.assertIsNone(self.led().data["stop"]["stood_down"])
+
+    def test_deferred_first_converges_then_stands_down(self) -> None:
+        self.handoff(sleeping("a", 0.6), sleeping("b", 0.6), sleeping("c", 0.6))
+        self.assertIsNone(self.stop())
+        self.assertEqual(self.runs(), ["a"])
+        self.assertIsNone(self.led().data["stop"]["stood_down"])
+        self.assertIsNone(self.stop())
+        self.assertEqual(self.runs(), ["a", "b"])  # b before anything else
+        self.assertIsNone(self.led().data["stop"]["stood_down"])
+        self.assertIsNone(self.stop())
+        self.assertEqual(self.runs(), ["a", "b", "c"])
+        data = self.led().data["stop"]
+        # Every turn-tier criterion was judged on this tree: a real `ok`.
+        self.assertEqual(data["final_verdict"], verdict.OK)
+        self.assertEqual(data["stood_down"]["verdict"], verdict.OK)
+        self.assertEqual(data["block_count"], 0)
+        self.assertIsNone(self.stop())
+        self.assertEqual(self.runs(), ["a", "b", "c"])
+
+    def test_an_edit_drops_what_an_earlier_tree_judged(self) -> None:
+        self.handoff(sleeping("a", 0.6), sleeping("b", 0.6))
+        self.stop()
+        self.touch_source()
+        self.assertIsNone(self.stop())  # b runs first, a is deferred now
+        self.assertEqual(self.runs(), ["a", "b"])
+        data = self.led().data["stop"]
+        self.assertEqual(data["final_verdict"], verdict.UNVERIFIED)
+        self.assertIsNone(data["stood_down"])
+        self.assertEqual(data["deferred"], [{"id": "a", "tier": "turn", "reason": "budget"}])
+
+    def test_stop_hook_active_cut_by_the_budget_does_not_stand_down(self) -> None:
+        self.handoff(sleeping("slow", 1.0), counting("later"))
+        self.assertIsNone(self.stop(stop_hook_active=True))
+        self.assertIsNone(self.led().data["stop"]["stood_down"])
+
+    def test_out_of_blocks_cut_by_the_budget_still_does_not_stand_down(self) -> None:
+        self.handoff(sleeping("slow", 1.0), counting("later"))
+        led = self.led()
+        led.data["stop"]["block_count"] = stop_gate.MAX_BLOCKS
+        led.save()
+        self.assertIsNone(self.stop())
+        data = self.led().data["stop"]
+        self.assertIsNone(data["stood_down"])
+        self.assertEqual(data["final_verdict"], verdict.UNVERIFIED)
+
+    def test_budget_cut_record_is_not_reused_by_the_verify_stop(self) -> None:
+        self.handoff(sleeping("slow", 1.0), counting("broken", exit_code=1))
+        self.stop()
+        self.prompt(VERIFY_PROMPT)
+        result = self.stop()  # no file changed
+        self.assertEqual(result["decision"], "block")
+        self.assertIn("broken: fail", result["reason"])
+        # Both judged again; the one the budget deferred goes first.
+        self.assertEqual(self.runs(), ["slow", "broken", "slow"])
+        self.assertEqual(self.events("stop_reused"), [])
+
+    def test_budget_cut_record_is_never_reusable(self) -> None:
+        self.write_contract(sleeping("slow", 0.6), counting("later"), budget=60)
+        contract.save_last(self.root, contract.execute(self.root, start_budget_s=0.3))
+        self.assertEqual(contract.load_last(self.root)["scope"], ["slow"])
+        self.assertIsNone(contract.reusable_last(self.root))
+        self.assertIsNone(contract.reusable_last(self.root, tiers=("turn",)))
+
+    def test_context_line_names_the_budget_deferred(self) -> None:
+        self.handoff(sleeping("slow", 1.0), counting("later"))
+        self.stop()
+        text = prompt_gate.build_context(self.root, self.led())
+        self.assertIn("later", text)
+        self.assertIn("budget", text)
+        self.assertNotIn("not gated", text)
+
+    def test_korean_context_line_names_the_budget_deferred(self) -> None:
+        self.handoff(sleeping("slow", 1.0), counting("later"))
+        self.set_lang("ko")
+        self.stop()
+        text = prompt_gate.build_context(self.root, self.led())
+        self.assertIn("later", text)
+        self.assertIn("예산", text)
+
+
+class TestStoodDownLineNamesTheTier(Project):
+    def test_turn_tier_and_verify_count(self) -> None:
+        self.write_contract(counting("fast"), counting("s1", tier="verify"),
+                            counting("s2", tier="verify"))
+        self.prompt(BUILD_PROMPT)
+        self.make_job({"t1": "passed"})
+        self.stop()
+        text = prompt_gate.build_context(self.root, self.led())
+        self.assertIn("turn-tier ok", text)
+        self.assertIn("2 deferred to /gatekit:verify", text)
+
+    def test_no_verify_tier_no_count(self) -> None:
+        self.write_contract(counting("fast"))
+        self.prompt(BUILD_PROMPT)
+        self.make_job({"t1": "passed"})
+        self.stop()
+        text = prompt_gate.build_context(self.root, self.led())
+        self.assertIn("turn-tier ok", text)
+        self.assertNotIn("deferred to", text)
+
+    def test_korean(self) -> None:
+        self.write_contract(counting("fast"), counting("s1", tier="verify"))
+        self.prompt(BUILD_PROMPT)
+        self.set_lang("ko")
+        self.make_job({"t1": "passed"})
+        self.stop()
+        text = prompt_gate.build_context(self.root, self.led())
+        self.assertIn("turn", text)
+        self.assertIn("1개", text)
 
 
 if __name__ == "__main__":  # pragma: no cover

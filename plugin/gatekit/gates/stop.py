@@ -28,7 +28,11 @@ ADR-0024 bounds what the gate judges:
 * **Tiers.** Under ``build`` only ``turn`` criteria run; ``verify`` ones are
   deferred to ``/gatekit:verify``, never judged, never ``ok``.
 * **Budget.** Under ``build`` no criterion starts once ``stop.budget_s`` is
-  spent; those are deferred too. What did run is judged as before.
+  spent; those are deferred too. What did run is judged as before. A run
+  with a budget deferral is never ``ok``: when what ran passed, the Stop is
+  allowed (no block spent), ``unverified`` is recorded and the gate does not
+  stand down. The next Stop runs the deferred ones first and keeps what the
+  same tree already judged, so it converges.
 """
 from __future__ import annotations
 
@@ -87,8 +91,15 @@ _MESSAGES = {
             "does not block; /gatekit:verify runs them: {ids}"
         ),
         "stood_down": (
-            "stop gate stood down ({subject} verdict {verdict} recorded): follow-up "
-            "edits are not gated; /gatekit:verify re-checks the contract"
+            "stop gate stood down ({subject} {scope} {verdict} recorded{extra}): "
+            "follow-up edits are not gated; /gatekit:verify re-checks the contract"
+        ),
+        "stood_down_tier": "turn-tier",
+        "stood_down_all": "contract",
+        "stood_down_extra": ", {count} deferred to /gatekit:verify",
+        "budget_pending": (
+            "stop gate: Stop-gate budget left criteria unjudged (unverified, not ok): "
+            "{ids} — the next turn end runs them first"
         ),
         "stale": (
             "gatekit: .gatekit/contract.json no longer matches spec/05-gate.md, so "
@@ -127,8 +138,15 @@ _MESSAGES = {
             "차단 사유가 아님, /gatekit:verify 가 실행: {ids}"
         ),
         "stood_down": (
-            "stop 게이트 해제({subject} 판정 {verdict} 기록됨): 이후 수정은 게이트를 "
-            "거치지 않음, 계약 재확인은 /gatekit:verify"
+            "stop 게이트 해제({subject} {scope} 판정 {verdict} 기록됨{extra}): 이후 "
+            "수정은 게이트를 거치지 않음, 계약 재확인은 /gatekit:verify"
+        ),
+        "stood_down_tier": "turn 등급",
+        "stood_down_all": "계약",
+        "stood_down_extra": ", {count}개는 /gatekit:verify 로 미룸",
+        "budget_pending": (
+            "stop 게이트: Stop 예산 소진으로 판정하지 못한 기준(미검증, ok 아님): "
+            "{ids} — 다음 턴 끝에 먼저 실행"
         ),
         "stale": (
             "gatekit: .gatekit/contract.json 이 spec/05-gate.md 와 더 이상 일치하지 "
@@ -200,12 +218,31 @@ def stand_down_applies(root, led: "ledger.Ledger") -> Optional[Dict[str, Any]]:
 
 
 def stand_down_line(root, led: "ledger.Ledger") -> str:
-    """The prompt hook's context line while a stand-down applies, else ""."""
+    """The prompt hook's context line about the Stop gate, else "".
+
+    While a stand-down applies it names what was judged (the turn tier under
+    ``build``) and how many criteria wait for ``/gatekit:verify``. Otherwise,
+    while criteria the Stop budget left unjudged are on record, it names them.
+    """
+    lang = led.output_lang
     stood = stand_down_applies(root, led)
     if stood is None:
+        stop_state = led.data.get("stop") if isinstance(led.data.get("stop"), dict) else {}
+        pending = contract.budget_deferred_ids({"deferred": stop_state.get("deferred")})
+        if pending and led.data.get("active_pipeline") in ENFORCED_PIPELINES:
+            return _message(lang, "budget_pending", ids=", ".join(pending))
         return ""
-    return _message(led.output_lang, "stood_down",
+    extra = ""
+    if stood.get("pipeline") == "build":
+        scope = _message(lang, "stood_down_tier")
+        held = len(contract.tier_scope(root)) - len(contract.tier_scope(root, BUILD_TIERS))
+        if held > 0:
+            extra = _message(lang, "stood_down_extra", count=held)
+    else:
+        scope = _message(lang, "stood_down_all")
+    return _message(lang, "stood_down",
                     subject=stood.get("job_id") or stood.get("pipeline") or "?",
+                    scope=scope, extra=extra,
                     verdict=stood.get("verdict") or verdict.UNVERIFIED)
 
 
@@ -222,6 +259,13 @@ def _stand_down(led: "ledger.Ledger", pipeline: str, job_id: Optional[str], fina
 
 def _nothing_in_scope(result: Dict[str, Any]) -> bool:
     return contract.NO_CRITERIA_IN_TIER_REASON in (result.get("reasons") or [])
+
+
+def _only_budget_deferred(result: Dict[str, Any]) -> bool:
+    """Everything that ran passed; the Stop budget left the rest unjudged."""
+    reasons = result.get("reasons") or []
+    return bool(reasons) and all(
+        str(r).startswith(contract.BUDGET_DEFERRED_REASON) for r in reasons)
 
 
 def _deferred_lines(lang: str, result: Dict[str, Any], budget_s: Optional[float]) -> List[str]:
@@ -273,21 +317,31 @@ def _judge(root, led: "ledger.Ledger", pipeline: Optional[str] = None) -> Dict[s
 
 
 def _judge_raw(root, led: "ledger.Ledger", tiers, start_budget_s) -> Dict[str, Any]:
-    last = contract.reusable_last(root, tiers)
-    if last is not None:
-        result = dict(last["result"])
-        result["reused_from"] = last.get("recorded_at")
-        led.append_event("stop_reused", {"recorded_at": last.get("recorded_at"),
+    same_tree = contract.same_tree_record(root)
+    if contract.covers(root, same_tree, tiers):
+        result = dict(same_tree["result"])
+        result["reused_from"] = same_tree.get("recorded_at")
+        led.append_event("stop_reused", {"recorded_at": same_tree.get("recorded_at"),
                                          "verdict": result.get("verdict")})
         return result
     previous = contract.load_last(root) or {}
     data = contract.load(root) or {}
     first: List[str] = []
+    deferred_first: List[str] = []
     if previous.get("source_sha256") == data.get("source_sha256"):
-        first = [c.get("id") for c in ((previous.get("result") or {}).get("criteria") or [])
+        last_result = previous.get("result") or {}
+        first = [c.get("id") for c in (last_result.get("criteria") or [])
                  if c.get("verdict") in (verdict.FAIL, verdict.UNVERIFIED)]
+        # Review of ADR-0024: what the budget left unjudged goes first, so
+        # every Stop judges at least one criterion it has not judged yet.
+        deferred_first = contract.budget_deferred_ids(last_result)
     result = contract.execute(root, cap_s=STOP_BUDGET_CAP_S, first=first,
-                              tiers=tiers, start_budget_s=start_budget_s)
+                              tiers=tiers, start_budget_s=start_budget_s,
+                              deferred_first=deferred_first)
+    if same_tree is not None and contract.budget_deferred_ids(result):
+        # Same tree as the last record: its verdicts for criteria this run
+        # did not reach still hold.
+        result = contract.carry_forward(result, same_tree["result"])
     if result.get("criteria"):
         try:
             contract.save_last(root, result)
@@ -362,6 +416,16 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     # would only stall. Recorded as `unverified`, never as `ok`.
     if outcome == verdict.OK or _nothing_in_scope(result):
         settle(outcome, True)
+        return hookio.allow()
+
+    # Review of ADR-0024: the Stop budget left criteria unjudged and what ran
+    # passed. There is nothing to fix, so no block (and no block spent), but
+    # it is not `ok` either: `unverified` is recorded and the gate keeps
+    # judging. The next Stop runs the deferred ones first, keeping what this
+    # tree already judged, so it reaches a verdict in as many Stops as there
+    # are criteria at most.
+    if _only_budget_deferred(result):
+        settle(outcome, False)
         return hookio.allow()
 
     # Out of blocks: stand down rather than trap the session, but say plainly

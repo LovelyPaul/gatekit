@@ -29,9 +29,10 @@ it as deferred and never judges it. Put in `verify` the full regression suite
 that repeats what the task gates already passed. Keep in `turn` one
 happy-path journey (the wiring criterion), the screenshot criterion, unit
 tests, typecheck and the static checks. Within `turn`, declare the slow ones
-last: the Stop gate runs last run's failures first, then declared order, and
-starts nothing once its budget is spent, so an early slow criterion leaves the
-rest deferred at every turn.
+last: the Stop gate starts nothing once its budget is spent, and a turn that
+left a criterion unjudged is `unverified`, not `ok`, so the gate keeps
+judging (deferred ones first) until every turn-tier criterion has run on the
+same tree. A slow criterion early in the list makes that take more turns.
 
 Add a per-spec criterion only for an acceptance criterion the suite does not
 cover, or when the measured suite cannot finish inside the budget as a whole.

@@ -144,6 +144,10 @@ DEFAULT_TIER = "turn"
 #: ``execute`` reason when the selected tiers cover no criterion.
 NO_CRITERIA_IN_TIER_REASON = "no_criteria_in_tier"
 
+#: ``execute`` reason when every criterion that ran passed but the Stop gate's
+#: start budget left others unjudged (ADR-0024 review): not judged is not ok.
+BUDGET_DEFERRED_REASON = "deferred_by_stop_budget"
+
 
 def validate_tier(tier: Any, ident: str = "?") -> List[str]:
     """Problems with a criterion's ``tier``; empty when valid."""
@@ -585,6 +589,7 @@ def execute(
     first: Optional[List[str]] = None,
     tiers: Optional[Sequence[str]] = None,
     start_budget_s: Optional[float] = None,
+    deferred_first: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Run every criterion within *total_budget_s* and aggregate the verdict.
 
@@ -601,8 +606,12 @@ def execute(
     runs every tier. *start_budget_s* stops starting criteria once that many
     seconds have passed since the run began, while the run-wide budget still
     has time left. Criteria left out either way are returned in ``deferred``
-    — not run, not judged, not in ``criteria`` and not in the aggregate.
-    ``scope`` is the sorted ids the tier selection covers.
+    — not run, not judged and not in ``criteria``. A budget deferral keeps
+    the verdict from being ``ok``: when everything that ran passed, the
+    verdict is ``unverified`` with :data:`BUDGET_DEFERRED_REASON` naming the
+    deferred ids. ``scope`` is the sorted ids actually judged.
+    *deferred_first* names ids to run before *first* (the Stop gate passes
+    the ones its budget deferred last time, so every Stop judges one new).
 
     Returns ``{"verdict", "criteria", "reasons"}``. ``reasons`` holds short
     human-readable strings naming what failed or went unverified; the stop gate
@@ -647,13 +656,12 @@ def execute(
             if _tier_of(crit) not in wanted_tiers:
                 deferred.append({"id": crit.get("id"), "tier": _tier_of(crit), "reason": "tier"})
         criteria = [c for c in criteria if _tier_of(c) in wanted_tiers]
-    scope = sorted(str(c.get("id")) for c in criteria)
     if not criteria:
         return {
             "verdict": verdict.UNVERIFIED,
             "criteria": [],
             "reasons": [NO_CRITERIA_IN_TIER_REASON],
-            "scope": scope,
+            "scope": [],
             "deferred": deferred,
         }
 
@@ -666,11 +674,12 @@ def execute(
         budget = min(budget, float(cap_s))
     started = time.monotonic()
     deadline = started + budget
-    if first:
-        wanted = set(first)
-        criteria = [c for c in criteria if c.get("id") in wanted] + [
-            c for c in criteria if c.get("id") not in wanted
-        ]
+    for ids in (first, deferred_first):  # the later group ends up ahead
+        if ids:
+            wanted = set(ids)
+            criteria = [c for c in criteria if c.get("id") in wanted] + [
+                c for c in criteria if c.get("id") not in wanted
+            ]
     results: List[Dict[str, Any]] = []
     for crit in criteria:
         now = time.monotonic()
@@ -683,22 +692,66 @@ def execute(
             continue
         results.append(_run_one(root, crit, deadline - now))
 
+    return _summarize(results, deferred, budget)
+
+
+def _summarize(results: List[Dict[str, Any]], deferred: List[Dict[str, Any]],
+               budget: Any) -> Dict[str, Any]:
+    """Aggregate what was judged. A budget deferral is never ``ok``."""
     reasons: List[str] = []
     for item in results:
         if item["verdict"] == verdict.FAIL:
-            reasons.append(f"{item['id']}: fail (exit {item['exit']})")
+            reasons.append(f"{item['id']}: fail (exit {item.get('exit')})")
         elif item["verdict"] == verdict.UNVERIFIED:
             detail = item.get("detail") or item.get("stderr_tail") or "not verified"
             reasons.append(f"{item['id']}: unverified ({detail.strip().splitlines()[0][:120]})")
-
+    overall = verdict.aggregate(results)
+    budget_ids = budget_deferred_ids({"deferred": deferred})
+    if budget_ids and overall == verdict.OK:
+        overall = verdict.UNVERIFIED
+        reasons.append(f"{BUDGET_DEFERRED_REASON}: {', '.join(budget_ids)}")
     return {
-        "verdict": verdict.aggregate(results),
+        "verdict": overall,
         "criteria": results,
         "total_budget_s": budget,
         "reasons": reasons,
-        "scope": scope,
+        "scope": sorted(str(c.get("id")) for c in results),
         "deferred": deferred,
     }
+
+
+def budget_deferred_ids(result: Dict[str, Any]) -> List[str]:
+    """Ids a result left unjudged because the Stop gate's budget ran out."""
+    return [str(d.get("id")) for d in (result.get("deferred") or [])
+            if isinstance(d, dict) and d.get("reason") == "budget"]
+
+
+def carry_forward(result: Dict[str, Any], previous: Dict[str, Any]) -> Dict[str, Any]:
+    """Fill *result*'s budget-deferred criteria with *previous*'s verdicts.
+
+    The caller guarantees *previous* was judged on the same tree, contract and
+    no-tests signatures (:func:`same_tree_record`), so its verdict for a
+    criterion this run did not reach still holds. What neither run judged
+    stays deferred, and the result stays unverified until nothing is.
+    """
+    judged = {c.get("id"): c for c in (previous.get("criteria") or []) if isinstance(c, dict)}
+    ran = {c.get("id") for c in result.get("criteria") or []}
+    results = list(result.get("criteria") or [])
+    deferred: List[Dict[str, Any]] = []
+    carried = 0
+    for item in result.get("deferred") or []:
+        cid = item.get("id") if isinstance(item, dict) else None
+        if cid is not None and item.get("reason") == "budget" and cid in judged \
+                and cid not in ran:
+            results.append(dict(judged[cid], carried=True))
+            carried += 1
+        else:
+            deferred.append(item)
+    if not carried:
+        return result
+    merged = dict(result)
+    merged.update(_summarize(results, deferred, result.get("total_budget_s")))
+    return merged
 
 
 def _tier_of(crit: Dict[str, Any]) -> str:
@@ -793,19 +846,17 @@ def save_last(root: pathlib.Path, result: Dict[str, Any]) -> None:
         # there were any) must not be reused.
         "signatures_sha256": runcheck.signatures_digest(),
         "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
-        # ADR-0024: which criteria the run covered, so a turn-tier result is
-        # never reused where a full one is needed, and vice versa.
+        # ADR-0024: which criteria the run judged, so a turn-tier or
+        # budget-cut result is never reused where a full one is needed.
         "scope": list(result.get("scope") or []),
         "result": result,
     }
     config.write_json_atomic(_last_result_path(root), record)
 
 
-def reusable_last(root: pathlib.Path,
-                  tiers: Optional[Sequence[str]] = None) -> Optional[Dict[str, Any]]:
-    """The last record when the contract, the tree, the no-tests signatures
-    and the scope that *tiers* selects (``None``: every tier) are all
-    unchanged."""
+def same_tree_record(root: pathlib.Path) -> Optional[Dict[str, Any]]:
+    """The last record when the contract, the no-tests signatures and the
+    tree are unchanged since it was written, whatever it covered."""
     last = load_last(root)
     data = load(root)
     if not last or not data or status(root) != verdict.OK:
@@ -815,13 +866,33 @@ def reusable_last(root: pathlib.Path,
     if "signatures_sha256" not in last or (
             last.get("signatures_sha256") != runcheck.signatures_digest()):
         return None
-    if not isinstance(last.get("scope"), list) or (
-            sorted(str(i) for i in last["scope"]) != tier_scope(root, tiers)):
+    if not isinstance(last.get("result"), dict):
         return None
     current = tree_fingerprint(root)
     if not current or current != last.get("fingerprint"):
         return None
-    return last if isinstance(last.get("result"), dict) else None
+    return last
+
+
+def covers(root: pathlib.Path, record: Optional[Dict[str, Any]],
+           tiers: Optional[Sequence[str]] = None) -> bool:
+    """Whether *record* judged exactly what *tiers* selects now (``None``:
+    every tier). A record with a Stop-budget deferral covers nothing: its
+    scope is only what it judged, and it is never a full judgement."""
+    if not record or not isinstance(record.get("scope"), list):
+        return False
+    if budget_deferred_ids(record.get("result") or {}):
+        return False
+    return sorted(str(i) for i in record["scope"]) == tier_scope(root, tiers)
+
+
+def reusable_last(root: pathlib.Path,
+                  tiers: Optional[Sequence[str]] = None) -> Optional[Dict[str, Any]]:
+    """The last record when the contract, the tree, the no-tests signatures
+    and the scope that *tiers* selects (``None``: every tier) are all
+    unchanged, and it has no Stop-budget deferral."""
+    last = same_tree_record(root)
+    return last if covers(root, last, tiers) else None
 
 
 # --------------------------------------------------------------------------
