@@ -917,7 +917,9 @@ class TestGradingFilesChangedSinceApproval(TempProject):
     def spec(self, body: str = PASS) -> pathlib.Path:
         path = self.root / "tests" / "check.py"
         path.parent.mkdir(exist_ok=True)
-        path.write_text(body, encoding="utf-8")
+        # exact bytes: write_text turns \n into \r\n on Windows, and the
+        # tests compare the recorded hash with sha256(body)
+        path.write_bytes(body.encode("utf-8"))
         return path
 
     def setup_contract(self, body: str = PASS) -> pathlib.Path:

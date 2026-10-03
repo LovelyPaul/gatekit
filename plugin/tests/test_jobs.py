@@ -3122,7 +3122,9 @@ class TestGradingChangedAfterFailure(JobTestCase):
     def check(self, body: str) -> None:
         path = self.root / "tests" / "check.py"
         path.parent.mkdir(exist_ok=True)
-        path.write_text(body, encoding="utf-8")
+        # exact bytes: write_text turns \n into \r\n on Windows, and the
+        # tests compare the recorded hash with sha256(body)
+        path.write_bytes(body.encode("utf-8"))
 
     def task(self, *extra_argv) -> dict:
         return self.simple_task(task_id="t", target="tests/**", gates=[
