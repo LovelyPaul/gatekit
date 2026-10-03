@@ -611,6 +611,9 @@ def save_last(root: pathlib.Path, result: Dict[str, Any]) -> None:
     record = {
         "source_sha256": data.get("source_sha256"),
         "fingerprint": tree_fingerprint(root),
+        # ADR-0022: a result judged under other no-tests signatures (or before
+        # there were any) must not be reused.
+        "signatures_sha256": runcheck.signatures_digest(),
         "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "result": result,
     }
@@ -618,12 +621,16 @@ def save_last(root: pathlib.Path, result: Dict[str, Any]) -> None:
 
 
 def reusable_last(root: pathlib.Path) -> Optional[Dict[str, Any]]:
-    """The last record when the contract and the tree are both unchanged."""
+    """The last record when the contract, the tree and the no-tests
+    signatures are all unchanged."""
     last = load_last(root)
     data = load(root)
     if not last or not data or status(root) != verdict.OK:
         return None
     if last.get("source_sha256") != data.get("source_sha256"):
+        return None
+    if "signatures_sha256" not in last or (
+            last.get("signatures_sha256") != runcheck.signatures_digest()):
         return None
     current = tree_fingerprint(root)
     if not current or current != last.get("fingerprint"):
@@ -668,9 +675,7 @@ def _classify_baseline(root, item: Dict[str, Any], argv: List[str],
     if found_verdict == verdict.UNVERIFIED:
         if stderr.startswith("could not execute:"):
             program = str(argv[0]) if argv else ""
-            rel = (runcheck.relativize(program, root)
-                   if ("/" in program or "\\" in program) else None)
-            owner = runcheck.scope_owner(rel, tasks) if rel else None
+            rel, owner = runcheck.program_owner(program, root, tasks)
             if owner:
                 return "not_yet_runnable", "needs %s, which task %s writes" % (rel, owner)
             return "command_error", "cannot execute %s and no task writes it" % (program or "argv")
@@ -678,7 +683,7 @@ def _classify_baseline(root, item: Dict[str, Any], argv: List[str],
     gate = {"verdict": verdict.FAIL, "exit": item.get("exit"),
             "stdout_tail": item.get("stdout_tail") or "", "stderr_tail": stderr}
     kind = jobs.classify_gate_result(gate, argv, root=root, tasks=tasks)
-    found = runcheck.missing_path_owner(gate, root, tasks)
+    found = runcheck.missing_path_owner(gate, root, tasks, argv=argv)
     if kind == "not_yet_runnable":
         return kind, "needs %s, which task %s writes" % (found["path"], found["owner"])
     if kind == "command_error":

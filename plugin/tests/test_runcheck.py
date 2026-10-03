@@ -12,6 +12,39 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from gatekit import paths, runcheck
 
+
+class plugin_with_signatures:
+    """Context manager: a throwaway plugin root (found through
+    CLAUDE_PLUGIN_ROOT, as an installed hook finds it) whose signature file
+    holds *body*."""
+
+    def __init__(self, body: str) -> None:
+        self.body = body
+
+    def __enter__(self):
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        root = os.path.join(self._tmp.name, "plugin")
+        os.makedirs(os.path.join(root, ".claude-plugin"))
+        os.makedirs(os.path.join(root, "spec-kit"))
+        with open(os.path.join(root, ".claude-plugin", "plugin.json"), "w") as h:
+            h.write('{"name": "gatekit", "version": "0"}')
+        with open(os.path.join(root, "spec-kit", runcheck.SIGNATURES_FILE), "w") as h:
+            h.write(self.body)
+        self._old = os.environ.get("CLAUDE_PLUGIN_ROOT")
+        os.environ["CLAUDE_PLUGIN_ROOT"] = root
+        runcheck._signatures.cache_clear()
+        return root
+
+    def __exit__(self, *exc):
+        if self._old is None:
+            os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
+        else:
+            os.environ["CLAUDE_PLUGIN_ROOT"] = self._old
+        runcheck._signatures.cache_clear()
+        self._tmp.cleanup()
+        return False
+
 #: (signature id, zero-test output, its exit code, real-run output with a
 #: positive count, its exit code). Each zero-test output must be named by
 #: its signature; each real run must not be named at all.
@@ -32,6 +65,10 @@ SIGNATURE_CASES = (
      "# tests 3\n# suites 1\n# pass 3\n# fail 0\n", 0),
     ("mocha", "\n\n  0 passing (1ms)\n\n", 0,
      "\n  thing\n    ✓ works\n\n  4 passing (12ms)\n", 0),
+    ("pytest-deselected", "collected 3 items / 3 deselected / 0 selected\n"
+                          "============ 3 deselected in 0.01s ============\n", 5,
+     "collected 3 items / 1 deselected / 2 selected\n"
+     "============ 2 passed, 1 deselected in 0.05s ============\n", 0),
     ("go", "?   \texample.com/app\t[no test files]\n", 0,
      "?   \texample.com/app/cmd\t[no test files]\nok  \texample.com/app/lib\t0.004s\n", 0),
     ("cargo", "running 0 tests\n\ntest result: ok. 0 passed; 0 failed; 0 ignored\n", 0,
@@ -49,6 +86,42 @@ class TestSignatureFile(unittest.TestCase):
         for sig in data["signatures"]:
             self.assertTrue(sig.get("pattern") and sig.get("positive"), sig["id"])
             self.assertTrue(sig.get("exits"), sig["id"])
+
+    def test_malformed_files_never_raise(self) -> None:
+        cases = (
+            "[]",
+            '{"signatures": {"id": "x"}}',
+            '{"signatures": ["not a dict", 3, null]}',
+            '{"signatures": [{"id": "x", "pattern": 5, "positive": "a", "exits": [0]}]}',
+            '{"signatures": [{"id": "x", "pattern": "a", "positive": "b", "exits": "0"}]}',
+            '{"signatures": [{"id": "x", "pattern": "a", "positive": "b", "exits": [true]}]}',
+            '{"signatures": [{"id": "x", "pattern": "a", "positive": "b", "exits": [0.5]}]}',
+            "null",
+        )
+        for body in cases:
+            with self.subTest(body=body):
+                with plugin_with_signatures(body):
+                    self.assertIsNone(runcheck.ran_no_tests("Ran 0 tests in 0.000s", "", 0))
+
+    def test_one_bad_entry_does_not_disable_the_rest(self) -> None:
+        body = json.dumps({"signatures": [
+            {"id": "broken", "pattern": "(unclosed", "positive": "x", "exits": [0]},
+            "junk",
+            {"id": "bad-exits", "pattern": "a", "positive": "b", "exits": [False]},
+            {"id": "unittest", "pattern": "^Ran 0 tests in\\b",
+             "positive": "^Ran [1-9]\\d* tests? in\\b", "exits": [0, 5]},
+        ]})
+        with plugin_with_signatures(body):
+            self.assertEqual(runcheck.ran_no_tests("Ran 0 tests in 0.000s", "", 0), "unittest")
+            self.assertEqual([s[0] for s in runcheck._signatures()], ["unittest"])
+
+    def test_the_digest_follows_the_file(self) -> None:
+        with plugin_with_signatures('{"signatures": []}'):
+            first = runcheck.signatures_digest()
+        with plugin_with_signatures('{"signatures": [], "v": 2}'):
+            second = runcheck.signatures_digest()
+        self.assertRegex(first, r"^[0-9a-f]{64}$")
+        self.assertNotEqual(first, second)
 
     def test_an_unreadable_file_means_no_signatures(self) -> None:
         runcheck._signatures.cache_clear()
@@ -85,7 +158,39 @@ class TestRanNoTests(unittest.TestCase):
 
     def test_pytest_and_unittest_exit_five(self) -> None:
         self.assertEqual(runcheck.ran_no_tests("no tests ran in 0.01s", "", 5), "pytest")
+        self.assertEqual(runcheck.ran_no_tests("Ran 0 tests in 0.000s\n\nNO TESTS RAN", "", 5),
+                         "unittest")
+
+    def test_unittest_before_312_exits_zero(self) -> None:
         self.assertEqual(runcheck.ran_no_tests("Ran 0 tests in 0.000s\n\nOK", "", 0), "unittest")
+
+    def test_pytest_all_deselected_is_exit_five_only(self) -> None:
+        text = "============ 1 deselected in 0.00s ============\n"
+        self.assertEqual(runcheck.ran_no_tests(text, "", 5), "pytest-deselected")
+        self.assertIsNone(runcheck.ran_no_tests(text, "", 0))
+
+    def test_go_cover_lines_count_as_a_real_run(self) -> None:
+        out = ("ok  \texample.com/m/pkg\t0.123s\tcoverage: 80.0% of statements\n"
+               "?   \texample.com/m/cmd\t[no test files]\n")
+        self.assertIsNone(runcheck.ran_no_tests(out, "", 0))
+        cached = "ok  \texample.com/m/pkg\t(cached)\tcoverage: 80.0% of statements\n" \
+                 "?   \texample.com/m/cmd\t[no test files]\n"
+        self.assertIsNone(runcheck.ran_no_tests(cached, "", 0))
+
+    def test_go_no_tests_to_run_is_not_a_positive(self) -> None:
+        out = "ok  \texample.com/m/pkg\t0.002s [no tests to run]\n"
+        self.assertEqual(runcheck.ran_no_tests(out, "", 0), "go")
+
+    def test_go_pattern_is_anchored(self) -> None:
+        self.assertIsNone(runcheck.ran_no_tests("the docs mention [no test files]\n", "", 0))
+
+    def test_ansi_colour_is_ignored(self) -> None:
+        pytest = "\x1b[33m============ \x1b[33mno tests ran\x1b[0m\x1b[33m in 0.01s ============\x1b[0m\n"
+        self.assertEqual(runcheck.ran_no_tests(pytest, "", 5), "pytest")
+        jest = "\x1b[1mNo tests found, exiting with code 0\x1b[22m\n"
+        self.assertEqual(runcheck.ran_no_tests("", jest, 0), "jest")
+        real = "\x1b[32m============ 3 passed in 0.1s ============\x1b[0m\nRan 0 tests in 0s\n"
+        self.assertIsNone(runcheck.ran_no_tests(real, "", 0))
 
     def test_patterns_are_anchored(self) -> None:
         self.assertIsNone(runcheck.ran_no_tests("the doc says Ran 0 tests in 0s", "", 0))
@@ -135,6 +240,29 @@ class TestMissingPaths(unittest.TestCase):
         py = "python.exe: can't open file 'C:\\\\work\\\\app\\\\run.py': [Errno 2] No such file or directory"
         self.assertEqual(runcheck.missing_paths(py), ["C:\\work\\app\\run.py"])
 
+    def test_node_cannot_find_a_module_path(self) -> None:
+        text = "Error: Cannot find module '/work/app/scripts/e2e.js'\n    at Module._resolve"
+        self.assertEqual(runcheck.missing_paths(text), ["/work/app/scripts/e2e.js"])
+        self.assertEqual(runcheck.missing_paths("Error: Cannot find module './lib/x'"),
+                         ["./lib/x"])
+
+    def test_a_bare_package_name_is_not_a_path(self) -> None:
+        self.assertEqual(runcheck.missing_paths("Error: Cannot find module 'express'"), [])
+        self.assertEqual(runcheck.missing_paths("Error: Cannot find module '@scope/pkg'"), [])
+
+    def test_a_bare_module_named_in_argv_counts(self) -> None:
+        text = "Error: Cannot find module 'e2e'"
+        self.assertEqual(runcheck.missing_paths(text, argv=["node", "e2e"]), ["e2e"])
+
+    def test_pytest_file_or_directory_not_found(self) -> None:
+        text = "ERROR: file or directory not found: tests/test_login.py\n"
+        self.assertEqual(runcheck.missing_paths(text), ["tests/test_login.py"])
+
+    def test_an_ambiguous_path_with_spaces_is_not_extracted(self) -> None:
+        self.assertEqual(runcheck.missing_paths("cat: my dir/a.txt: No such file or directory"), [])
+        self.assertEqual(runcheck.missing_paths("cat: a.txt: No such file or directory"), ["a.txt"])
+        self.assertEqual(runcheck.missing_paths("  oops x y.txt: No such file or directory"), [])
+
     def test_each_path_once(self) -> None:
         text = NPM_ENOENT.format(root="/r") * 2
         self.assertEqual(runcheck.missing_paths(text), ["/r/package.json"])
@@ -148,6 +276,23 @@ class TestRelativize(unittest.TestCase):
     def test_relative_paths_are_relative_to_the_root(self) -> None:
         self.assertEqual(runcheck.relativize("package.json", "/work/app"), "package.json")
         self.assertEqual(runcheck.relativize("./src/x.py", "/work/app"), "src/x.py")
+
+    def test_dot_dot_segments_are_normalized(self) -> None:
+        self.assertEqual(runcheck.relativize("/r/web/../src/a.ts", "/r"), "src/a.ts")
+        self.assertEqual(runcheck.relativize("src/../lib/a.ts", "/r"), "lib/a.ts")
+        self.assertIsNone(runcheck.relativize("/r/../etc/x", "/r"))
+        self.assertEqual(runcheck.relativize("C:\\r\\web\\..\\src\\a.ts", "C:\\r"), "src/a.ts")
+
+    def test_a_symlinked_path_matches_its_realpath_root(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            real = os.path.join(os.path.realpath(tmp), "real")
+            os.makedirs(os.path.join(real, "src"))
+            link = os.path.join(os.path.realpath(tmp), "link")
+            os.symlink(real, link)
+            # the message names the symlinked form; the root is the real one
+            self.assertEqual(runcheck.relativize(link + "/src/missing.json", real),
+                             "src/missing.json")
 
     def test_outside_the_root_is_none(self) -> None:
         self.assertIsNone(runcheck.relativize("/etc/hosts", "/work/app"))
@@ -187,14 +332,46 @@ class TestScopeOwner(unittest.TestCase):
                 "stderr_tail": NPM_ENOENT.format(root="/work/app")}
         found = runcheck.missing_path_owner(gate, "/work/app", self.TASKS)
         self.assertEqual(found, {"path": "package.json", "owner": "shell-login",
-                                 "manifest": True})
+                                 "manifest": True, "argv_named": False})
 
     def test_missing_path_owner_outside_the_root(self) -> None:
         gate = {"verdict": "fail", "exit": 1, "stdout_tail": "",
                 "stderr_tail": "cat: /etc/gatekit.conf: No such file or directory"}
         found = runcheck.missing_path_owner(gate, "/work/app", self.TASKS)
         self.assertEqual(found, {"path": "/etc/gatekit.conf", "owner": None,
-                                 "manifest": False})
+                                 "manifest": False, "argv_named": False})
+
+    def test_a_manifest_refusal_names_package_json(self) -> None:
+        gate = {"verdict": "fail", "exit": 254, "stdout_tail": "",
+                "stderr_tail": "npm error enoent Could not read package.json: Error: ENOENT: "
+                               "no such file or directory, open '/work/app/.npmrc'\n"
+                               "npm error enoent Error: ENOENT: no such file or directory, "
+                               "open '/work/app/package.json'\n"}
+        found = runcheck.missing_path_owner(gate, "/work/app", [])
+        self.assertEqual(found["path"], "package.json")
+        self.assertTrue(found["manifest"])
+        bare = {"verdict": "fail", "exit": 254, "stdout_tail": "",
+                "stderr_tail": "npm error enoent Could not read package.json\n"
+                               "cat: other.txt: No such file or directory\n"}
+        self.assertEqual(runcheck.missing_path_owner(bare, "/work/app", [])["path"], "package.json")
+
+    def test_argv_named_is_reported(self) -> None:
+        gate = {"verdict": "fail", "exit": 127, "stdout_tail": "",
+                "stderr_tail": "bash: scripts/e2e.sh: No such file or directory\n"}
+        tasks = [{"id": "e2e", "write_scope": ["scripts/**"]}]
+        found = runcheck.missing_path_owner(gate, "/work/app", tasks,
+                                            argv=["bash", "scripts/e2e.sh"])
+        self.assertEqual((found["path"], found["owner"], found["argv_named"]),
+                         ("scripts/e2e.sh", "e2e", True))
+        self.assertFalse(runcheck.missing_path_owner(gate, "/work/app", tasks,
+                                                     argv=["bash", "-c", "x"])["argv_named"])
+
+    def test_interpreters(self) -> None:
+        for prog in ("bash", "/bin/sh", "zsh", "node", "python3", "/usr/bin/python3.12",
+                     "python.exe", "ruby", "deno", "bun", "tsx", "ts-node"):
+            self.assertTrue(runcheck.is_interpreter(prog), prog)
+        for prog in ("npm", "npx", "pytest", "nonexistentprog", "jest", ""):
+            self.assertFalse(runcheck.is_interpreter(prog), prog)
 
     def test_nothing_extracted_is_none(self) -> None:
         gate = {"verdict": "fail", "exit": 1, "stdout_tail": "1 failed", "stderr_tail": ""}

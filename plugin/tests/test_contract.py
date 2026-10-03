@@ -792,6 +792,27 @@ class TestBaseline(TempProject):
         manifest = {c["id"]: c for c in result["criteria"]}["manifest"]
         self.assertIn("package.json", manifest["detail"])
 
+    def test_baseline_and_preflight_agree_on_a_program(self) -> None:
+        from gatekit import jobs
+        self.write_tasks(self.shell_task())
+        self.write_gate(
+            {"id": "owned", "argv": ["bin/run-e2e"]},
+            {"id": "unowned", "argv": ["no-such-binary-gatekit-xyz"]},
+            {"id": "script", "argv": ["bash", "bin/e2e.sh"]},
+        )
+        contract.derive(self.root)
+        result = contract.baseline(self.root)
+        tasks = contract._baseline_tasks(self.root)
+        for crit in contract.load(self.root)["criteria"]:
+            gate = jobs.run_gates(self.root, {"gates": [{"name": "g", "argv": crit["argv"]}]})
+            kind = jobs.classify_gate_result(gate["gates"][0], crit["argv"], root=self.root,
+                                             tasks=tasks)
+            with self.subTest(crit=crit["id"]):
+                self.assertEqual(kind, self.classes(result)[crit["id"]])
+        self.assertEqual(self.classes(result), {"owned": "not_yet_runnable",
+                                                "unowned": "command_error",
+                                                "script": "not_yet_runnable"})
+
     def test_baseline_json_is_written(self) -> None:
         self.write_gate({"id": "passes", "argv": emitting(stdout="ok\n")})
         data = contract.derive(self.root)
@@ -845,4 +866,29 @@ class TestBaseline(TempProject):
         contract.baseline(self.root)
         self.run_cli()
         self.assertIsNone(contract.load_last(self.root))
+        self.assertIsNone(contract.reusable_last(self.root))
+
+
+class TestReuseFollowsTheSignatures(TempProject):
+    """A record saved under other signatures (e.g. before 0.14.0, when a
+    zero-test run counted as ok) must not be reused."""
+
+    def test_a_record_under_other_signatures_is_not_reused(self) -> None:
+        from unittest import mock
+        from gatekit import runcheck
+        self.write_gate({"id": "a", "argv": emitting(stdout="ok\n")})
+        contract.derive(self.root)
+        contract.save_last(self.root, contract.execute(self.root))
+        self.assertIsNotNone(contract.reusable_last(self.root))
+        with mock.patch.object(runcheck, "signatures_digest", return_value="0" * 64):
+            self.assertIsNone(contract.reusable_last(self.root))
+
+    def test_a_record_without_the_digest_is_not_reused(self) -> None:
+        self.write_gate({"id": "a", "argv": emitting(stdout="ok\n")})
+        contract.derive(self.root)
+        contract.save_last(self.root, contract.execute(self.root))
+        path = self.root / ".gatekit" / "runs" / "contract-last.json"
+        record = json.loads(path.read_text(encoding="utf-8"))
+        record.pop("signatures_sha256", None)
+        path.write_text(json.dumps(record), encoding="utf-8")
         self.assertIsNone(contract.reusable_last(self.root))

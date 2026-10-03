@@ -601,7 +601,9 @@ def run_gates(root, task: dict) -> dict:
                     "detail": "could not run: %s" % exc,
                     "elapsed_s": round(time.time() - started, 3),
                     "stdout_tail": "",
-                    "stderr_tail": "",
+                    # The classifier reads the tails; an empty one would make
+                    # a missing program look like an ordinary failure.
+                    "stderr_tail": "could not run: %s" % exc,
                 }
             )
             continue
@@ -666,7 +668,11 @@ def classify_gate_result(gate: dict, argv=None, root=None, tasks=None) -> str:
     With *root* and *tasks* (the job's tasks), a missing path the output names
     that some task's `write_scope` covers is `not_yet_runnable`: the gate is
     fine, the work has not happened yet. An uncovered npm manifest is a
-    `command_error`. Without them the ADR-0009 rules below apply unchanged.
+    `command_error`. A program that could not be executed at all is a
+    `command_error` unless it is a path some task writes. Exit 126/127 stays
+    a `command_error` unless argv[0] is an interpreter (`runcheck.INTERPRETERS`)
+    and the missing, task-written path is one of its arguments. Without *root*
+    and *tasks* the ADR-0009 rules below apply unchanged.
 
     `command_error` — refuse the job — only when the failing gate's exit code
     is one of `COMMAND_ERROR_EXITS`, or a `COMMAND_ERROR_PATTERNS` line also
@@ -680,14 +686,26 @@ def classify_gate_result(gate: dict, argv=None, root=None, tasks=None) -> str:
     if not isinstance(gate, dict) or gate.get("verdict") != verdict.FAIL:
         return "expected"
     code = gate.get("exit")
-    if isinstance(code, int) and code in COMMAND_ERROR_EXITS:
-        return "command_error"
-    if root is not None and tasks is not None:
-        found = runcheck.missing_path_owner(gate, root, tasks)
-        if found and found["owner"]:
+    scoped = root is not None and tasks is not None
+    first_arg = argv[0] if isinstance(argv, list) and argv else ""
+    if code is None and could_not_run(gate):
+        # The program itself could not be executed. It is not yet runnable
+        # only when it is a path some task writes (ADR-0022, as baseline).
+        if scoped and runcheck.program_owner(first_arg, root, tasks)[1]:
             return "not_yet_runnable"
-        if found and found["manifest"]:
-            return "command_error"
+        return "command_error"
+    found = runcheck.missing_path_owner(gate, root, tasks, argv=argv) if scoped else None
+    if isinstance(code, int) and code in COMMAND_ERROR_EXITS:
+        # `bash scripts/e2e.sh` exits 127 when the script is missing: the
+        # interpreter ran, the file a task writes did not exist yet.
+        if (found and found["owner"] and found["argv_named"]
+                and runcheck.is_interpreter(first_arg)):
+            return "not_yet_runnable"
+        return "command_error"
+    if found and found["owner"]:
+        return "not_yet_runnable"
+    if found and found["manifest"]:
+        return "command_error"
     stdout = gate.get("stdout_tail") or ""
     stderr = gate.get("stderr_tail") or ""
     tokens = _argv_tokens(argv)
@@ -712,6 +730,12 @@ def classify_gate_result(gate: dict, argv=None, root=None, tasks=None) -> str:
     if first.startswith("usage:"):
         return "suspicious"
     return "expected"
+
+
+def could_not_run(gate: dict) -> bool:
+    """True for a `run_gates` result whose program could not be executed."""
+    return (isinstance(gate, dict) and gate.get("exit") is None
+            and str(gate.get("stderr_tail") or "").startswith("could not run:"))
 
 
 def looks_like_command_error(gate: dict, argv=None) -> bool:
@@ -745,7 +769,7 @@ def preflight(root, jdir, tasks: list) -> dict:
     `{"passed": [ids], "warnings": [str]}`. Raises `GatePreflightError` when a
     gate is a broken command, before any worker has been spawned.
     """
-    passed, warnings, broken = [], [], []
+    passed, warnings, notices, broken = [], [], [], []
     for task in tasks:
         task_id = str(task.get("id"))
         result = run_gates(root, task)
@@ -766,17 +790,27 @@ def preflight(root, jdir, tasks: list) -> dict:
         declared = {str(g.get("name") or "gate-%d" % i): g.get("argv")
                     for i, g in enumerate(task.get("gates") or [])}
         annotated = False
+        noted = False
         for gate in gates:
-            kind = classify_gate_result(gate, declared.get(str(gate.get("name"))),
-                                        root=root, tasks=tasks)
-            found = (runcheck.missing_path_owner(gate, root, tasks)
+            gate_argv = declared.get(str(gate.get("name")))
+            kind = classify_gate_result(gate, gate_argv, root=root, tasks=tasks)
+            found = (_missing_for_preflight(gate, gate_argv, root, tasks)
                      if kind in ("not_yet_runnable", "command_error") else None)
             if kind == "not_yet_runnable":
-                # ADR-0022: silent start; the record says why it is fine.
+                # ADR-0022: start; the record says why it is fine.
                 gate["preflight"] = "not_yet_runnable"
                 gate["preflight_detail"] = "needs %s, which task %s writes" % (
                     found["path"], found["owner"])
                 annotated = True
+                if found["argv_named"] and not noted:
+                    # A path the gate names itself is trusted to be the one a
+                    # task writes; a typo there only shows when the gate runs
+                    # after that task. Say so once per task, not as a warning.
+                    notices.append(
+                        "%s: gate `%s` runs %s, which task %s writes — not checked "
+                        "until then; if the name is a typo it fails after that task"
+                        % (task_id, gate.get("name"), found["path"], found["owner"]))
+                    noted = True
             elif kind == "command_error":
                 tail = _tail((gate.get("stderr_tail") or gate.get("stdout_tail") or ""), 400)
                 missing = ("needs %s and no task in this job writes it; " % found["path"]
@@ -795,7 +829,19 @@ def preflight(root, jdir, tasks: list) -> dict:
             "gate preflight refused to start the job — the command itself fails, "
             "no worker could make it pass:\n" + "\n".join(broken)
         )
-    return {"passed": passed, "warnings": warnings}
+    return {"passed": passed, "warnings": warnings, "notices": notices}
+
+
+def _missing_for_preflight(gate: dict, argv, root, tasks):
+    """What `classify_gate_result` saw: the missing path and its owner, or for
+    a program that could not run at all, the program itself."""
+    if could_not_run(gate):
+        program = argv[0] if isinstance(argv, list) and argv else ""
+        rel, owner = runcheck.program_owner(program, root, tasks)
+        if rel is None:
+            return None  # a bare name on PATH: the "could not run" tail says it
+        return {"path": rel, "owner": owner, "manifest": False, "argv_named": True}
+    return runcheck.missing_path_owner(gate, root, tasks, argv=argv)
 
 
 def _spawn_worker(root, backend: dict, task: dict, job_id: str, tdir, timeout_s: float,
@@ -1276,6 +1322,7 @@ def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False,
         "no_preflight": bool(no_preflight),
         "execution": mode,
         "preflight_warnings": [],
+        "preflight_notices": [],
         "tasks": [str(t.get("id")) for t in tasks],
         "config": {"build": build_cfg},
     }
@@ -1297,6 +1344,7 @@ def start(root, task_ids=None, backend_name=None, parallel=None, dry_run=False,
     if not no_preflight:
         pre = preflight(root, jdir, tasks)  # raises GatePreflightError before any spawn
         job["preflight_warnings"] = pre["warnings"]
+        job["preflight_notices"] = pre["notices"]
         job["preflight_passed"] = pre["passed"]
         write_json(jdir / "job.json", job)
         already = set(pre["passed"])
@@ -1894,6 +1942,7 @@ def status(root, job_id: Optional[str] = None) -> dict:
         "finished_at": finished_at,
         "stopped_at": job.get("stopped_at"),
         "preflight_warnings": job.get("preflight_warnings") or [],
+        "preflight_notices": job.get("preflight_notices") or [],
         "done": done,
         "tasks": rows,
     }
@@ -2313,6 +2362,8 @@ def run(argv: list) -> int:
                 _print_table(payload)
                 for line in payload.get("preflight_warnings") or []:
                     print("  warn: %s" % line)
+                for line in payload.get("preflight_notices") or []:
+                    print("  note: %s" % line)
             return 0 if payload["verdict"] != verdict.FAIL else 1
 
         if cmd == "stop":

@@ -18,8 +18,11 @@ Pure functions over strings and task dicts; nothing here runs a command.
 from __future__ import annotations
 
 import functools
+import hashlib
 import json
+import ntpath
 import os
+import posixpath
 import re
 from typing import Any, Dict, Iterable, List, Optional
 
@@ -28,22 +31,68 @@ from gatekit import paths
 SIGNATURES_FILE = "no-tests-signatures.json"
 
 
+def _signatures_path():
+    return paths.plugin_root() / "spec-kit" / SIGNATURES_FILE
+
+
+def _compile_signature(sig: Any) -> Optional[tuple]:
+    """One entry as ``(id, pattern, positive, exits)``, or None when malformed.
+
+    Exits must be a list of integers (``true`` is not an exit code); a missing
+    list means ``[0]``.
+    """
+    if not isinstance(sig, dict):
+        return None
+    sig_id, pattern, positive = sig.get("id"), sig.get("pattern"), sig.get("positive")
+    if not (isinstance(sig_id, str) and sig_id and isinstance(pattern, str) and pattern
+            and isinstance(positive, str) and positive):
+        return None
+    exits = sig.get("exits", [0])
+    if exits is None:
+        exits = [0]
+    if not isinstance(exits, list) or not exits or not all(
+            isinstance(e, int) and not isinstance(e, bool) for e in exits):
+        return None
+    try:
+        return (sig_id, re.compile(pattern, re.MULTILINE),
+                re.compile(positive, re.MULTILINE), tuple(exits))
+    except (re.error, TypeError, ValueError, OverflowError):
+        return None
+
+
 @functools.lru_cache(maxsize=1)
 def _signatures() -> tuple:
-    """Compiled signatures; an unreadable or malformed file means none."""
+    """Compiled signatures. An unreadable or structurally malformed file means
+    none; a malformed entry is skipped and the rest still apply."""
     try:
-        path = paths.plugin_root() / "spec-kit" / SIGNATURES_FILE
-        data = json.loads(path.read_text(encoding="utf-8"))
-        compiled = []
-        for sig in data.get("signatures") or []:
-            exits = tuple(int(e) for e in sig.get("exits") or [0])
-            compiled.append((str(sig["id"]),
-                             re.compile(sig["pattern"], re.MULTILINE),
-                             re.compile(sig["positive"], re.MULTILINE),
-                             exits))
-        return tuple(compiled)
-    except (OSError, ValueError, KeyError, TypeError, re.error):
+        data = json.loads(_signatures_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
         return ()
+    entries = data.get("signatures") if isinstance(data, dict) else None
+    if not isinstance(entries, list):
+        return ()
+    return tuple(c for c in (_compile_signature(e) for e in entries) if c is not None)
+
+
+def signatures_digest() -> Optional[str]:
+    """SHA-256 of the signature file's bytes, or None when it cannot be read.
+
+    Recorded with the Stop gate's last result so a result judged under other
+    signatures (e.g. before 0.14.0) is never reused.
+    """
+    try:
+        return hashlib.sha256(_signatures_path().read_bytes()).hexdigest()
+    except (OSError, ValueError):
+        return None
+
+
+#: Terminal colour and cursor escapes; runners add them under a TTY or when
+#: forced (FORCE_COLOR, --color=yes), and they split the anchored patterns.
+_ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
+
+def strip_ansi(text: Any) -> str:
+    return _ANSI.sub("", str(text or ""))
 
 
 def ran_no_tests(stdout: Any, stderr: Any, exit_code: Any) -> Optional[str]:
@@ -51,12 +100,13 @@ def ran_no_tests(stdout: Any, stderr: Any, exit_code: Any) -> Optional[str]:
 
     A match needs one signature's pattern with *exit_code* in its exits, and
     no signature's positive-count pattern anywhere in the output — so a run
-    that reports any real tests is never called empty.
+    that reports any real tests is never called empty. ANSI escapes are
+    stripped first.
     """
     sigs = _signatures()
-    if not sigs or not isinstance(exit_code, int):
+    if not sigs or not isinstance(exit_code, int) or isinstance(exit_code, bool):
         return None
-    text = "%s\n%s" % (stdout or "", stderr or "")
+    text = strip_ansi("%s\n%s" % (stdout or "", stderr or ""))
     if any(positive.search(text) for _, _, positive, _ in sigs):
         return None
     for sig_id, pattern, _, exits in sigs:
@@ -66,21 +116,45 @@ def ran_no_tests(stdout: Any, stderr: Any, exit_code: Any) -> Optional[str]:
 
 
 #: Lines that name a path the command could not find. Each has one group, the
-#: path. `No module named` names a module, not a path, and is not here.
+#: path. `No module named` names a module, not a path, and is not here. The
+#: shell form (`<prog>: <path>: No such file or directory`) needs the path to
+#: open the line or follow a `<prog>: ` prefix and to hold no space: a path
+#: with spaces is ambiguous in that form, and no extraction beats a wrong one.
 _MISSING_PATH_PATTERNS = (
     re.compile(r"ENOENT: no such file or directory, (?:open|stat|lstat|scandir|access|"
                r"realpath|readlink|opendir|chdir|uv_cwd) '([^']+)'", re.IGNORECASE),
     re.compile(r"can't open file '([^']+)'"),
     re.compile(r"No such file or directory: '([^']+)'"),
-    re.compile(r"(?:^|\s)([^\s:'\"\[\]]+): No such file or directory", re.MULTILINE),
+    re.compile(r"(?:^|:[ \t])([^\s:'\"\[\]]+): No such file or directory", re.MULTILINE),
+    re.compile(r"ERROR: file or directory not found: (\S+)"),
 )
+#: node's message for a missing entry script or relative require. It also names
+#: missing packages, so a capture counts only when it looks like a path.
+_CANNOT_FIND_MODULE = re.compile(r"Cannot find module '([^']+)'")
 #: npm's own message when the project has no manifest: the runner cannot start.
 _MISSING_MANIFEST = re.compile(r"Could not read package\.json")
+_DRIVE = re.compile(r"^[A-Za-z]:[\\/]")
 
 
-def missing_paths(text: Any) -> List[str]:
-    """Paths *text* names as missing, in order of appearance, each once."""
+def _looks_like_path(raw: str, argv: Optional[Iterable[Any]]) -> bool:
+    """A `Cannot find module` capture is a path when it is absolute, explicitly
+    relative, or holds a slash and is not a scoped package (``@scope/pkg``) —
+    or when it is one of the command's own arguments. ``express`` is not."""
+    if argv and raw in {str(a) for a in argv}:
+        return True
+    if raw.startswith(("/", "./", "../", ".\\", "..\\")) or _DRIVE.match(raw):
+        return True
+    return ("/" in raw or "\\" in raw) and not raw.startswith("@")
+
+
+def missing_paths(text: Any, argv: Optional[Iterable[Any]] = None) -> List[str]:
+    """Paths *text* names as missing, in order of appearance, each once.
+
+    *argv*, when given, lets a bare ``Cannot find module 'x'`` count as a path
+    because the command itself named ``x``.
+    """
     text = str(text or "")
+    argv = list(argv) if argv else None
     hits = []
     for pattern in _MISSING_PATH_PATTERNS:
         for match in pattern.finditer(text):
@@ -88,6 +162,10 @@ def missing_paths(text: Any) -> List[str]:
             raw = match.group(1).replace("\\\\", "\\").strip()
             if raw:
                 hits.append((match.start(1), raw))
+    for match in _CANNOT_FIND_MODULE.finditer(text):
+        raw = match.group(1).strip()
+        if raw and _looks_like_path(raw, argv):
+            hits.append((match.start(1), raw))
     ordered: List[str] = []
     for _, raw in sorted(hits):
         if raw not in ordered:
@@ -100,47 +178,100 @@ def is_missing_manifest(text: Any) -> bool:
     return bool(_MISSING_MANIFEST.search(str(text or "")))
 
 
-_DRIVE = re.compile(r"^[A-Za-z]:/")
-
-
 def _norm(path: str) -> str:
     return path.replace("\\", "/")
+
+
+def _windows_shaped(path: str) -> bool:
+    return bool(_DRIVE.match(path)) or "\\" in path
+
+
+def _normalize(path: str) -> str:
+    """Collapse ``.`` and ``..`` segments, with the rules of the platform the
+    path looks like, and return it with forward slashes."""
+    if _windows_shaped(path):
+        return _norm(ntpath.normpath(path))
+    return posixpath.normpath(path)
+
+
+def _real_forms(path: str) -> List[str]:
+    """*path*, plus its resolved form when it or its parent exists here, so a
+    symlinked prefix (``/var`` vs ``/private/var``) still matches the root."""
+    forms = [path]
+    if _windows_shaped(path) and os.name != "nt":
+        return forms
+    try:
+        if os.path.exists(path):
+            forms.append(_norm(os.path.realpath(path)))
+        else:
+            parent, name = os.path.split(path)
+            if parent and os.path.isdir(parent):
+                forms.append(_norm(os.path.join(os.path.realpath(parent), name)))
+    except (OSError, ValueError):
+        pass
+    return forms
 
 
 def relativize(raw: str, root: Any) -> Optional[str]:
     """*raw* as a POSIX path relative to *root*, or None outside it.
 
-    Textual, so a Windows message is understood on any host: backslashes
-    become slashes and a drive letter compares case-insensitively. A relative
-    *raw* is already relative to the root, which is every gate's cwd.
+    Textual first, so a Windows message is understood on any host:
+    backslashes become slashes, ``..`` collapses, and a drive letter compares
+    case-insensitively. Then the resolved forms of both are compared where
+    they exist on this host. A relative *raw* is already relative to the
+    root, which is every gate's cwd.
     """
-    path = _norm(str(raw or "").strip())
-    if not path:
+    text = str(raw or "").strip()
+    if not text:
         return None
+    path = _normalize(text)
     if path.startswith("/") or _DRIVE.match(path):
-        roots = {_norm(str(root)).rstrip("/")}
+        root_text = str(root)
+        roots = {_normalize(root_text).rstrip("/")}
         try:
-            roots.add(_norm(os.path.realpath(str(root))).rstrip("/"))
+            roots.add(_norm(os.path.realpath(root_text)).rstrip("/"))
         except (OSError, ValueError):
             pass
-        for base in sorted(roots, key=len, reverse=True):
-            if not base:
-                continue
-            if _DRIVE.match(base):
-                if path.lower().startswith(base.lower() + "/"):
-                    path = path[len(base) + 1:]
+        rest = None
+        for form in _real_forms(path):
+            for base in sorted(roots, key=len, reverse=True):
+                if not base:
+                    continue
+                if _DRIVE.match(base):
+                    if form.lower().startswith(base.lower() + "/"):
+                        rest = form[len(base) + 1:]
+                elif form.startswith(base + "/"):
+                    rest = form[len(base) + 1:]
+                if rest is not None:
                     break
-            elif path.startswith(base + "/"):
-                path = path[len(base) + 1:]
+            if rest is not None:
                 break
-        else:
+        if rest is None:
             return None
-    while path.startswith("./"):
-        path = path[2:]
+        path = rest
     parts = [p for p in path.split("/") if p not in ("", ".")]
     if not parts or ".." in parts:
         return None
     return "/".join(parts)
+
+
+#: Programs that run a file named in their arguments. When one of these exits
+#: 126/127 because that file is missing, the file — not the program — is what
+#: could not be found (ADR-0022).
+INTERPRETERS = frozenset(("sh", "bash", "zsh", "node", "python", "python3", "ruby", "deno",
+                          "bun", "tsx", "ts-node"))
+_VERSION_SUFFIX = re.compile(r"(?<=[a-z])[\d.]+$")
+
+
+def is_interpreter(program: Any) -> bool:
+    """True when *program* (a path or a bare name) is one of `INTERPRETERS`;
+    ``python3.12`` and ``python.exe`` count as ``python``."""
+    name = ntpath.basename(_norm(str(program or "")).rsplit("/", 1)[-1]).lower()
+    if name.endswith(".exe"):
+        name = name[:-4]
+    if not name:
+        return False
+    return name in INTERPRETERS or _VERSION_SUFFIX.sub("", name) in INTERPRETERS
 
 
 def _scope_globs(task: Dict[str, Any]) -> List[str]:
@@ -167,19 +298,38 @@ def scope_owner(relpath: str, tasks: Optional[Iterable[Dict[str, Any]]]) -> Opti
     return None
 
 
-def missing_path_owner(gate: Dict[str, Any], root: Any,
-                       tasks: Optional[Iterable[Dict[str, Any]]]) -> Optional[Dict[str, Any]]:
-    """``{"path", "owner", "manifest"}`` for a failing gate's missing path.
+def _argv_paths(argv: Optional[Iterable[Any]], root: Any) -> set:
+    """Each argument as relativized into the project (options skipped)."""
+    found = set()
+    for arg in argv or []:
+        tok = str(arg).strip()
+        if not tok or tok.startswith("-"):
+            continue
+        rel = relativize(tok, root)
+        if rel is not None:
+            found.add(rel)
+    return found
 
-    The first extracted path that a task covers wins; otherwise the first
-    extracted path is reported with ``owner`` None (relative when inside the
-    root, as printed when not). None when the output names no missing path.
+
+def missing_path_owner(gate: Dict[str, Any], root: Any,
+                       tasks: Optional[Iterable[Dict[str, Any]]],
+                       argv: Optional[Iterable[Any]] = None) -> Optional[Dict[str, Any]]:
+    """``{"path", "owner", "manifest", "argv_named"}`` for a failing gate's
+    missing path.
+
+    The first extracted path that a task covers wins; otherwise the path is
+    reported with ``owner`` None — ``package.json`` when npm says it cannot
+    read the manifest, else the first extracted path (relative when inside the
+    root, as printed when not). ``argv_named`` says the reported path is one
+    of the gate's own arguments. None when the output names no missing path.
     """
     text = "%s\n%s" % (gate.get("stdout_tail") or "", gate.get("stderr_tail") or "")
-    raws = missing_paths(text)
+    argv = list(argv) if isinstance(argv, list) else None
+    raws = missing_paths(text, argv=argv)
     if not raws:
         return None
     manifest = is_missing_manifest(text)
+    named = _argv_paths(argv, root)
     tasks = list(tasks or [])
     first = None
     for raw in raws:
@@ -189,5 +339,23 @@ def missing_path_owner(gate: Dict[str, Any], root: Any,
             first = shown
         owner = scope_owner(rel, tasks) if rel is not None else None
         if owner:
-            return {"path": rel, "owner": owner, "manifest": manifest}
-    return {"path": first, "owner": None, "manifest": manifest}
+            return {"path": rel, "owner": owner, "manifest": manifest,
+                    "argv_named": rel in named}
+    if manifest:
+        first = "package.json"
+    return {"path": first, "owner": None, "manifest": manifest,
+            "argv_named": first in named}
+
+
+def program_owner(program: Any, root: Any,
+                  tasks: Optional[Iterable[Dict[str, Any]]]) -> "tuple":
+    """``(relpath, owner)`` for a program that could not be executed at all.
+
+    Only a program given as a path (holding a slash) can be one a task
+    writes; a bare name is looked up on PATH and gives ``(None, None)``.
+    """
+    text = str(program or "")
+    if "/" not in text and "\\" not in text:
+        return None, None
+    rel = relativize(text, root)
+    return rel, (scope_owner(rel, tasks) if rel else None)

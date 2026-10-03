@@ -2889,6 +2889,159 @@ class TestNotYetRunnable(JobTestCase):
                          "command_error")
 
 
+class TestNotYetRunnableReview(JobTestCase):
+    """Second-review cases: interpreters, argv-named notices, could-not-run."""
+
+    def host_config(self) -> None:
+        cfg = {"build": {"execution": "host", "max_retries": 2, "parallel": 1,
+                         "task_timeout_s": 60}}
+        (self.root / ".gatekit" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+
+    def gate(self, stderr: str, code: int) -> dict:
+        return {"verdict": verdict.FAIL, "exit": code, "stdout_tail": "", "stderr_tail": stderr}
+
+    SCRIPTS = [{"id": "e2e-setup", "write_scope": ["scripts/**"]}]
+
+    def test_bash_on_a_script_a_task_writes_is_not_yet_runnable(self) -> None:
+        gate = self.gate("bash: scripts/e2e.sh: No such file or directory\n", 127)
+        self.assertEqual(jobs.classify_gate_result(gate, ["bash", "scripts/e2e.sh"],
+                                                   root=self.root, tasks=self.SCRIPTS),
+                         "not_yet_runnable")
+
+    def test_node_on_a_script_a_task_writes_is_not_yet_runnable(self) -> None:
+        gate = self.gate("Error: Cannot find module '%s/scripts/e2e.js'\n" % self.root, 1)
+        self.assertEqual(jobs.classify_gate_result(gate, ["node", "scripts/e2e.js"],
+                                                   root=self.root, tasks=self.SCRIPTS),
+                         "not_yet_runnable")
+
+    def test_127_for_the_program_itself_stays_a_command_error(self) -> None:
+        gate = self.gate("sh: nonexistentprog: command not found\n", 127)
+        self.assertEqual(jobs.classify_gate_result(gate, ["nonexistentprog"], root=self.root,
+                                                   tasks=[{"id": "x", "write_scope": ["**"]}]),
+                         "command_error")
+
+    def test_127_with_the_path_not_in_argv_stays_a_command_error(self) -> None:
+        gate = self.gate("bash: scripts/e2e.sh: No such file or directory\n", 127)
+        self.assertEqual(jobs.classify_gate_result(gate, ["bash", "-c", "run-all"],
+                                                   root=self.root, tasks=self.SCRIPTS),
+                         "command_error")
+
+    def test_an_argv_named_owned_path_prints_a_notice(self) -> None:
+        import contextlib, io
+        self.host_config()
+        runner = self.simple_task(task_id="runner", target="src/tset_app.py")
+        user = self.simple_task(task_id="user", target="src/user.txt",
+                                gates=[{"name": "t", "argv": [sys.executable, "src/tset_app.py"]}])
+        self.write_tasks(runner, user)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = jobs.run(["start", "--root", str(self.root)])
+        self.assertEqual(code, 0)
+        self.assertIn("note:", out.getvalue())
+        self.assertIn("src/tset_app.py", out.getvalue())
+        self.assertNotIn("warn:", out.getvalue())
+        job = json.loads((self.root / ".gatekit" / "jobs" / jobs.latest_job_id(self.root)
+                          / "job.json").read_text())
+        self.assertEqual(job["preflight_warnings"], [])
+        self.assertEqual(len(job["preflight_notices"]), 1)
+
+    def test_an_output_only_path_prints_no_notice(self) -> None:
+        self.host_config()
+        shell = self.simple_task(task_id="shell-login", target="package.json")
+        e2e = self.simple_task(task_id="gallery", target="src/g.tsx", gates=[
+            {"name": "e2e", "argv": emitting_gate(stderr=NPM_ENOENT_TEXT, code=254)}])
+        self.write_tasks(shell, e2e)
+        job = jobs.start(self.root)
+        self.assertEqual(job.get("preflight_notices"), [])
+
+    def test_could_not_run_reaches_the_classifier(self) -> None:
+        result = jobs.run_gates(self.root, self.simple_task(
+            gates=[{"name": "g", "argv": ["no-such-binary-gatekit-xyz"]}]))
+        self.assertIn("could not run", result["gates"][0]["stderr_tail"])
+
+    def test_preflight_refuses_a_program_no_task_writes(self) -> None:
+        self.host_config()
+        self.write_tasks(self.simple_task(gates=[{"name": "g",
+                                                  "argv": ["no-such-binary-gatekit-xyz"]}]))
+        with self.assertRaises(jobs.GatePreflightError):
+            jobs.start(self.root)
+
+    def test_preflight_starts_on_a_program_a_task_writes(self) -> None:
+        self.host_config()
+        tool = self.simple_task(task_id="tool", target="bin/run-e2e")
+        user = self.simple_task(task_id="user", target="src/u.txt",
+                                gates=[{"name": "g", "argv": ["bin/run-e2e"]}])
+        self.write_tasks(tool, user)
+        job = jobs.start(self.root)
+        pre = json.loads((self.task_dir(job["job_id"], "user") / "preflight.json").read_text())
+        self.assertEqual(pre["gates"][0]["preflight"], "not_yet_runnable")
+
+    def test_a_real_bash_on_a_missing_script_starts(self) -> None:
+        self.host_config()
+        scripts = self.simple_task(task_id="e2e-setup", target="scripts/**")
+        user = self.simple_task(task_id="user", target="src/u.txt",
+                                gates=[{"name": "e2e", "argv": ["bash", "scripts/e2e.sh"]}])
+        self.write_tasks(scripts, user)
+        job = jobs.start(self.root)
+        pre = json.loads((self.task_dir(job["job_id"], "user") / "preflight.json").read_text())
+        self.assertEqual(pre["gates"][0]["exit"], 127)
+        self.assertEqual(pre["gates"][0]["preflight"], "not_yet_runnable")
+        self.assertEqual(len(job["preflight_notices"]), 1)
+
+    def test_a_real_bash_on_a_script_no_task_writes_is_refused(self) -> None:
+        self.host_config()
+        self.write_tasks(self.simple_task(gates=[{"name": "e2e",
+                                                  "argv": ["bash", "scripts/e2e.sh"]}]))
+        with self.assertRaises(jobs.GatePreflightError):
+            jobs.start(self.root)
+
+    def test_dot_dot_in_a_message_still_finds_the_owner(self) -> None:
+        gate = self.gate("Error: ENOENT: no such file or directory, open '%s/web/../src/a.ts'\n"
+                         % self.root, 1)
+        self.assertEqual(jobs.classify_gate_result(
+            gate, ["node", "x.js"], root=self.root,
+            tasks=[{"id": "src", "write_scope": ["src/**"]}]), "not_yet_runnable")
+
+    def test_a_manifest_refusal_names_package_json(self) -> None:
+        self.host_config()
+        text = ("npm error enoent Could not read package.json: Error: ENOENT: no such file or "
+                "directory, open '{root}/.npmrc'\n")
+        self.write_tasks(self.simple_task(gates=[{"name": "e2e",
+                                                  "argv": emitting_gate(stderr=text, code=254)}]))
+        with self.assertRaises(jobs.GatePreflightError) as ctx:
+            jobs.start(self.root)
+        self.assertIn("needs package.json", str(ctx.exception))
+
+
+class TestMalformedSignatureFile(JobTestCase):
+    """A broken data file must never break a gate run (the Stop hook would
+    fail open and skip recording its judgement)."""
+
+    def plugin_root(self, body: str) -> str:
+        root = self.root / "fakeplugin"
+        (root / ".claude-plugin").mkdir(parents=True)
+        (root / "spec-kit").mkdir()
+        (root / ".claude-plugin" / "plugin.json").write_text('{"name": "gatekit"}')
+        (root / "spec-kit" / "no-tests-signatures.json").write_text(body)
+        return str(root)
+
+    def test_run_gates_survives_every_shape(self) -> None:
+        from gatekit import runcheck
+        for body in ("[]", '{"signatures": {"a": 1}}', '{"signatures": ["x"]}'):
+            with self.subTest(body=body):
+                self.set_env(CLAUDE_PLUGIN_ROOT=self.plugin_root(body))
+                runcheck._signatures.cache_clear()
+                try:
+                    result = jobs.run_gates(self.root, self.simple_task(
+                        gates=[{"name": "t", "argv": emitting_gate(stdout="Ran 0 tests in 0s\n")}]))
+                finally:
+                    os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
+                    runcheck._signatures.cache_clear()
+                    import shutil
+                    shutil.rmtree(self.root / "fakeplugin")
+                self.assertEqual(result["gates"][0]["verdict"], verdict.OK)
+
+
 class TestZeroTestsIsNotAPass(JobTestCase):
     def gate_task(self, argv) -> dict:
         return self.simple_task(gates=[{"name": "tests", "argv": argv}])

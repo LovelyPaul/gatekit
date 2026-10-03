@@ -509,3 +509,31 @@ class TestExplicitRunFeedsReuse(CountingCriteria):
         self.assertEqual(contract.run(["run", "--root", str(self.root)]), 0)
         self.assertIsNone(stop_gate.handle(self.event()))
         self.assertEqual(self.runs(), 1)
+
+
+class TestStopWithMalformedSignatures(StopProject):
+    """ADR-0022 review: a structurally broken signature file raised out of
+    contract.execute, so the Stop hook failed open without a judgement."""
+
+    def test_the_stop_gate_still_judges(self) -> None:
+        from gatekit import runcheck
+        plugin = self.root / "fakeplugin"
+        (plugin / ".claude-plugin").mkdir(parents=True)
+        (plugin / "spec-kit").mkdir()
+        (plugin / ".claude-plugin" / "plugin.json").write_text('{"name": "gatekit"}')
+        (plugin / "spec-kit" / "no-tests-signatures.json").write_text('{"signatures": {"x": 1}}')
+        old = os.environ.get("CLAUDE_PLUGIN_ROOT")
+        os.environ["CLAUDE_PLUGIN_ROOT"] = str(plugin)
+        runcheck._signatures.cache_clear()
+        try:
+            self.failing()
+            self.set_pipeline("build")
+            result = stop_gate.handle(self.event())
+        finally:
+            if old is None:
+                os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
+            else:
+                os.environ["CLAUDE_PLUGIN_ROOT"] = old
+            runcheck._signatures.cache_clear()
+        self.assertEqual(result["decision"], "block")
+        self.assertIsNotNone(contract.load_last(self.root))

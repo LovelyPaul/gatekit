@@ -15,19 +15,33 @@ approval (ADR-0022). Found on a real job where 7 of 10 tasks warned about a
 
 - **A missing path that a task will write is not an error.** When a failing
   gate names a missing path (`ENOENT … open '<path>'`, `No such file or
-  directory`, `can't open file`) and some task in the job has it in its
-  `write_scope`, preflight starts silently and `preflight.json` names that
-  task. npm missing a `package.json` that no task writes is refused with
-  exit 4. A refusal for a missing script names the path and says no task
-  writes it. A script that a task does write is no longer refused.
+  directory`, `can't open file`, pytest's `file or directory not found`,
+  node's `Cannot find module './…'`) and some task in the job has it in its
+  `write_scope`, preflight starts and `preflight.json` names that task.
+  `bash scripts/e2e.sh`, `node scripts/e2e.js` and `python3 scripts/x.py`
+  on a script that a task writes are no longer refused, including bash's
+  exit 127; a program that is not found at all still is. When the gate
+  names that path in its own arguments, `jobs start` prints one `note:` line
+  per task naming the path and the task that writes it, because a typo
+  there now shows only after that task runs. npm missing a `package.json`
+  that no task writes is refused with exit 4 and the message names
+  `package.json`. A refusal for a missing script names the path and says no
+  task writes it. A program path that cannot be executed and that no task
+  writes is refused too; before, preflight saw no output for it and started
+  silently. `..` segments and symlinked prefixes (`/var` vs `/private/var`)
+  in a message no longer hide the owner.
 - **Zero tests is `unverified`.** A gate or criterion whose runner ran no
   tests is `unverified` with `ran no tests (<runner>)`, not `ok`. This
   covers pytest, unittest, jest, vitest, Playwright, `node --test`, mocha,
   `go test` and `cargo test`. It never applies when the output also reports
   a positive count. pytest's and unittest's exit 5 ("no tests ran") are
-  `unverified` too. Preflight no longer skips such a task, and the Stop gate
-  no longer counts it. The signatures live in
-  `plugin/spec-kit/no-tests-signatures.json`.
+  `unverified` too, and so is pytest's exit 5 when every test was
+  deselected (`-k` that matches nothing). ANSI colour in the output does not
+  hide a match, and `go test` lines with `coverage:` count as a real run.
+  Preflight no longer skips such a task, and the Stop gate no longer counts
+  it or reuses a result recorded before 0.14.0. The signatures live in
+  `plugin/spec-kit/no-tests-signatures.json`; a malformed file or entry is
+  skipped rather than breaking a gate run.
 
 ### Added
 
@@ -36,9 +50,10 @@ approval (ADR-0022). Found on a real job where 7 of 10 tasks warned about a
   `command_error` or `unverified`. Results go to `.gatekit/baseline.json`,
   and the command exits 4 on a `command_error`. `/gatekit:gate` shows the
   classes in the approval table and flags criteria that pass before any
-  work. The same run is the budget measurement `gate-criteria.md` asks for,
-  so the gate step still costs one contract run. It never writes the Stop
-  gate's `contract-last.json`.
+  work. The same run is the budget measurement `gate-criteria.md` asks for;
+  it runs again after a budget edit so `baseline.json` always matches the
+  approved file. It runs against the pre-work tree, so anything a criterion
+  creates there stays. It never writes the Stop gate's `contract-last.json`.
 
 ## 0.13.1 — 2026-10-03
 
