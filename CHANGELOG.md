@@ -4,6 +4,36 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.16.4 — 2026-10-03
+
+Fixes from a review of 0.16.3 (ADR-0026, amended).
+
+### Fixed
+
+- **Doctor's port probe reads typed declarations and quoted keys.**
+  `const webServer: PlaywrightTestConfig['webServer'] = { port: 3800 }` and
+  `const webServer: { command: string; port: number }[] = [ … ]` yielded no
+  port: the type annotation was read as the value. After `const`/`let`/`var`
+  the annotation is now skipped to its `=`. `'webServer':` and
+  `"webServer":` keys are recognised, and a `webServer` inside another
+  string literal is no longer taken for a key.
+- **The built-in evaluator brief puts the scratch exception on the write
+  gate.** It said the CLI sandbox and the write gate both refuse writes
+  except under `.gatekit/eval/`, but only the write gate makes that
+  exception. It now says a backend's own sandbox may refuse even scratch
+  files, and then the evaluator keeps scratch in memory or reports the step
+  `unverified`; the spec-kit brief says the same.
+- **Commands detect the language the way the prompt hook does.**
+  `/gatekit:build`, `/gatekit:tasks`, `/gatekit:gate` and `/gatekit:verify` ran
+  `gatekit lang "$(head -40 spec/01-prd.md)"`, which reads a table-heavy
+  Korean PRD as `en`. They now run `gatekit lang --spec`: the spec's prose
+  head (`lang.from_spec`), else the latest session ledger's language, else
+  `en`. The positional `gatekit lang <text>` is unchanged.
+- **Spec templates name the launcher.** `RECOVERY.md`, `PROGRESS.md`,
+  `01-prd.md`, `04-tasks.md` and `05-gate.md` (ko and en) said
+  `python3 -m gatekit …`, which does not run from a project; they now name
+  `bin/gatekit.py`, and `gate_command_invocations` checks the templates too.
+
 ## 0.16.3 — 2026-10-03
 
 Fixes from a review of 0.16.2 (ADR-0026, amended).
