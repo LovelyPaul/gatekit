@@ -22,21 +22,28 @@ then passes and nothing records that the thing doing the judging changed. The
 completion contract has the same exposure after approval: `05-gate.md`'s hash
 is pinned, but the spec files its criteria run are not.
 
-The owner considered three responses:
+The owner was offered four options:
 
-1. **Block writes** to grading files during a build (in the write gate).
-   This breaks ADR-0013: a refined gate or test is normal, and the write gate
-   cannot tell a fix from a loosening.
-2. **Detect and refuse**: fail or withhold the task when its grading file
-   changed between a failure and a pass. Same problem one step later: a test
-   that was itself wrong is fixed exactly this way, and a refusal would send a
-   correct task back to a worker.
-3. **Detect and report only**: record that it happened, keep the verdict, and
-   put it in front of the reviewer.
+1. **Strict protection**: the write gate refuses edits to grading files that
+   existed at approval; changing one needs `05-gate.md` re-approved. Strongest,
+   but it breaks ADR-0013 — a refined gate or test mid-build is normal — and
+   every such refinement would cost a re-approval round trip.
+2. **Lock on pass**: once a task passes, the write gate refuses later edits to
+   its grading files. Edits before the pass stay allowed, so it does not catch
+   a task loosening its own test on the way to its first pass — the case this
+   ADR is about.
+3. **Detect and report only**: record grading-file hashes, never block a
+   write. A criterion whose grading file changed since approval is withheld as
+   `unverified`; a task that passed only after its own grading file changed is
+   reported, its verdict kept.
+4. **Defer** the step until real builds on 0.14.0 show whether it is needed.
 
-The owner chose 3 for tasks. For completion criteria the approved file is the
+The owner chose 3. For completion criteria the approved file is the
 contract, so a change there cannot be a pass; it is reported as `unverified`
-(never `fail`, since nothing was shown wrong, and never `ok`).
+(never `fail`, since nothing was shown wrong, and never `ok`). For tasks a
+test that was itself wrong is fixed exactly this way, so a refusal would send
+a correct task back to a worker; the change is put in front of the reviewer
+instead.
 
 ## Decision
 
@@ -128,7 +135,10 @@ of <paths>".
 
 ## Rejected alternatives
 
-- Options 1 and 2 above, for the reasons given.
+- Options 1, 2 and 4 above, for the reasons given.
+- **Withhold the task** when its grading file changed between a failure and a
+  pass. A test that was itself wrong is fixed exactly this way, and a refusal
+  would send a correct task back to a worker.
 - **Hash the whole write scope.** Code changes between a failure and a pass
   are the point of an attempt; only the judging files say something.
 - **Diff and judge the change** (e.g. count removed assertions). Runner- and
