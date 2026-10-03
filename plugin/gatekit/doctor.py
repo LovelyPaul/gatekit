@@ -308,8 +308,11 @@ def _balanced_value(text: str, start: int) -> str:
     return text[start:limit]
 
 
+#: A '...' or "..." literal stops at a line break (JS does not let one span
+#: lines), so a quote in a regex literal such as ``/'/g`` blanks at most the
+#: rest of its line, not the rest of the file. Template literals span lines.
 _STRING_RE = re.compile(
-    r"'(?:[^'\\]|\\.)*'?|\"(?:[^\"\\]|\\.)*\"?|`(?:[^`\\]|\\.)*`?", re.S)
+    r"'(?:[^'\\\n]|\\.)*'?|\"(?:[^\"\\\n]|\\.)*\"?|`(?:[^`\\]|\\.)*`?", re.S)
 _NOT_NEWLINE_RE = re.compile(r"[^\n]")
 
 

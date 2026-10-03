@@ -341,6 +341,19 @@ class TestAxisProjectStatePortProbe(DoctorTestCase):
         self.assertEqual(self.ports_of(
             "const webServer: Config = { command: 'x', port: 3804 }\n"), [3804])
 
+    def test_quote_in_a_regex_literal_does_not_hide_the_port(self) -> None:
+        # Review of 0.16.4: an unterminated '...' or "..." ran to EOF and
+        # blanked the `webServer` key after it.
+        self.assertEqual(self.ports_of(
+            "const r = /'/g;\nexport default { webServer: { port: 3810 } }\n"), [3810])
+        self.assertEqual(self.ports_of(
+            'const r = /"/;\nexport default { webServer: { port: 3811 } }\n'), [3811])
+        self.assertEqual(self.ports_of(
+            "const r = /it's/;\nexport default { webServer: { port: 3812 } }\n"), [3812])
+        # A template literal still spans lines.
+        self.assertEqual(self.ports_of(
+            "const t = `a\nwebServer: { port: 9243 }\n`;\n"), [])
+
     def test_typed_declaration_without_a_value_reads_nothing_after_it(self) -> None:
         self.assertEqual(self.ports_of(
             "let webServer: Config;\nconst other = { port: 9240 };\n"), [])

@@ -16,7 +16,9 @@ Fixes from a review of 0.16.3 (ADR-0026, amended).
   port: the type annotation was read as the value. After `const`/`let`/`var`
   the annotation is now skipped to its `=`. `'webServer':` and
   `"webServer":` keys are recognised, and a `webServer` inside another
-  string literal is no longer taken for a key.
+  string literal is no longer taken for a key; a quoted string ends at a
+  line break, so a quote in a regex literal (`/'/g`) does not hide the keys
+  below it.
 - **The built-in evaluator brief puts the scratch exception on the write
   gate.** It said the CLI sandbox and the write gate both refuse writes
   except under `.gatekit/eval/`, but only the write gate makes that

@@ -265,7 +265,12 @@ as before. A `;`, `,`, closing bracket or line break at depth 0 before any
 in matching quotes (`'webServer':`, `"webServer":`) is recognised. A
 `webServer` inside any other string literal (`console.log('webServer: {…}')`)
 is not a key: string contents are blanked before matching, and values are
-still read from the unblanked text so `url: '…:3000'` keeps its port.
+still read from the unblanked text so `url: '…:3000'` keeps its port. A
+`'…'` or `"…"` literal ends at a line break (a JavaScript string cannot span
+lines; template literals still do), so a lone quote outside a string — in a
+regex literal such as `/'/g` or `/it's/` — blanks at most the rest of its
+line. An earlier draft let it run to the end of the file, which blanked a
+`webServer` key below it and hid its port.
 
 
 ### C2. The built-in brief puts the scratch exception on the write gate only
