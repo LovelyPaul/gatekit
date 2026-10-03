@@ -4,6 +4,47 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.16.7 — 2026-10-04
+
+Small fixes from the study: one entry per command in the slash menu, a doctor
+port probe that no longer misreads three rare config shapes, and documents
+that match the tree.
+
+### Changed
+
+- **Each command appears once in the slash menu.** The trigger-shim skill
+  behind every command (`gatekit-build`, …) now carries
+  `user-invocable: false`, so Claude Code shows `/gatekit:build` but no longer
+  `/gatekit:gatekit-build`. Claude still invokes a shim from its description,
+  so asking in plain words keeps working. Codex reads the same `SKILL.md`
+  files and ignores the key, so `$gatekit-<name>` is unchanged.
+  `tools/gate_skill_size.py` fails a shim, found by its exact `name:`,
+  that lacks the key (ADR-0026 D2). Not yet seen in a live menu.
+
+### Fixed
+
+- **Doctor's port probe reads three rare shapes correctly** (ADR-0026 D1).
+  A backtick inside a template expression no longer hides the ports below
+  it; a ternary that yields the string `'webServer'` is no longer read as the
+  key; a `port:` inside a string in the value (a `command:` line) is no
+  longer reported. Comments, strings and template expressions are blanked in
+  one linear pass; a template expression that does not close on its line, or
+  at the end of the file, is read the earlier way, so a regex literal inside
+  one cannot hide the rest of the file.
+- **The port fallback is bounded.** The literal after `||` or `??` must sit
+  within 200 characters, so a config with many `port:` keys no longer takes
+  several seconds to scan.
+
+### Documentation
+
+- `ROADMAP.md`: the rename compatibility layer is listed as shipped in
+  0.16.6; 0.17.0 keeps only the name flip, the English manual, the migration
+  guide, URL updates and the demo. The PowerShell gate awaits a live Windows
+  session. The worker-timeout bug is marked as affecting `execution: worker`
+  and `--backend` builds only; the default is host.
+- `docs/ARCHITECTURE.md` §1 lists the files the tree actually has, and the
+  hook count is corrected to 9 registrations over 8 gate scripts.
+
 ## 0.16.6 — 2026-10-04
 
 The PowerShell tool meets the same gates as Bash (ADR-0028), and gatekit
