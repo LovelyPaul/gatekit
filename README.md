@@ -251,6 +251,7 @@ defaults.
 - `docs/decisions/` — the architectural decision records.
 - `docs/retros/` — retrospectives from real trial builds (Korean); each
   lists the tool defects and friction found, with evidence paths.
+- [`ROADMAP.md`](ROADMAP.md) — what is being worked on now, next and later, and the non-goals.
 
 ## Status
 
