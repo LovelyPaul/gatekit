@@ -180,6 +180,27 @@ class TestBashGate(Project):
         "cp forged/approvals.json .gatekit/",
         "truncate -s 0 .gatekit/contract.json",
         "touch .gatekit/approvals.json",
+        # review: globs and braces in a target
+        "echo {} > .gatekit/approval?.json",
+        "cp /tmp/f .gatekit/a*s.json",
+        "jq . x | tee .gatekit/{approvals,x}.json",
+        "echo > .gatekit/approvals.js[o]n",
+        "echo > .gate*/contract.json",
+        "rm .gatekit/*",
+        "rm -rf .gatek?t",
+        # review: cd behind shell keywords, pushd, conditional cd
+        "{ cd .gatekit; echo > approvals.json; }",
+        "if true; then cd .gatekit; fi; echo {} > approvals.json",
+        "for i in 1; do cd .gatekit; done; echo {} > approvals.json",
+        "! cd .gatekit; echo > contract.json",
+        "pushd .gatekit; echo > approvals.json",
+        "cd .gatekit; false && cd /tmp; echo > approvals.json",
+        # review: copies into .gatekit that do not name it as a literal destination
+        "cp -t .gatekit /tmp/x/approvals.json",
+        "cp --target-directory=.gatekit /tmp/x/contract.json",
+        "install -t .gatekit /tmp/x/approvals.json",
+        "cp /tmp/x/* .gatekit/",
+        "cp -r /tmp/fake/.gatekit .",
     )
 
     def test_denied_before_and_after_approval(self) -> None:
@@ -189,6 +210,27 @@ class TestBashGate(Project):
             for command in self.COMMANDS:
                 with self.subTest(approved=approved, command=command):
                     self.assertDenied(self.bash(command))
+
+    def test_copies_through_a_symlink_or_of_a_directory(self) -> None:
+        (self.root / "g").symlink_to(self.root / ".gatekit", target_is_directory=True)
+        fake = self.root / "fake"
+        (fake / ".gatekit").mkdir(parents=True)
+        (fake / "approvals.json").write_text("{}", encoding="utf-8")
+        for approved in (False, True):
+            if approved:
+                self.approve()
+            for command in ("cp /tmp/x/approvals.json g", "cp /tmp/x/approvals.json g/",
+                            "rsync -a fake/ .", "cp -R fake/ .", "rsync -a fake/ .gatekit"):
+                with self.subTest(approved=approved, command=command):
+                    self.assertDenied(self.bash(command))
+
+    def test_globs_and_cd_that_miss_the_files_are_allowed(self) -> None:
+        self.approve()
+        for command in ("rm -rf build/*", "rm -f *.json", "echo > src/*.txt",
+                        "cd src && echo x > approvals.json", "cp -r fake/ build",
+                        "if true; then cd src; fi; echo x > out.txt", "cp a* src/"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.bash(command))
 
     def test_opaque_command_naming_the_file_after_approval(self) -> None:
         self.approve()

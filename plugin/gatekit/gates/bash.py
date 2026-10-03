@@ -35,6 +35,7 @@ Denial reasons are written in the session's ``output_lang``.
 """
 from __future__ import annotations
 
+import fnmatch
 import os
 import posixpath
 import re
@@ -50,7 +51,7 @@ else:
 
     ensure_package_path()
 
-from gatekit import hookio  # noqa: E402
+from gatekit import hookio, paths  # noqa: E402
 from gatekit.gates import write  # noqa: E402
 
 #: Tokens that end one simple command and start the next.
@@ -126,14 +127,19 @@ def _message(lang: str, key: str, **fields: Any) -> str:
 class WriteTargets:
     """Result of :func:`extract_write_targets`."""
 
-    __slots__ = ("targets", "opaque", "why", "removed", "copies")
+    __slots__ = ("targets", "opaque", "why", "removed", "copies", "cwds", "unresolved")
 
     def __init__(self) -> None:
         self.targets: List[str] = []
         #: ADR-0027: paths a command deletes or moves away (``rm``, ``mv`` sources).
         self.removed: List[str] = []
-        #: ADR-0027: ``(sources, destination)`` of ``cp``/``mv``/``ln``/``install``/``rsync``.
-        self.copies: List[Tuple[List[str], str]] = []
+        #: ADR-0027: ``(sources, destination, raw sources)`` of ``cp``/``mv``/
+        #: ``ln``/``install``/``rsync``; sources and raw sources pair up.
+        self.copies: List[Tuple[List[str], str, List[str]]] = []
+        #: ADR-0027: every working directory the command may write from.
+        self.cwds: List[str] = []
+        #: ADR-0027: literal targets left unresolved because the cwd was unknown.
+        self.unresolved: List[str] = []
         self.opaque: bool = False
         self.why: str = ""
 
@@ -247,6 +253,8 @@ def _add(result: WriteTargets, raw: str, cwd: Optional[str], why: str) -> None:
         return
     resolved = _resolve(raw, cwd)
     if resolved is None:
+        if "$" not in raw and "`" not in raw:
+            result.unresolved.append(raw)
         result.mark_opaque(why)
         return
     if _is_device(resolved):
@@ -291,11 +299,20 @@ def _pull_redirects(words: List[str], result: WriteTargets, cwd: Optional[str]) 
     return rest
 
 
+#: Reserved words that may precede a simple command (``{ cd x; }``, ``then cd x``).
+_KEYWORDS = {"{", "}", "!", "if", "then", "else", "elif", "fi", "do", "done",
+             "while", "until"}
+
+
 def _strip_wrappers(words: List[str]) -> List[str]:
-    """Drop ``sudo``/``env``/``VAR=x`` prefixes to reach the real command."""
+    """Drop ``sudo``/``env``/``VAR=x`` prefixes and reserved words to reach
+    the real command."""
     index = 0
     while index < len(words):
         word = words[index]
+        if word in _KEYWORDS:
+            index += 1
+            continue
         if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", word):
             index += 1
             continue
@@ -397,6 +414,18 @@ def _archive(name: str, args: List[str], result: WriteTargets, cwd: Optional[str
         _add(result, target or ".", cwd, "variable in tar directory")
 
 
+def _target_directory(args: List[str]) -> Optional[str]:
+    """The operand of ``-t DIR`` / ``-tDIR`` / ``--target-directory[=]DIR``."""
+    for index, arg in enumerate(args):
+        if arg in ("-t", "--target-directory"):
+            return args[index + 1] if index + 1 < len(args) else ""
+        if arg.startswith("--target-directory="):
+            return arg.split("=", 1)[1]
+        if arg.startswith("-t") and len(arg) > 2 and not arg.startswith("--"):
+            return arg[2:]
+    return None
+
+
 def _analyze(words: List[str], result: WriteTargets, cwd: Optional[str]) -> Optional[str]:
     """Inspect one simple command. Returns the new cwd (or ``None`` = unknown)."""
     args = _pull_redirects(words, result, cwd)
@@ -406,10 +435,16 @@ def _analyze(words: List[str], result: WriteTargets, cwd: Optional[str]) -> Opti
     name = posixpath.basename(args[0])
     rest = args[1:]
 
-    if name == "cd":
-        if not rest:
+    if name in ("cd", "pushd"):
+        operands = [a for a in rest if not (a.startswith("-") and a != "-")]
+        if not operands:
             return None  # $HOME — unknown to us
-        return _resolve(rest[0], cwd)
+        new = _resolve(operands[0], cwd)
+        if new:
+            result.cwds.append(new)
+        return new
+    if name == "popd":
+        return None
 
     if name in _SHELLS:
         if "-c" in rest:
@@ -418,6 +453,8 @@ def _analyze(words: List[str], result: WriteTargets, cwd: Optional[str]) -> Opti
             result.targets.extend(t for t in nested.targets if t not in result.targets)
             result.removed.extend(nested.removed)
             result.copies.extend(nested.copies)
+            result.cwds.extend(nested.cwds)
+            result.unresolved.extend(nested.unresolved)
             if nested.opaque:
                 result.mark_opaque(nested.why)
         return cwd
@@ -492,16 +529,21 @@ def _analyze(words: List[str], result: WriteTargets, cwd: Optional[str]) -> Opti
 
     if name in ("cp", "mv", "ln", "install", "rsync"):
         positional = _positional(rest, consuming=("-t", "--target-directory", "-m", "-o", "-g"))
-        if len(positional) >= 2:
+        target_dir = _target_directory(rest)
+        if target_dir is None and len(positional) >= 2:
             _add(result, positional[-1], cwd, "variable in destination")
-            sources = [r for r in (_resolve(a, cwd) for a in positional[:-1]) if r]
-            dest = _resolve(positional[-1], cwd)
-            if dest:
-                result.copies.append((sources, dest))
-            if name == "mv":
-                result.removed.extend(sources)
-        elif any(a.startswith("-t") or a.startswith("--target-directory") for a in rest):
+            dest_raw, source_raws = positional[-1], positional[:-1]
+        elif target_dir is not None:
             result.mark_opaque("%s target directory" % name)
+            dest_raw, source_raws = target_dir, positional
+        else:
+            return cwd
+        pairs = [(r, a) for r, a in ((_resolve(a, cwd), a) for a in source_raws) if r]
+        dest = _resolve(dest_raw, cwd)
+        if dest:
+            result.copies.append(([r for r, _ in pairs], dest, [a for _, a in pairs]))
+        if name == "mv":
+            result.removed.extend(r for r, _ in pairs)
         return cwd
 
     if name in ("touch", "rm", "rmdir", "unlink", "mkdir", "truncate", "chmod", "chown"):
@@ -538,6 +580,8 @@ def extract_write_targets(command: str, cwd: Optional[str]) -> WriteTargets:
         result.mark_opaque("unbalanced quotes")
         return result
     current = cwd
+    if cwd:
+        result.cwds.append(cwd)
     for simple in _split_simple(tokens):
         current = _analyze(simple, result, current)
     return result
@@ -625,43 +669,150 @@ def _lower_abs(path: str) -> str:
     return os.path.normpath(write._canonical(path)).replace("\\", "/").lower().rstrip("/")
 
 
+_GLOB_CHARS = frozenset("*?[{")
+_STATE = paths.STATE_DIRNAME
+
+
+def _base(path: str) -> str:
+    return _lower_abs(path).rsplit("/", 1)[-1]
+
+
+def _own_paths(root) -> "tuple[str, List[str]]":
+    """``(state dir, [protected files])``, realpath'd, lowered, canonical."""
+    state = _lower_abs(os.path.realpath(str(paths.state_dir(root))))
+    return state, [state + "/" + name for name in write.PROTECTED_NAMES]
+
+
+def _segment_match(name: str, pattern: str) -> bool:
+    """Glob match of one segment; braces are read as ``*`` (a superset), and
+    a leading dot must be matched literally, as the shell does by default."""
+    pattern = re.sub(r"\{[^}]*\}", "*", pattern)
+    if name.startswith(".") and not pattern.startswith("."):
+        return False
+    return fnmatch.fnmatchcase(name, pattern)
+
+
+def _glob_segments(path: str) -> List[str]:
+    """*path* (absolute) as lowered segments, the glob-free prefix realpath'd."""
+    parts = _lower_abs(path).split("/")
+    first = next((i for i, p in enumerate(parts) if _GLOB_CHARS & set(p)), len(parts))
+    prefix = "/".join(parts[:first]) or "/"
+    real = _lower_abs(os.path.realpath(prefix)) if first else ""
+    return [p for p in real.split("/") if p] + [p for p in parts[first:] if p]
+
+
+def _glob_hits(path: str, candidates: List[str]) -> bool:
+    if not (_GLOB_CHARS & set(path)):
+        return False
+    pats = _glob_segments(path)
+    for cand in candidates:
+        segs = [p for p in cand.split("/") if p]
+        if len(segs) == len(pats) and all(_segment_match(n, p) for n, p in zip(segs, pats)):
+            return True
+    return False
+
+
+def _glob_tail_hits(path: str) -> bool:
+    """A glob whose last two segments can match ``.gatekit/<protected name>``
+    in any directory (another project's record is protected too)."""
+    if not (_GLOB_CHARS & set(path)):
+        return False
+    segs = _glob_segments(path)
+    return (len(segs) >= 2 and _segment_match(_STATE, segs[-2])
+            and any(_segment_match(n, segs[-1]) for n in write.PROTECTED_NAMES))
+
+
 def _contains_protected(root, removed: str) -> bool:
     """True when deleting or moving *removed* takes a protected file with it:
     it is a ``.gatekit`` directory, or an ancestor of this project's own."""
-    try:
-        for candidate in {_lower_abs(removed), _lower_abs(os.path.realpath(removed))}:
-            if candidate.rsplit("/", 1)[-1] == ".gatekit":
+    state, files = _own_paths(root)
+    ancestors = [state]
+    while "/" in ancestors[-1].strip("/"):
+        ancestors.append(ancestors[-1].rsplit("/", 1)[0])
+    if _glob_hits(removed, files + ancestors):
+        return True
+    for candidate in {_lower_abs(removed), _lower_abs(os.path.realpath(removed))}:
+        if candidate.rsplit("/", 1)[-1] == _STATE:
+            return True
+        for mine in files:
+            if mine.startswith(candidate + "/") or candidate in ("", "/"):
                 return True
-            for own in write.protected_files(root):
-                mine = _lower_abs(os.path.realpath(str(own)))
-                if mine.startswith(candidate + "/") or candidate in ("", "/"):
-                    return True
-    except (OSError, ValueError, TypeError):
+    return False
+
+
+def _dir_holds(path: str, names) -> bool:
+    """True when directory *path* has an entry named one of *names* (any case)."""
+    try:
+        return os.path.isdir(path) and any(e.lower() in names for e in os.listdir(path))
+    except OSError:
         return False
+
+
+def _copy_hit(root, sources: List[str], dest: str, raws: List[str]) -> Optional[str]:
+    """A copy or move that lands a protected file: into a ``.gatekit``
+    directory a source named like one (or a directory with one, copied by
+    contents), into the directory holding ours a ``.gatekit`` directory."""
+    state, _ = _own_paths(root)
+    dests = {_lower_abs(dest), _lower_abs(os.path.realpath(dest))}
+    into_state = any(d.rsplit("/", 1)[-1] == _STATE for d in dests)
+    into_parent = state.rsplit("/", 1)[0] in dests
+    names = set(write.PROTECTED_NAMES)
+    for source, raw in zip(sources, raws):
+        base = _base(source)
+        by_contents = raw.endswith("/") or raw.endswith("/.")
+        if into_state and (base in names or any(_segment_match(n, base) for n in names)
+                           or (by_contents and _dir_holds(source, names))):
+            return _STATE + "/"
+        if into_parent and (_segment_match(_STATE, base)
+                            or (by_contents and _dir_holds(source, {_STATE}))):
+            return _STATE + "/"
+    return None
+
+
+def _in_state_cwd(command: str, found: WriteTargets) -> bool:
+    """True when the command may run from a ``.gatekit`` directory: one of its
+    working directories is one (after realpath), or its text names one."""
+    if _STATE in command.lower():
+        return True
+    for cwd in found.cwds:
+        for candidate in (_lower_abs(cwd), _lower_abs(os.path.realpath(cwd))):
+            if candidate.rsplit("/", 1)[-1] == _STATE:
+                return True
     return False
 
 
 def protected_hit(root, command: str, found: WriteTargets) -> Optional[str]:
     """The protected file this command would write, remove or replace, else
-    ``None``. A copy or move into a ``.gatekit`` directory counts when a
-    source's base name is a protected name."""
+    ``None`` (ADR-0027). Never raises."""
+    try:
+        return _protected_hit(root, command, found)
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _protected_hit(root, command: str, found: WriteTargets) -> Optional[str]:
+    _, files = _own_paths(root)
     for target in found.targets:
         hit = write.protected_state(root, target)
         if hit:
             return hit
+        if _glob_hits(target, files) or _glob_tail_hits(target):
+            return _STATE + "/"
     for removed in found.removed:
         hit = write.protected_state(root, removed)
         if hit:
             return hit
         if _contains_protected(root, removed):
-            return ".gatekit/"
-    for sources, dest in found.copies:
-        if _lower_abs(dest).rsplit("/", 1)[-1] != ".gatekit":
-            continue
-        for source in sources:
-            name = _lower_abs(source).rsplit("/", 1)[-1]
-            if name in write.PROTECTED_NAMES:
-                return ".gatekit/" + name
+            return _STATE + "/"
+    for sources, dest, raws in found.copies:
+        hit = _copy_hit(root, sources, dest, raws)
+        if hit:
+            return hit
+    # A cwd we may have misread (a conditional `cd`, an unknown one): a
+    # target named like a protected file counts when .gatekit is in play.
+    for target in list(found.targets) + list(found.unresolved) + list(found.removed):
+        if _base(target) in write.PROTECTED_NAMES and _in_state_cwd(command, found):
+            return _STATE + "/" + _base(target)
     if found.opaque:
         match = _PROTECTED_MENTION_RE.search(command)
         if match:

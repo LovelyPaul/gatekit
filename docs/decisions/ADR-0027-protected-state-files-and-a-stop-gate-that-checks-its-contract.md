@@ -70,10 +70,24 @@ always: before and after approval, in any session, with or without
   protected; when a removed path (`rm`, `rmdir`, `unlink`
   operands, `mv` sources) is a protected file or a directory that contains
   one (`rm -rf .gatekit`, `mv .gatekit x`); when a `cp`/`mv`/`ln`/`install`/
-  `rsync` destination is the `.gatekit` directory and a source's base name
-  is a protected name; and when the command is otherwise opaque (inline
-  interpreter code, `git checkout`, `eval`, …) and its text names
-  `.gatekit/approvals.json` or `.gatekit/contract.json`.
+  `rsync` destination (positional or `-t`/`--target-directory`, after
+  realpath) is a `.gatekit` directory and a source is named like a protected
+  file or is a directory copied by contents (`src/`) that holds one, or the
+  destination is the directory holding this project's `.gatekit` and a source
+  is a `.gatekit` directory or a directory copied by contents that holds one;
+  and when the command is otherwise opaque (inline interpreter code, `git
+  checkout`, `eval`, …) and its text names `.gatekit/approvals.json` or
+  `.gatekit/contract.json`. A target, removed path or copy source with glob
+  or brace characters (`approval?.json`, `{approvals,x}.json`, `.gatekit/*`)
+  counts when it can match a protected file segment by segment (braces read
+  as `*`; a leading dot matched literally, as the shell does without
+  `dotglob`). Reserved words before a command (`{`, `!`, `then`, `do`, …) are
+  skipped so `cd` behind them is tracked, `pushd` is read as `cd` and `popd`
+  makes the directory unknown; and because a `cd` under `&&`/`||`/`if` may or
+  may not run, a target named `approvals.json`/`contract.json` counts whenever
+  one of the command's directories is a `.gatekit` directory or its text names
+  `.gatekit`. (The keyword, `pushd` and `popd` reading also sharpens rules (a)
+  and (b) before approval: a relative write after `popd` is now `opaque`.)
 - **The launcher stays allowed.** `python3 "<plugin>/bin/gatekit.py" approve
   spec/05-gate.md` and `… contract derive` name no write target in shell
   syntax, so the host session runs them as before. A worker's `approve` stays
@@ -163,6 +177,14 @@ evaluated, in this order, and the first failure is the result
   running `gatekit approve`.
 - Other `.gatekit/**` files (session ledgers, `runs/contract-last.json`, job
   directories) stay writable as before.
+- The Bash reading is static: a glob under `shopt -s dotglob`, `git clean -x`
+  (opaque, and it does not name the file), or a script file that writes the
+  files are not seen after approval.
+- **False positives accepted.** An opaque command that only reads a
+  protected file by name (`python3 -c "…open('.gatekit/contract.json')…"`) is
+  denied in every session; `cat`, `jq` and the Read tool stay allowed. A
+  command that names `.gatekit` and writes a file called `approvals.json` or
+  `contract.json` elsewhere is denied too.
 
 **Contract changes** (`docs/ARCHITECTURE.md`): §2 notes that the two files are
 written only by gatekit; §3 the write and bash gates' protected-file rule and
