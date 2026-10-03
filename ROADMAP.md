@@ -55,7 +55,7 @@ Roughly in order of how often the gap has cost time in real sessions.
 | Item | Why | Decision record |
 |---|---|---|
 | Cost and token tracking per task | A job shows elapsed time but not what each task cost; a long build cannot be budgeted by spend. Remaining context is visible only to the statusline today. | [ADR-0013](docs/decisions/ADR-0013-workers-only-for-other-models.md) (open question on context-aware thresholds) |
-| Live job view | `status` answers "is it moving" once; a streamed view (`stream-json` for the claude backend, a files-touched count, `--watch` on `results`) would answer it continuously. | [ADR-0010](docs/decisions/ADR-0010-build-visibility.md) |
+| Live job view | `status` answers "is it moving" once; a streamed view (`stream-json` for the claude backend, a files-touched count, `jobs status --watch` as proposed in ADR-0010 — not implemented) would answer it continuously. | [ADR-0010](docs/decisions/ADR-0010-build-visibility.md) |
 | Resume after a crash or a blocked dependency | A `blocked` task does not resume when its dependency later passes in the same job; resume is manual. | [ADR-0009](docs/decisions/ADR-0009-gate-preflight.md) |
 | Worker evidence receipts with typed blockers | A worker's report should carry what it ran and why it stopped as typed data, not prose, so a silent failure (no output, timeout) still says something. | [ADR-0021](docs/decisions/ADR-0021-host-budget-and-failure-fingerprint.md) (evidence-less failures never fingerprint) |
 | Brownfield mode | The pipeline assumes a new project; an existing codebase needs a way to gate changes without re-specifying what already exists. | no ADR yet |

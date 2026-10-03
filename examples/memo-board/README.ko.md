@@ -24,14 +24,14 @@
 
 | 경로 | 내용 |
 |---|---|
-| `spec/01-prd.md` … `spec/05-gate.md`, `spec/RECOVERY.md` | 승인된 스펙 세트: 가정 원장이 있는 PRD, 화면, 아키텍처, `gatekit-task` 펜스 3개, 완료 계약 |
+| `spec/01-prd.md` … `spec/05-gate.md`, `spec/RECOVERY.md` | 리허설에서 승인된 스펙 세트(`RECOVERY.md`는 초안 그대로): 가정 원장이 있는 PRD, 화면, 아키텍처, `gatekit-task` 펜스 3개, 완료 계약 |
 | `index.html`, `style.css`, `app.js`, `server.js` | 화면과 `node:http` 정적 서버(포트 **4183**) |
 | `notes.js`, `remove.js`, `count.js` | 작업마다 하나씩, 단위 테스트가 붙은 순수 함수 |
 | `delete-ui.js`, `count-ui.js` | 삭제·개수 기능. 다른 작업이 소유한 파일을 고치지 않고 화면에 붙음 |
 | `tests/` | `node:test` 단위 테스트 |
 | `e2e/` | Playwright 스펙: 작업별 하나, 세 작업을 잇는 여정 하나, 스크린샷 기준 하나 |
 | `package.json`, `package-lock.json`, `playwright.config.ts` | 의존성은 `@playwright/test` 하나 |
-| `screenshots/` | 리허설 검증에서 찍은 캡처 3장 |
+| `screenshots/` | 리허설 검증에서 찍은 캡처 3장. 리허설의 스크린샷 스펙이 두 작업에 같은 마지막 화면을 찍어서 메모 추가와 메모 개수 캡처가 똑같습니다(이 예제 스펙의 알려진 결함) |
 
 `.gatekit/` 디렉터리는 없습니다. 승인은 내 사본 파일의 해시이므로 직접 기록해야 합니다.
 `spec/PROGRESS.md`도 뺐습니다. 빌드가 새로 씁니다.

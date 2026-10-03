@@ -29,14 +29,14 @@ not rounded to a pass or a fail. The captures are in [`screenshots/`](screenshot
 
 | Path | What it is |
 |---|---|
-| `spec/01-prd.md` … `spec/05-gate.md`, `spec/RECOVERY.md` | the approved spec set: PRD with its assumption ledger, screens, architecture, the three `gatekit-task` fences, and the completion contract |
+| `spec/01-prd.md` … `spec/05-gate.md`, `spec/RECOVERY.md` | the spec set that was approved in the rehearsal (`RECOVERY.md` stays a draft): PRD with its assumption ledger, screens, architecture, the three `gatekit-task` fences, and the completion contract |
 | `index.html`, `style.css`, `app.js`, `server.js` | the page and a `node:http` static server on port **4183** |
 | `notes.js`, `remove.js`, `count.js` | pure functions, one per task, unit-tested |
 | `delete-ui.js`, `count-ui.js` | the delete and count features, each installed into the page without editing the files another task owns |
 | `tests/` | `node:test` unit tests |
 | `e2e/` | Playwright specs: one per task, a journey across all three, and the screenshot criterion |
 | `package.json`, `package-lock.json`, `playwright.config.ts` | the only dependency is `@playwright/test` |
-| `screenshots/` | the three captures from the rehearsal's verify run |
+| `screenshots/` | the three captures from the rehearsal's verify run; the add-note and note-count captures are identical because the rehearsal's screenshot spec captured the same final state for both — a known flaw of this example spec |
 
 There is no `.gatekit/` directory: approvals are hashes of your copy of the
 files, so you record them yourself. `spec/PROGRESS.md` is left out too; the

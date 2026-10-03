@@ -34,7 +34,7 @@ Nothing below is deleted by uninstalling. Decide per project.
 | Path | What it is | Usually |
 |---|---|---|
 | `spec/` | your PRD, screens, architecture, tasks, completion contract, progress | **keep** — it is your project's documentation, committed like any other doc |
-| `.gatekit/` | config, approvals, attempts, contract, baseline; `runs/` and `jobs/` are local logs | remove when you no longer want gatekit in this project |
+| `.gatekit/` | config, approvals, attempts, contract, baseline; `runs/` and `jobs/` are local logs | remove when you no longer want gatekit in this project; `config.json`, `approvals.json` and `attempts.json` may be committed team state — check with your team first |
 | `AGENTS.md` block between `<!-- gatekit:begin … -->` and `<!-- gatekit:end -->` | Codex instructions from the generated layer | remove the block; keep the rest of the file |
 | `.codex/hooks.json` | Codex hook registrations from the generated layer | delete it if gatekit wrote it and you added nothing; otherwise remove only the entries that run gatekit |
 | `.agents/skills/gatekit-*` | Codex skills from the generated layer | delete these directories |
