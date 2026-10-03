@@ -63,6 +63,12 @@ without it:
 ```
 ````
 
+The scratch-directory bullet below is an instruction, not enforcement
+(ADR-0026): the write gate allows paths outside the project (ADR-0018) and a
+`read-only` scope does not sandbox the evaluator's Bash. A Codex evaluator's
+`workspace-write` sandbox confines it to the workspace plus Codex's own
+temporary directories.
+
 The rest of the evaluator's prompt says, in `output_lang`:
 
 - You are the evaluator. You did not write this code and you must not change it.
@@ -98,6 +104,10 @@ The rest of the evaluator's prompt says, in `output_lang`:
   are two different facts. If you cannot open or read the image, that
   verdict is `unverified`, not a silent skip.
 - Do not fix anything you find. Report it.
+- Scratch files — a driver script, a server log, a screenshot you take
+  yourself — go only under `.gatekit/eval/` in the project root (create it
+  if it is missing). Write nothing outside the project: not `/tmp`, not your
+  home directory.
 - Record the result under the **last-verification heading that already exists**
   in `spec/PROGRESS.md` (`## 마지막 검증` in Korean, `## Last verification` in
   English). Do not add a heading in another language — `spec validate` treats
@@ -107,7 +117,7 @@ The rest of the evaluator's prompt says, in `output_lang`:
   filling its YAML frontmatter block (`title`/`date`/`status`) along with the
   rest of the placeholders.
   Write the timestamp, the aggregate verdict, and one line per criterion and per
-  E2E step. This file is the one exception to read-only; nothing else may be
-  written.
+  E2E step. This file and the `.gatekit/eval/` scratch directory are the only
+  exceptions to read-only; nothing else may be written.
 - Reply with the verdict table only. Do not paste command transcripts.
 

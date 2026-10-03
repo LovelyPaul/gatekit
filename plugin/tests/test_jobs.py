@@ -3505,3 +3505,29 @@ class TestEvaluatorSandbox(JobTestCase):
             else:
                 os.environ["CODEX_HOME"] = old_env
             codex_home.cleanup()
+
+
+class TestEvaluatorBriefScratch(unittest.TestCase):
+    """ADR-0026: in the 0.16.0 rehearsal the read-only evaluator wrote its
+    driver script, a server log and screenshots to /tmp. The brief it is
+    given names the one place scratch files may go."""
+
+    def setUp(self) -> None:
+        brief = pathlib.Path(__file__).resolve().parents[1] / "spec-kit" / "evaluator-brief.md"
+        self.text = brief.read_text(encoding="utf-8")
+        # The evaluator gets the bullet list from "You are the evaluator" on.
+        self.bullets = self.text[self.text.index("- You are the evaluator."):]
+
+    def test_brief_names_the_scratch_directory(self) -> None:
+        self.assertIn(".gatekit/eval/", self.bullets)
+
+    def test_brief_forbids_writing_outside_the_project(self) -> None:
+        self.assertIn("outside the project", self.bullets)
+
+    def test_scratch_rule_survives_for_a_cli_evaluator(self) -> None:
+        # A CLI evaluator is given every bullet but "Record the result under".
+        start = self.bullets.index("- Record the result under")
+        end = self.bullets.index("\n- ", start + 1)
+        kept = self.bullets[:start] + self.bullets[end:]
+        self.assertIn(".gatekit/eval/", kept)
+        self.assertIn("outside the project", kept)
