@@ -183,3 +183,17 @@ value after each `webServer:` up to its balanced closing brace or bracket
 (strings respected, at most 8000 characters), and reads `port:` and `url:`
 there, including the literal fallback after `||` or `??`. It is still a scan,
 not a parser: a port set only from a variable is not found.
+
+### Open question: each command appears twice in the slash menu
+
+Every command has a trigger-shim skill, so Claude Code's menu shows both
+`/gatekit:build` and `/gatekit:gatekit-build`. Claude Code's skill
+frontmatter documents `user-invocable: false`, which hides a skill from the
+`/` menu while Claude can still invoke it from its description. Codex's
+skill documentation names only `name` and `description` in `SKILL.md` (with
+`allow_implicit_invocation` in an optional `agents/openai.yaml`) and does not
+say how it treats an unknown key. Under Codex the skills are also the user's
+only entry point, since Codex has no slash commands, so hiding them there
+would be wrong even if it were possible. The shims are left unchanged until
+it is confirmed that Codex ignores the key, or the plugin can ship it for
+Claude Code alone.
