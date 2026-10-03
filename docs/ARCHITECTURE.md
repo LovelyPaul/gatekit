@@ -29,9 +29,10 @@ directories) but contains no code copied from any other project.
 
 ```
 gatekit/
-├── .claude-plugin/marketplace.json     # one plugin: ./plugin
+├── .claude-plugin/marketplace.json     # one plugin: ./plugin (Claude Code and Codex read it, ADR-0019)
 ├── plugin/                              # the installable plugin
 │   ├── .claude-plugin/plugin.json
+│   ├── bin/gatekit.py                   # launcher: runs the CLI from any working directory (commands call it via ${CLAUDE_PLUGIN_ROOT})
 │   ├── commands/                        # execution instructions (one per pipeline)
 │   │   ├── discover.md    /gatekit:discover    → spec/00-discovery.md (optional first step)
 │   │   ├── interview.md   /gatekit:interview   → spec/01-prd.md, spec/03-architecture.md
@@ -43,12 +44,15 @@ gatekit/
 │   │   ├── verify.md      /gatekit:verify      → independent E2E + report check
 │   │   ├── doctor.md      /gatekit:doctor
 │   │   └── setup.md       /gatekit:setup       → optional Codex backend, config
-│   ├── skills/<name>/SKILL.md           # ≤ 40-line NL trigger shims that point at the command
-│   ├── hooks/hooks.json                 # 7 hook registrations (see §3); auto-loaded, never listed in plugin.json
+│   ├── skills/gatekit-<name>/SKILL.md   # ≤ 40-line NL trigger shims that point at the command; `user-invocable: false` (ADR-0026 D2)
+│   ├── hooks/hooks.json                 # 9 hook registrations over 8 gate scripts (see §3); auto-loaded, never listed in plugin.json
 │   ├── gatekit/                         # kernel package (stdlib only)
+│   │   ├── __init__.py, __main__.py     package; `python3 -m gatekit <sub>` runs cli.main
 │   │   ├── cli.py         dispatcher: python3 -m gatekit <sub>
 │   │   ├── hookio.py      hook stdin/stdout contract, safe wrapper, host dialects (§3)
 │   │   ├── hosts.py       generated host layers: `gatekit install --host codex` (§15)
+│   │   ├── names.py       the plugin's current, future and legacy names; fence, state-dir, env and command aliases (ADR-0029)
+│   │   ├── migrate.py     `gatekit migrate`: move the state directory to another name, dry run unless --apply (ADR-0029)
 │   │   ├── ledger.py      per-session run ledger
 │   │   ├── lang.py        output_lang detection
 │   │   ├── verdict.py     4-state vocabulary + aggregation
@@ -56,28 +60,58 @@ gatekit/
 │   │   ├── runcheck.py    "ran no tests" signatures, missing-path extraction, scope ownership (ADR-0022)
 │   │   ├── approval.py    hash-anchored approvals
 │   │   ├── spec.py        spec set validation
+│   │   ├── design.py      design as data: spec/tokens.json v2, presets, blast radius (ADR-0008)
 │   │   ├── jobs.py        job runner (job dir, atomic writes, spawn, gates, redelegate)
 │   │   ├── workers.py     worker backends (claude default, codex optional, custom)
 │   │   ├── pwsh.py        static reader of PowerShell command text for the powershell gate (ADR-0028)
 │   │   ├── doctor.py      8-axis diagnosis
 │   │   ├── config.py      .gatekit/config.json loader with defaults
-│   │   ├── paths.py       project root / state dir resolution
-│   │   └── gates/         hook entry points: prompt.py write.py bash.py powershell.py spawn.py question.py compact.py stop.py
-│   ├── spec-kit/
-│   │   ├── templates/{ko,en}/01-prd.md … 05-gate.md, RECOVERY.md, PROGRESS.md
+│   │   ├── paths.py       project root / state dir resolution, argv path aliases (ADR-0029)
+│   │   └── gates/         hook entry points: prompt.py write.py bash.py powershell.py spawn.py question.py compact.py stop.py;
+│   │                      tokens.py (a task gate, not a hook: colour literals must be design tokens, ADR-0008);
+│   │                      _bootstrap.py (makes the package importable when a gate runs as a script)
+│   ├── spec-kit/                        # data and reference files read by commands, not prompt prose
+│   │   ├── templates/{ko,en}/00-discovery.md, 01-prd.md, 02-screens.md, 02-design.md, 03-architecture.md, 04-tasks.md, 05-gate.md, RECOVERY.md, PROGRESS.md
 │   │   ├── heading-map.json             # canonical headings per file per language
 │   │   ├── no-tests-signatures.json     # per-runner "ran no tests" patterns (ADR-0022)
-│   │   └── grading-patterns.json        # which argv files count as grading files (ADR-0023)
-│   ├── policy/language.md questioning.md verification.md   # loaded at runtime by commands
-│   └── tests/                           # unittest, run with: cd plugin && python3 -m unittest discover -s tests
-├── tools/                               # CI gates (stdlib)
+│   │   ├── grading-patterns.json        # which argv files count as grading files (ADR-0023)
+│   │   ├── design-antipatterns.json     # generic-output patterns the verify evaluator checks a screenshot against (ADR-0017)
+│   │   ├── presets/design/*.json, README.md   # design presets in tokens.json v2 shape (ADR-0008)
+│   │   ├── discovery-summary.md         # /gatekit:discover: shape of spec/00-discovery.md
+│   │   ├── interview-subjects.md        # /gatekit:interview: what the conversation pursues
+│   │   ├── domain-research.md           # /gatekit:interview: category research before the draft
+│   │   ├── prototype-gate.md            # /gatekit:mockup: the preview and the live prototype (ADR-0011, ADR-0017)
+│   │   ├── task-gates.md                # /gatekit:tasks: writing a task's gates
+│   │   ├── gate-criteria.md             # /gatekit:gate: deriving completion criteria
+│   │   └── evaluator-brief.md           # /gatekit:verify: launching the independent evaluator and its brief
+│   ├── policy/                          # loaded at runtime by commands
+│   │   ├── language.md questioning.md verification.md assumptions.md conversation.md
+│   │   └── codex.md                     # differences under a host without slash commands (ADR-0019)
+│   └── tests/                           # unittest, run with: cd plugin && python3 -m unittest discover -s tests; fixtures/ holds spec sets and jobs
+├── tools/                               # CI gates and runners (stdlib)
+│   ├── gate_no_abs_paths.py             # no absolute personal paths in tracked text
+│   ├── gate_skill_size.py               # SKILL.md ≤ 40 lines, commands ≤ 160, no AskUserQuestion grant, shims hidden from the / menu
+│   ├── gate_blob_size.py                # no tracked file over 1 MB
+│   ├── gate_forbidden_phrases.py        # no execution steps in skills; commands name policy and output_lang
+│   ├── gate_manifest.py                 # plugin manifests match the tree and CHANGELOG version
+│   ├── gate_readme_sync.py              # README.md and README.ko.md list the shipped commands
+│   ├── gate_command_invocations.py      # every kernel call in commands, policies and templates runs
+│   ├── gate_manual_accuracy.py          # docs/manual describes the code that exists
+│   ├── gate_clean_room.py               # no other project's vocabulary (clean-room rule)
+│   ├── run_tests.py, test_tools.py      # the full suite; fault-injection tests for the gates
+│   └── build_manual_bundle.py           # packages docs/manual/ for import elsewhere
 ├── examples/<name>/                     # complete sample projects (spec/ + the code a real build produced); copied out to run, never imported by plugin/ or tools/
-├── docs/ARCHITECTURE.md (this), decisions/ADR-*.md
+├── docs/
+│   ├── ARCHITECTURE.md (this), QUICKSTART.md, decisions/ADR-*.md
+│   ├── manual/                          # the user manual (Korean today; English planned for 0.17.0)
+│   ├── assets/                          # manual diagrams (.svg sources and .png renders)
+│   └── retros/                          # write-ups of trial builds
 ├── .github/workflows/ci.yml
 ├── .github/ISSUE_TEMPLATE/{bug_report,feature_request,config}.yml, .github/PULL_REQUEST_TEMPLATE.md
-├── README.md, README.ko.md, CHANGELOG.md, CONTRIBUTING.md, SECURITY.md, LICENSE, CLAUDE.md
+├── README.md, README.ko.md, CHANGELOG.md, CONTRIBUTING.md, SECURITY.md, LICENSE, CLAUDE.md, AGENTS.md
+├── .gitignore, .gitattributes
 ├── CODE_OF_CONDUCT.md                   # Contributor Covenant 2.1, adopted by reference
-├── ROADMAP.md                           # public roadmap: now / next / later / non-goals, items linked to ADRs
+├── ROADMAP.md                           # public roadmap: now / shipped / next / later / non-goals, items linked to ADRs
 ├── UNINSTALL.md                         # removing the plugin and cleaning up project state
 ```
 
