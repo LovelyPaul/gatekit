@@ -168,6 +168,40 @@ class TestLanguageFromSpec(PromptProject):
         prompt_gate.handle(self.event("2"))
         self.assertEqual(self.led().data["output_lang"], "ko")
 
+    def old_shape_ledger(self, output_lang: str, events: list) -> None:
+        """A pre-0.16.1 ledger: no `lang_source` key at all."""
+        path = ledger.Ledger.path_for(self.root, self.session)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "version": 1, "session_id": self.session,
+            "created_at": "2026-10-01T00:00:00Z", "updated_at": "2026-10-01T00:00:00Z",
+            "output_lang": output_lang, "active_pipeline": None,
+            "questions": {"asked": 0, "max_calls": 2, "budget_exceeded": False},
+            "scopes": [], "events": events}), encoding="utf-8")
+
+    def test_resumed_old_ledger_keeps_its_prompt_language(self) -> None:
+        # Review of 0.16.1: before `lang_source` existed only a prompt could
+        # set the language, so a resumed old session keeps it.
+        self.write_prd(KO_PRD)
+        self.old_shape_ledger("en", [{"ts": "2026-10-01T00:00:00Z", "kind": "prompt",
+                                      "detail": {"chars": 24}}])
+        prompt_gate.handle(self.event(BARE_BUILD))
+        self.assertEqual(self.led().data["output_lang"], "en")
+        self.assertEqual(self.led().data["lang_source"], "prompt")
+
+    def test_resumed_old_korean_ledger_keeps_ko(self) -> None:
+        self.write_prd(EN_PRD)
+        self.old_shape_ledger("ko", [])
+        prompt_gate.handle(self.event(BARE_BUILD))
+        self.assertEqual(self.led().data["output_lang"], "ko")
+
+    def test_old_ledger_with_no_prompt_yet_takes_the_spec(self) -> None:
+        self.write_prd(KO_PRD)
+        self.old_shape_ledger("en", [])
+        prompt_gate.handle(self.event(BARE_BUILD))
+        self.assertEqual(self.led().data["output_lang"], "ko")
+        self.assertEqual(self.led().data["lang_source"], "spec")
+
     def test_unreadable_spec_keeps_the_hook_working(self) -> None:
         (self.root / "spec" / "01-prd.md").mkdir(parents=True)
         result = prompt_gate.handle(self.event(BARE_BUILD))

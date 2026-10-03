@@ -149,3 +149,13 @@ blocks, table rows (lines starting with `|`) and inline code spans are
 skipped, and at most 1000 raw lines are scanned. An English PRD that names a
 Korean product is still `en`. The commands' own `gatekit lang "$(head -40
 spec/01-prd.md)"` calls are unchanged.
+
+### A3. A resumed pre-0.16.1 session keeps its language
+
+The prompt hook consults the spec while `lang_source` is not `"prompt"`. A
+ledger written before 0.16.1 has no `lang_source` key; loading backfilled it
+as `null`, so a resumed session whose language a prompt had set was switched
+to the spec's on its next bare prompt. Loading now backfills a missing key as
+`"prompt"` when the ledger's `output_lang` is `ko` or it holds a `prompt`
+event (before ADR-0026 only a prompt could set the language), and as `null`
+otherwise. A present key, `null` included, is left alone.

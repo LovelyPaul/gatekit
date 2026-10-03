@@ -89,6 +89,14 @@ def _blank(session_id: str) -> Dict[str, Any]:
 
 def _backfill(data: Dict[str, Any], session_id: str) -> Dict[str, Any]:
     """Fill in any key a hand-edited or older ledger is missing."""
+    if isinstance(data, dict) and "lang_source" not in data:
+        # A ledger from before ADR-0026. Back then only a prompt could set
+        # the language, so one that is Korean, or that has seen a prompt,
+        # keeps it: the spec must not override a resumed session's language.
+        events = data.get("events") if isinstance(data.get("events"), list) else []
+        prompted = data.get("output_lang") == "ko" or any(
+            isinstance(e, dict) and e.get("kind") == "prompt" for e in events)
+        data["lang_source"] = "prompt" if prompted else None
     template = _blank(session_id)
     for key, default in template.items():
         if key not in data:

@@ -230,7 +230,11 @@ Loading backfills any missing key from the blank ledger. A key whose blank
 value is an object (`questions`, `stop`) but whose stored value is not one —
 `"stop": null` in a hand-edited ledger — is replaced by the blank object; the
 Stop gate checks the same before reading `stop`. Before this, `"stop": null`
-made the Stop gate fail open, silently, at every turn end.
+made the Stop gate fail open, silently, at every turn end. A ledger with no
+`lang_source` key predates ADR-0026, when only a prompt could set the
+language: it is backfilled as `"prompt"` when its `output_lang` is `ko` or it
+has a `prompt` event, else `null`, so the spec never overrides a resumed
+session's language.
 
 ## 5. Completion contract (`contract.py`)
 
