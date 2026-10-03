@@ -209,7 +209,9 @@ def axis_project_state(root) -> dict:
 # `reuseExistingServer: true` the e2e tests run against whatever answers
 # there — in the 0.16.0 rehearsal, another project's app. The port is found
 # by a small scan, not by parsing JS/TS: comments are dropped, the value after
-# each `webServer:` (or `webServer =`) is taken from its first `{` or `[` up
+# each `webServer:` (the key may be quoted; a match inside a string is not a
+# key) or `webServer =` (also `const webServer: <type> =`, the annotation
+# skipped) is taken from its first `{` or `[` up
 # to the balanced closing brace or bracket (strings respected), and in it
 # `port: <n>` / `url: '<scheme>://<host>:<n>'` are read, also as the fallback
 # after `||` or `??` (`process.env.PORT || 3000`). A value that does not open
@@ -221,9 +223,12 @@ PLAYWRIGHT_CONFIGS = tuple("playwright.config." + ext for ext in ("ts", "js", "m
 E2E_CONFIG_DIR = ("spec", "design", "e2e")
 #: Most characters of one `webServer` value read; an unbalanced value stops here.
 WEBSERVER_WINDOW = 8000
-#: `webServer: <value>` in an object, `webServer = <value>` in a declaration
-#: (not `==`, `===` or `=>`).
-_WEBSERVER_RE = re.compile(r"\bwebServer\s*(?::|=(?![=>]))\s*")
+#: `webServer: <value>` in an object (the key may be quoted), `webServer =
+#: <value>` in a declaration (not `==`, `===` or `=>`), and `const webServer:
+#: <type> = <value>` — there the `:` opens a type annotation, not the value.
+_WEBSERVER_RE = re.compile(
+    r"(?:\b(?P<decl>const|let|var)\s+)?(?P<q>['\"]?)\bwebServer(?P=q)"
+    r"\s*(?P<sep>:|=(?![=>]))\s*")
 #: A line break at depth 0 continues the value only next to these (a
 #: ternary or `||` chain split over lines); otherwise it ends it.
 _CONTINUES_BEFORE = frozenset("?:|&=(+-*/,")
@@ -303,6 +308,65 @@ def _balanced_value(text: str, start: int) -> str:
     return text[start:limit]
 
 
+_STRING_RE = re.compile(
+    r"'(?:[^'\\]|\\.)*'?|\"(?:[^\"\\]|\\.)*\"?|`(?:[^`\\]|\\.)*`?", re.S)
+_NOT_NEWLINE_RE = re.compile(r"[^\n]")
+
+
+def _blank_string(match) -> str:
+    literal = match.group(0)
+    if literal[1:-1] == "webServer" and literal[-1] == literal[0]:
+        return literal
+    return literal[0] + _NOT_NEWLINE_RE.sub(" ", literal[1:])
+
+
+def _mask_strings(text: str) -> str:
+    """*text* with each string literal blanked after its opening quote (same
+    length, line breaks kept), so that ``webServer`` in a message is not
+    taken for a key; a literal that is exactly ``webServer`` (a quoted key)
+    is kept."""
+    return _STRING_RE.sub(_blank_string, text)
+
+
+def _annotation_end(text: str, start: int) -> tuple:
+    """``(value, end)`` for the type annotation of ``const webServer: <type>``
+    starting at *start*: the index just after the ``=`` that ends it (-1 when
+    the declaration has no value) and how far the search read. Brackets,
+    braces, parentheses and ``<>`` nest (a type literal spans lines and holds
+    ``;``); ``=>`` is part of a function type. At depth 0 a ``;``, ``,``,
+    closing bracket or line break ends the declaration without a value."""
+    depth = 0
+    quote = None
+    limit = min(len(text), start + WEBSERVER_WINDOW)
+    i = start
+    while i < limit:
+        ch = text[i]
+        if quote:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+        elif ch in "'\"`":
+            quote = ch
+        elif ch == "=":
+            if text.startswith("=>", i):
+                i += 2
+                continue
+            if depth == 0 and not text.startswith("==", i):
+                return i + 1, i + 1
+        elif ch in "{[(<":
+            depth += 1
+        elif ch in "}])>":
+            if depth == 0:
+                return -1, i
+            depth -= 1
+        elif depth == 0 and ch in ";,\n":
+            return -1, i
+        i += 1
+    return -1, limit
+
+
 def _value_open(text: str, start: int) -> tuple:
     """``(open, end)`` for the ``webServer`` value starting at *start*: the
     index of the first ``{``/``[`` in it (-1 when there is none) and how far
@@ -366,12 +430,17 @@ def webserver_ports(root) -> list:
         except OSError:
             continue
         read_to = 0
-        for match in _WEBSERVER_RE.finditer(text):
+        for match in _WEBSERVER_RE.finditer(_mask_strings(text)):
             if match.start() < read_to:
                 # Inside a value already read: reading it again finds
                 # nothing new and, nested, costs a window per match.
                 continue
-            opened, read_to = _value_open(text, match.end())
+            start = match.end()
+            if match.group("decl") and match.group("sep") == ":":
+                start, read_to = _annotation_end(text, start)
+                if start < 0:
+                    continue
+            opened, read_to = _value_open(text, start)
             if opened < 0:
                 continue
             window = _balanced_value(text, opened)

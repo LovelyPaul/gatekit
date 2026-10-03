@@ -324,6 +324,45 @@ class TestAxisProjectStatePortProbe(DoctorTestCase):
             "const webServer = { command: 'x', port: 3200 };\n"
             "export default defineConfig({ webServer });\n"), [3200])
 
+    def test_typed_webserver_declaration(self) -> None:
+        # Review of 0.16.3: the type annotation was read as the value.
+        self.assertEqual(self.ports_of(
+            "const webServer: PlaywrightTestConfig['webServer'] = { command: 'x', port: 3800 };\n"
+            "export default defineConfig({ webServer });\n"), [3800])
+        self.assertEqual(self.ports_of(
+            "const webServer: { command: string; port: number }[] = "
+            "[{ command: 'x', port: 3801 }];\n"), [3801])
+        self.assertEqual(self.ports_of(
+            "let webServer: {\n  command: string;\n  port: number;\n}[] = [\n"
+            "  { command: 'x', port: 3802 },\n];\n"), [3802])
+        self.assertEqual(self.ports_of(
+            "const webServer: Array<{ port: number; make: () => void }> = "
+            "[{ port: 3803 }];\n"), [3803])
+        self.assertEqual(self.ports_of(
+            "const webServer: Config = { command: 'x', port: 3804 }\n"), [3804])
+
+    def test_typed_declaration_without_a_value_reads_nothing_after_it(self) -> None:
+        self.assertEqual(self.ports_of(
+            "let webServer: Config;\nconst other = { port: 9240 };\n"), [])
+        self.assertEqual(self.ports_of(
+            "let webServer: Config, other = { port: 9241 };\n"), [])
+
+    def test_quoted_webserver_key(self) -> None:
+        # Review of 0.16.3: a quoted key was not recognised.
+        self.assertEqual(self.ports_of(
+            "export default { 'webServer': { command: 'x', port: 3700 } }"), [3700])
+        self.assertEqual(self.ports_of(
+            'module.exports = { "webServer": { command: "x", port: 3701 } }'), [3701])
+        self.assertEqual(self.ports_of(
+            "export default { 'webServer\": { port: 9242 } }"), [])
+
+    def test_webserver_inside_a_string_is_not_a_key(self) -> None:
+        self.assertEqual(self.ports_of(
+            "console.log('webServer: { port: 9243 }')\nexport default {}\n"), [])
+        self.assertEqual(self.ports_of(
+            "const help = `set webServer = { port: 9244 }`;\n"
+            "export default { webServer: { port: 3702 } }\n"), [3702])
+
     def test_value_without_an_object_reads_nothing_after_it(self) -> None:
         self.assertEqual(self.ports_of(
             "export default { webServer: makeServer, use: { port: 9229 } }"), [])

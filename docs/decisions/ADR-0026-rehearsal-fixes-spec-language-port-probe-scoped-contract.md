@@ -244,3 +244,26 @@ break and no closing `---` was skipped whole. `lang.prose_head` now strips a
 BOM from line 0 before the check, and treats the block as frontmatter only
 when a closing `---` (or `...`) appears within the next 60 lines; otherwise
 line 0 is read as a thematic break and the lines after it as usual.
+
+## Amendment, 0.16.4 (2026-10-03, owner approval in session)
+
+A review of 0.16.3 found the following. Each change below replaces the
+matching part of the decision or of the earlier amendments.
+
+### C1. The port scan reads typed declarations and quoted keys
+
+B1 matched `webServer:` and `webServer =`, so in
+`const webServer: PlaywrightTestConfig['webServer'] = { port: 3800 }` and
+`const webServer: { command: string; port: number }[] = [ … ]` the colon of
+the type annotation was taken for the key and the type was read as the
+value; no port was found. After `const`, `let` or `var` a `webServer:` now
+opens a type annotation: the scan skips it to the `=` that ends it (brackets,
+braces, parentheses and `<>` nest, so a type literal may hold `;` and span
+lines; `=>` belongs to a function type) and reads the value after that `=`
+as before. A `;`, `,`, closing bracket or line break at depth 0 before any
+`=` means a declaration without a value, and nothing after it is read. A key
+in matching quotes (`'webServer':`, `"webServer":`) is recognised. A
+`webServer` inside any other string literal (`console.log('webServer: {…}')`)
+is not a key: string contents are blanked before matching, and values are
+still read from the unblanked text so `url: '…:3000'` keeps its port.
+
