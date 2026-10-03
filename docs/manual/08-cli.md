@@ -16,7 +16,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" <subcommand> [args]
 
 이 규칙은 CI 게이트 `tools/gate_command_invocations.py`가 강제한다. 커맨드·정책 파일이나 스펙 템플릿(`plugin/spec-kit/templates/`)에 실행되지 않는 호출 형식이 들어가면 빌드가 실패한다.
 
-## 서브커맨드 9개
+## 서브커맨드 10개
 
 `cli.py`의 `SUBCOMMANDS` 레지스트리가 전부다. 모듈은 지연 import되므로 하나가 깨져도 나머지는 동작한다.
 
@@ -30,6 +30,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" <subcommand> [args]
 | `workers` | 워커 백엔드 관리 |
 | `ledger` | 세션 원장 조회·파이프라인 설정 |
 | `install` | Codex 호스트 층 생성 (`--host codex`) |
+| `migrate` | 상태 디렉터리를 다른 이름으로 옮김 (기본은 미리보기) |
 | `lang` | 출력 언어 감지 |
 
 인자 없이 부르면 사용법을 출력하고 종료 코드 1을 낸다. `-h`·`--help`·`help`는 0을 낸다. 없는 서브커맨드는 2다.
@@ -185,6 +186,29 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" install --host codex [--root PATH
 |---|---|
 | 0 | 성공 |
 | 2 | 알 수 없는 호스트 (`claude`는 플러그인으로 설치하므로 여기서 받지 않는다) |
+
+## migrate
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" migrate [--root PATH] [--to gatekit|gatebound] [--apply] [--json]
+```
+
+gatekit은 스터디 기수가 끝난 뒤 gatebound로 이름이 바뀐다(ADR-0029). 이 서브커맨드는 프로젝트의 상태 디렉터리(`.gatekit/` ↔ `.gatebound/`)를 대상 이름으로 옮긴다. 기본은 미리보기이고 계획만 출력한다. `--apply`를 줘야 실제로 바꾼다.
+
+- 디렉터리 이름을 바꾼다. 그 아래에 git이 추적하는 파일이 있으면 `git mv`를 쓴다.
+- `.gitignore`에서 옛 디렉터리를 가리키는 줄을 새 이름으로 고친다.
+- `.codex/hooks.json`이 있으면 Codex 층을, `AGENTS.md`에 관리 블록만 있으면 그 블록을 다시 만든다.
+- `spec/`은 읽지도 쓰지도 않는다. 승인은 `05-gate.md`의 해시에 묶여 있으므로 `gatekit-*` 펜스는 그대로 두면 된다. 두 접두사 모두 계속 읽힌다.
+- 이미 대상 이름이면 아무것도 하지 않는다. 두 번 실행해도 같다.
+- `.gatekit/`과 `.gatebound/`가 둘 다 있으면 거부한다. 먼저 하나를 정리한다(`/gatekit:doctor` 3번 축이 훅이 어느 쪽을 쓰는지 알려 준다).
+
+`--to`의 기본값은 지금 이름(`gatekit`)이라서, 이름이 바뀌기 전에는 아무것도 하지 않는다. `--to gatebound`로 미리 연습할 수 있다. 옮긴 뒤에도 지금 플러그인은 `.gatebound/`를 그대로 읽는다.
+
+| 종료 코드 | 뜻 |
+|---|---|
+| 0 | 성공, 또는 할 일 없음 |
+| 1 | 두 디렉터리가 다 있어 거부, 또는 적용 실패 |
+| 2 | 인자 오류 |
 
 ## lang
 

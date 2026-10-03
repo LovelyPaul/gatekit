@@ -21,6 +21,8 @@ gatekit을 쓰다 보면 **막히는 일이 자주 생긴다.** 그게 이 도�
 |---|---|---|
 | 훅이 전혀 안 먹힘 | 플러그인이 설치되지 않았거나 `settings.json`의 `enabledPlugins`에서 비활성 | `/gatekit:doctor` 2번 축 확인 후 `/plugin install gatekit` 또는 `/plugin enable gatekit@gatekit`. 그다음 Claude Code 재시작 |
 | 설치했는데 여전히 안 먹힘 | 현재 세션이 구 버전을 로드한 상태 | Claude Code 재시작 |
+| `/gatekit:doctor` 2번 축이 `fail`이고 "more than one plugin of this name family" | gatekit과 gatebound(이름이 바뀐 뒤의 플러그인)가 동시에 켜짐 — 사용자 또는 프로젝트 `settings.json`의 `enabledPlugins`, 또는 Codex 플러그인 캐시에 둘 다 있음. 둘 다 켜져 있으면 새 플러그인의 Stop·질문 게이트는 쉬고 프롬프트 훅이 세션당 한 번 경고한다 | 처방에 나온 대로 하나를 끈다(`/plugin disable <키>`). 쓰기·Bash·spawn 게이트는 둘 다 돌아도 같은 거부만 낸다 (ADR-0029) |
+| `/gatekit:doctor` 3번 축이 `fail`이고 "both .gatebound/ and .gatekit/ exist" | 프로젝트에 상태 디렉터리가 두 개. 훅은 `approvals.json`이 있는 쪽을 쓴다 | 쓰지 않는 쪽에서 필요한 것만 옮기고 그 디렉터리를 터미널에서 지운다(세션 안에서는 상태 보호 규칙이 거부한다). 그동안 `migrate`는 거부한다 (ADR-0029) |
 | 소스 파일 수정이 차단됨 | `spec/05-gate.md`가 승인되지 않음 (`unverified`) 또는 승인 만료 (`fail`) | `/gatekit:gate` 실행 후 사용자가 승인. 급하면 `spec/`·`docs/`·루트 `*.md`에 먼저 쓴다 |
 | 스펙 검증 실패 — 제목 누락 | 템플릿의 H2 제목을 지우거나 바꿈 | `heading-map.json`의 해당 언어 제목을 그대로 복원. 06번 문서에 전체 목록이 있다 |
 | 스펙 검증 실패 — 다른 언어 제목 혼입 | 한 파일에 `## 목표`와 `## Goals`가 섞임 | 한 언어로 통일. 특히 `PROGRESS.md`에 프리핸드 제목을 쓸 때 자주 생긴다. 템플릿에서 복사한다 |
