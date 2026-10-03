@@ -21,8 +21,10 @@ Why a shim that duplicates a command must say `user-invocable: false`
 menu, so each command appeared twice (`/gatekit:build` and
 `/gatekit:gatekit-build`). The key hides the shim from the menu while the
 model can still invoke it; Codex ignores the key and still loads the skill.
-A shim duplicates a command when its folder is named after the command,
-alone or after a `<prefix>-`.
+A skill is a command's shim when its frontmatter `name:` is exactly
+`<plugin>-<command>` (the folder name when `name:` is absent), `<plugin>`
+being the name in plugin/.claude-plugin/plugin.json and `<command>` a file
+in plugin/commands/. A skill such as `design-gate` stays in the menu.
 
 Usage:
     python3 tools/gate_skill_size.py [--root PATH] [--json]
@@ -51,6 +53,7 @@ ALLOWED_TOOLS_BLOCK_RE = re.compile(
     r"(?im)^allowed-tools:\s*\n((?:^[ \t]*-.*\n?)+)"
 )
 USER_INVOCABLE_FALSE_RE = re.compile(r"(?m)^user-invocable:\s*false\s*$")
+NAME_RE = re.compile(r"(?m)^name:\s*['\"]?([^'\"\n]*?)['\"]?\s*$")
 
 
 def repo_root() -> pathlib.Path:
@@ -96,13 +99,23 @@ def count_lines(path: pathlib.Path) -> int:
     return len(text.splitlines())
 
 
-def duplicates_a_command(skill_dir: str, commands: set[str]) -> bool:
-    return skill_dir in commands or any(skill_dir.endswith("-" + c) for c in commands)
+def plugin_name(root: pathlib.Path) -> str:
+    try:
+        data = json.loads((root / "plugin" / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+        return str(data.get("name") or "gatekit")
+    except (OSError, ValueError, AttributeError):
+        return "gatekit"
+
+
+def skill_name(skill_md: pathlib.Path, text: str) -> str:
+    match = NAME_RE.search(extract_frontmatter(text))
+    return match.group(1).strip() if match and match.group(1).strip() else skill_md.parent.name
 
 
 def scan(root: pathlib.Path) -> list[dict]:
     findings: list[dict] = []
-    commands = {p.stem for p in (root / "plugin" / "commands").glob("*.md")}
+    prefix = plugin_name(root) + "-"
+    shims = {prefix + p.stem for p in (root / "plugin" / "commands").glob("*.md")}
 
     for skill_md in sorted((root / "plugin" / "skills").glob("*/SKILL.md")):
         rel = skill_md.relative_to(root).as_posix()
@@ -127,7 +140,7 @@ def scan(root: pathlib.Path) -> list[dict]:
                     ),
                 }
             )
-        if duplicates_a_command(skill_md.parent.name, commands) and not \
+        if skill_name(skill_md, text) in shims and not \
                 USER_INVOCABLE_FALSE_RE.search(extract_frontmatter(text)):
             findings.append(
                 {

@@ -399,8 +399,12 @@ literal containing `//` or `/*`, which is read as a comment.
 
 This settles the open question under the 0.16.2 amendment. Every shim in
 `plugin/skills/gatekit-<name>/SKILL.md` now carries `user-invocable: false`
-in its frontmatter, and `tools/gate_skill_size.py` fails a shim whose folder
-is named after a command (alone or after a `<prefix>-`) without it, so
+in its frontmatter, and `tools/gate_skill_size.py` fails a command's shim
+without it. A skill is a command's shim when its frontmatter `name:` is
+exactly `<plugin>-<command>` (the folder name when `name:` is absent), for
+the plugin name in `plugin.json` and a file in `plugin/commands/`; an earlier
+draft matched any folder ending in `-<command>`, which would have forced a
+skill such as `design-gate` out of the menu. With the key,
 Claude Code's `/` menu lists `/gatekit:build` once instead of also listing
 `/gatekit:gatekit-build`.
 

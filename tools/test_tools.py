@@ -180,9 +180,33 @@ class TestSkillSize(unittest.TestCase):
             root = pathlib.Path(tmp)
             minimal_clean_repo(root)
             write(root / "plugin" / "skills" / "build" / "SKILL.md",
-                  "---\nname: build\n---\nuser-invocable: false\n")
+                  "---\nname: gatekit-build\n---\nuser-invocable: false\n")
             proc = run_gate("gate_skill_size.py", root)
             self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+
+    def test_shim_is_found_by_its_frontmatter_name(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            minimal_clean_repo(root)
+            write(root / "plugin" / "skills" / "anything" / "SKILL.md",
+                  "---\nname: gatekit-build\ndescription: x\n---\n# trigger\n")
+            proc = run_gate("gate_skill_size.py", root)
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+
+    def test_skill_whose_name_only_ends_in_a_command_may_stay_in_the_menu(self) -> None:
+        # Review of 0.16.7: `design-gate` is not the shim of `gate`.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            minimal_clean_repo(root)
+            write(root / "plugin" / "commands" / "gate.md", "---\nallowed-tools: Read\n---\n# gate\n")
+            write(root / "plugin" / "skills" / "gatekit-gate" / "SKILL.md",
+                  "---\nname: gatekit-gate\nuser-invocable: false\n---\n# trigger\n")
+            write(root / "plugin" / "skills" / "design-gate" / "SKILL.md",
+                  "---\nname: design-gate\ndescription: x\n---\n# design gate\n")
+            write(root / "plugin" / "skills" / "gatekit-design-gate" / "SKILL.md",
+                  "---\ndescription: x\n---\n# no name, folder is not a command's shim\n")
+            proc = run_gate("gate_skill_size.py", root)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
 
     def test_skill_without_a_command_may_stay_in_the_menu(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
