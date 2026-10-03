@@ -172,3 +172,14 @@ its scope, never a verdict: `contract=ok (last run: turn tier, N deferred to
 /gatekit:verify)` and `last run: M unjudged`, in Korean `contract=ok (마지막
 실행: turn 등급만, N개는 /gatekit:verify 로 미룸)` and `M개 미판정`.
 `contract=ok` keeps its meaning: the contract matches the approved gate file.
+
+### A5. The port scan reads only the `webServer` value, without comments
+
+Decision 2 read the 2000 characters after each `webServer`, so it reported
+ports in comments and in later, unrelated blocks (`use`, `projects`), and it
+missed `port: Number(process.env.PORT) || 3000`. Doctor now drops `//` and
+`/* */` comments (string literals kept, so a URL's `//` survives), takes the
+value after each `webServer:` up to its balanced closing brace or bracket
+(strings respected, at most 8000 characters), and reads `port:` and `url:`
+there, including the literal fallback after `||` or `??`. It is still a scan,
+not a parser: a port set only from a variable is not found.

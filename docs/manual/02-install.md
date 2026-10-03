@@ -59,7 +59,7 @@ python3 "gatekit/plugin/bin/gatekit.py" install --host codex
 |---|---|---|---|
 | 1 | plugin files | `plugin.json`, `hooks.json`, 게이트 스크립트 7개가 존재하고 비어 있지 않은가 | `/plugin install gatekit` — 스크립트가 없으면 그 게이트는 아예 발화하지 않는다 |
 | 2 | hooks registered | `installed_plugins.json`에 등재되고 `settings.json`의 `enabledPlugins`에서 활성인가 | `/plugin enable gatekit@gatekit` |
-| 3 | project state | `.gatekit/config.json`과 `approvals.json`이 파싱되는가. Playwright 설정(`playwright.config.{ts,js,mjs,cjs}`, `spec/design/e2e/` 아래 포함)의 `webServer` 포트(`port:`·`url:` 숫자, 정규식으로 찾으므로 변수로 지정한 포트는 못 찾음)에 이미 무언가 떠 있으면 `warn`. POSIX에서 `lsof`가 있으면 그 프로세스의 PID·명령·작업 디렉터리와 이 프로젝트 안인지 밖인지를 적는다(ADR-0026) | 해당 파일을 손으로 고치거나 삭제한다. 포트 충돌이면 그 프로세스를 직접 멈추거나 포트를 바꾼다. doctor는 아무것도 종료하지 않는다 |
+| 3 | project state | `.gatekit/config.json`과 `approvals.json`이 파싱되는가. Playwright 설정(`playwright.config.{ts,js,mjs,cjs}`, `spec/design/e2e/` 아래 포함)의 `webServer` 포트(`webServer:` 값의 중괄호·대괄호 안에서 주석을 뺀 `port:`·`url:` 숫자와 `process.env.PORT || 3000` 같은 `||` 뒤 기본값. 파서가 아니라 간단한 스캔이므로 변수로만 지정한 포트는 못 찾음)에 이미 무언가 떠 있으면 `warn`. POSIX에서 `lsof`가 있으면 그 프로세스의 PID·명령·작업 디렉터리와 이 프로젝트 안인지 밖인지를 적는다(ADR-0026) | 해당 파일을 손으로 고치거나 삭제한다. 포트 충돌이면 그 프로세스를 직접 멈추거나 포트를 바꾼다. doctor는 아무것도 종료하지 않는다 |
 | 4 | spec set | `spec validate` 판정 | 실패한 파일을 소유한 파이프라인으로 간다 |
 | 5 | contract freshness | `.gatekit/contract.json`의 `source_sha256`가 `05-gate.md`와 일치하는가 | `contract derive` 재실행 |
 | 6 | workers | 기본 백엔드 바이너리가 PATH에 있는가 | 해당 CLI를 설치하거나 `workers set-default <name>` |

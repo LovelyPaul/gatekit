@@ -208,19 +208,89 @@ def axis_project_state(root) -> dict:
 # ADR-0026: a server already listening on the Playwright webServer port. With
 # `reuseExistingServer: true` the e2e tests run against whatever answers
 # there — in the 0.16.0 rehearsal, another project's app. The port is found
-# by regex, not by parsing JS/TS: `port: <n>` or `url: '<scheme>://<host>:<n>'`
-# within WEBSERVER_WINDOW characters after each `webServer`. A port set from a
-# variable is not found.
+# by a small scan, not by parsing JS/TS: comments are dropped, the value after
+# each `webServer:` is taken up to its balanced closing brace or bracket
+# (strings respected), and in it `port: <n>` / `url: '<scheme>://<host>:<n>'`
+# are read, also as the fallback after `||` or `??` (`process.env.PORT ||
+# 3000`). A port set only from a variable is not found.
 PLAYWRIGHT_CONFIGS = tuple("playwright.config." + ext for ext in ("ts", "js", "mjs", "cjs"))
 #: Also searched (recursively) for Playwright configs.
 E2E_CONFIG_DIR = ("spec", "design", "e2e")
-WEBSERVER_WINDOW = 2000
-_WEBSERVER_RE = re.compile(r"\bwebServer\b")
-_PORT_RE = re.compile(r"\bport\s*:\s*(\d{1,5})\b")
+#: Most characters of one `webServer` value read; an unbalanced value stops here.
+WEBSERVER_WINDOW = 8000
+_WEBSERVER_RE = re.compile(r"\bwebServer\s*:\s*")
+_FALLBACK = r"(?:[^,;{}\[\]\n]*?(?:\|\||\?\?)\s*)?"
+_PORT_RE = re.compile(r"\bport\s*:\s*" + _FALLBACK + r"(\d{1,5})\b")
 _URL_PORT_RE = re.compile(
-    r"\burl\s*:\s*['\"`][A-Za-z][A-Za-z0-9+.-]*://(?:\[[^\]]*\]|[^'\"`/\s:]+):(\d{1,5})")
+    r"\burl\s*:\s*" + _FALLBACK
+    + r"['\"`][A-Za-z][A-Za-z0-9+.-]*://(?:\[[^\]]*\]|[^'\"`/\s:]+):(\d{1,5})")
 PROBE_TIMEOUT_S = 0.3
 LSOF_TIMEOUT_S = 3
+
+
+def _strip_js_comments(text: str) -> str:
+    """*text* without ``//`` and ``/* */`` comments; string literals (where
+    ``//`` is part of a URL) are kept as they are."""
+    out = []
+    i, n = 0, len(text)
+    quote = None
+    while i < n:
+        ch = text[i]
+        if quote:
+            out.append(ch)
+            if ch == "\\" and i + 1 < n:
+                out.append(text[i + 1])
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in "'\"`":
+            quote = ch
+            out.append(ch)
+            i += 1
+        elif text.startswith("//", i):
+            end = text.find("\n", i)
+            i = n if end < 0 else end
+        elif text.startswith("/*", i):
+            end = text.find("*/", i + 2)
+            out.append(" ")
+            i = n if end < 0 else end + 2
+        else:
+            out.append(ch)
+            i += 1
+    return "".join(out)
+
+
+def _balanced_value(text: str, start: int) -> str:
+    """The ``{…}`` or ``[…]`` value opening at *start*, up to its matching
+    close (strings respected), at most :data:`WEBSERVER_WINDOW` characters;
+    "" when no object or array opens there."""
+    if start >= len(text) or text[start] not in "{[":
+        return ""
+    depth = 0
+    quote = None
+    limit = min(len(text), start + WEBSERVER_WINDOW)
+    i = start
+    while i < limit:
+        ch = text[i]
+        if quote:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+        elif ch in "'\"`":
+            quote = ch
+        elif ch in "{[(":
+            depth += 1
+        elif ch in "}])":
+            depth -= 1
+            if depth == 0:
+                return text[start:i + 1]
+        i += 1
+    return text[start:limit]
 
 
 def _playwright_configs(root) -> list:
@@ -233,17 +303,17 @@ def _playwright_configs(root) -> list:
 
 
 def webserver_ports(root) -> list:
-    """Sorted ports named in the ``webServer`` blocks of the Playwright configs."""
+    """Sorted ports named in the ``webServer`` values of the Playwright configs."""
     import pathlib
 
     ports = set()
     for path in _playwright_configs(pathlib.Path(root)):
         try:
-            text = path.read_text(encoding="utf-8", errors="replace")
+            text = _strip_js_comments(path.read_text(encoding="utf-8", errors="replace"))
         except OSError:
             continue
         for match in _WEBSERVER_RE.finditer(text):
-            window = text[match.end():match.end() + WEBSERVER_WINDOW]
+            window = _balanced_value(text, match.end())
             for regex in (_PORT_RE, _URL_PORT_RE):
                 for found in regex.findall(window):
                     port = int(found)

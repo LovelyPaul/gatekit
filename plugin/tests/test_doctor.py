@@ -273,6 +273,41 @@ class TestAxisProjectStatePortProbe(DoctorTestCase):
         self.write_config(5173, where="spec/design/e2e/playwright.config.mjs", key="url")
         self.assertEqual(doctor.webserver_ports(self.root), [4183, 5173])
 
+    def ports_of(self, text: str) -> list:
+        (self.root / "playwright.config.ts").write_text(text, encoding="utf-8")
+        return doctor.webserver_ports(self.root)
+
+    def test_commented_ports_are_ignored(self) -> None:
+        # Review of 0.16.1: ports in comments were reported.
+        self.assertEqual(self.ports_of(
+            "webServer: {\n  // port: 4000 was the old one\n  /* url: 'http://localhost:4100' */\n"
+            "  command: 'x', url: 'http://localhost:3000' }\n"), [3000])
+
+    def test_ports_after_the_webserver_block_are_ignored(self) -> None:
+        self.assertEqual(self.ports_of(
+            "export default defineConfig({\n  webServer: { command: 'x', port: 3000 },\n"
+            "  use: { baseURL: 'http://localhost:3001' },\n"
+            "  projects: [{ name: 'api', use: { port: 9229 } }],\n});\n"), [3000])
+
+    def test_env_fallback_port(self) -> None:
+        self.assertEqual(self.ports_of(
+            "webServer: { command: 'npm run dev', port: Number(process.env.PORT) || 3000 }"),
+            [3000])
+        self.assertEqual(self.ports_of(
+            "webServer: { command: 'x', url: process.env.BASE_URL || 'http://127.0.0.1:4173' }"),
+            [4173])
+
+    def test_webserver_array(self) -> None:
+        self.assertEqual(self.ports_of(
+            "webServer: [{ command: 'a', port: 3000 },\n"
+            "  { command: 'b', url: 'http://127.0.0.1:8080/health' }],\n"
+            "use: { port: 1234 }\n"), [3000, 8080])
+
+    def test_braces_inside_strings_do_not_end_the_block(self) -> None:
+        self.assertEqual(self.ports_of(
+            "webServer: { command: 'node -e \"x}\" // not a comment', port: 3000 },\n"
+            "other: { port: 9999 }\n"), [3000])
+
     def test_no_config_no_ports(self) -> None:
         self.assertEqual(doctor.webserver_ports(self.root), [])
 
