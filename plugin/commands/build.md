@@ -54,11 +54,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" workers check "$(python3 "${CLAUD
 ```
 
 `--probe` sends one trivial prompt through the backend's read-only argv — the
-only check that catches a CLI that exists but cannot answer here (not logged
-in, or sandboxed away from its credentials). `fail`: stop and show the detail;
-the fix is to log in, or under a sandboxed host to run with escalated
-permissions. `unverified` (timed out) is not a blocker; say so once and
-continue.
+only check that catches a CLI that cannot answer here (not logged in, or
+sandboxed from its credentials). `fail`: stop and show the detail; the fix is
+to log in, or to run a sandboxed host with escalated permissions.
+`unverified` (timed out) is not a blocker; say so once and continue.
 
 ## Step 2 — start the job
 
@@ -66,9 +65,8 @@ continue.
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs start
 ```
 
-Add `--tasks <ids>` when `$ARGUMENTS` named specific tasks, `--backend <name>`
-when the user asked for one. Read `max_retries` and `parallel` from
-`.gatekit/config.json`; do not pass `--parallel` unless the user asked.
+Add `--tasks <ids>` when `$ARGUMENTS` named tasks, `--backend <name>` when the
+user asked for one; never `--parallel` unless asked (config holds it).
 
 The command prints one row per task. Record the job id. It first runs every
 task's gates once, before any worker (ADR-0009): gates that already pass
@@ -91,21 +89,19 @@ scope, gates, design, screens — implement it, then record the verdict with
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs status
 ```
 
-**Never read `output.txt` or `stderr.txt` into context.** They hold whole worker
-transcripts and will swamp the session. (Under `host` they do not exist.) Use
-the status table and:
+**Never read `output.txt` or `stderr.txt` into context** — whole worker
+transcripts (absent under `host`). Use the status table and:
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs results --compact
 ```
 
-which prints `id state gates_passed/total`, one line per task. Read a task's
-`gates.json` only when you need the specific failing gate's name.
+which prints `id state gates_passed/total`, one line per task; read a task's
+`gates.json` only for the failing gate's name.
 
-Terminal states are `passed`, `failed`, `timeout`, `redelegated`, `stopped`
-and `blocked`. A `blocked` task never ran because an in-job dependency did not
-pass: fix the dependency, then `jobs start --tasks <id>`. To end a job early,
-`jobs stop` — it ends this job's own workers only; never kill them by name.
+Terminal states: `passed`, `failed`, `timeout`, `redelegated`, `stopped`,
+`blocked` (never ran: an in-job dependency did not pass — fix it, then `jobs
+start --tasks <id>`). `jobs stop` ends this job's own workers; never kill them by name.
 
 ## Step 4 — route failures
 
@@ -125,6 +121,11 @@ again. Under `worker`, `jobs redelegate <task_id>`: it archives the attempt
 under `attempt-N/`, appends the gate output to the prompt and re-runs; exit 3
 means out of retries (`build.max_retries`) and you do not retry past it.
 
+**A grading file changed** (ADR-0023). A criterion `unverified` with `grading
+file changed since approval`: if the test change is intended, re-run
+`/gatekit:gate` to re-approve; otherwise revert it. A task flagged `grading
+changed after failure` passed only after its own test changed: read that diff.
+
 Consecutive failures bind across jobs by code (ADR-0014, ADR-0021): `redelegate`,
 `complete` and `start` refuse a task past `max_retries`, or after two identical
 failures, with exit 3. On refusal, diagnose: read `spec/RECOVERY.md` and the task's `gates.json`,
@@ -139,10 +140,9 @@ When every task is terminal, update `spec/PROGRESS.md` in `output_lang`.
 
 If the file does not exist, copy
 `${CLAUDE_PLUGIN_ROOT}/spec-kit/templates/<output_lang>/PROGRESS.md` first,
-filling its YAML frontmatter block (`title`/`date`/`status`) along with the
-rest of the placeholders. **Keep the template's headings exactly** — `spec
-validate` rejects a heading from the other language. Under them record: the
-job id, its execution mode and
+filling its frontmatter (`title`/`date`/`status`) and placeholders. **Keep the
+template's headings exactly** — `spec validate` rejects a heading from the
+other language. Under them record: the job id, its execution mode and
 backend, and whether the build is done; one line per task (id, final state,
 gates passed of total); every redelegated task with the gate that failed and
 what changed; tasks left blocked with the failing gate named; the timestamp.

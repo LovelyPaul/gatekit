@@ -67,6 +67,11 @@ _MESSAGES = {
             "completion cannot be judged (contract_stale). "
             "Run `" + paths.cli_invocation() + " contract derive`, then finish the work."
         ),
+        "grading_hint": (
+            "  A file that grades the work changed since approval: {paths}\n"
+            "  If the change is intended, re-run /gatekit:gate to re-approve; "
+            "otherwise revert it."
+        ),
         "unapproved": (
             "gatekit: grading files changed after spec/05-gate.md was approved and "
             "the contract was re-derived, so completion cannot be judged "
@@ -90,6 +95,11 @@ _MESSAGES = {
             "gatekit: .gatekit/contract.json 이 spec/05-gate.md 와 더 이상 일치하지 "
             "않아 완료 여부를 판정할 수 없습니다 (contract_stale). "
             "`" + paths.cli_invocation() + " contract derive` 를 실행한 뒤 작업을 마치세요."
+        ),
+        "grading_hint": (
+            "  승인 이후 작업을 채점하는 파일이 바뀌었습니다: {paths}\n"
+            "  의도한 변경이면 /gatekit:gate 를 다시 실행해 재승인하고, 아니면 "
+            "변경을 되돌리세요."
         ),
         "unapproved": (
             "gatekit: spec/05-gate.md 승인 이후 채점 파일이 바뀐 채 계약이 다시 "
@@ -214,6 +224,13 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if item.get("verdict") in (verdict.FAIL, verdict.UNVERIFIED)
     ]
     reasons_text = "\n".join(f"  - {line}" for line in result["reasons"]) or "  - (no detail)"
+    changed = sorted({str(p) for item in unmet
+                      if str(item.get("detail") or "").startswith(contract.GRADING_MARKER)
+                      for p in (item.get("grading_changed") or [])})
+    if changed:
+        # The reason line is cut at 120 characters; the instruction and the
+        # full path list stand on their own here.
+        reasons_text += "\n" + _message(lang, "grading_hint", paths=", ".join(changed))
     if result.get("reused_from"):
         reasons_text += "\n" + _message(lang, "reused", at=result["reused_from"])
     return hookio.block_stop(

@@ -117,6 +117,13 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" approve check spec/05-gate.md
 
 The check must print `ok`. Never edit the file to make a hash match.
 
+**When a grading file changes later.** Approval also pins the files that
+judge each criterion (ADR-0023). If one changes, the criterion comes back
+`unverified` ("grading file changed since approval"), and re-deriving alone
+does not clear it: `approve check` prints `fail` and names the file. If the
+change is intended, run this command again to re-approve; otherwise revert
+it. A worker can never approve.
+
 ## Step 7 — report
 
 In `output_lang`: (1) the file path and the number of criteria; (2) the

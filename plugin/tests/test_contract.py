@@ -951,10 +951,27 @@ class TestGradingFilesChangedSinceApproval(TempProject):
         result = contract.execute(self.root)
         item = result["criteria"][0]
         self.assertEqual(item["verdict"], "unverified")
-        self.assertIn("grading file changed since approval: tests/check.py", item["detail"])
-        self.assertIn("re-derive and re-approve 05-gate", item["detail"])
+        self.assertTrue(item["detail"].startswith(contract.GRADING_MARKER))
+        self.assertIn("/gatekit:gate", item["detail"])
+        self.assertTrue(item["detail"].endswith(": tests/check.py"))
+        self.assertEqual(item["grading_changed"], ["tests/check.py"])
         self.assertEqual(result["verdict"], "unverified")
         self.assertTrue(any("grading file changed" in r for r in result["reasons"]))
+
+    def test_the_hint_survives_the_reason_cut(self) -> None:
+        # F3: the instruction comes first, the paths last, so the 120-char
+        # cut in `reasons` drops paths, never the instruction.
+        deep = self.root / "tests" / ("d" * 60) / ("e" * 60)
+        deep.mkdir(parents=True)
+        path = deep / "test_long.py"
+        path.write_text(self.PASS, encoding="utf-8")
+        rel = path.relative_to(self.root).as_posix()
+        self.write_gate({"id": "c", "argv": [PY, rel]})
+        contract.derive(self.root)
+        path.write_text(self.PASS + "# loosened\n", encoding="utf-8")
+        reason = contract.execute(self.root)["reasons"][0]
+        self.assertIn("/gatekit:gate", reason)
+        self.assertIn("revert", reason)
 
     def test_a_deleted_file_is_unverified(self) -> None:
         path = self.setup_contract()

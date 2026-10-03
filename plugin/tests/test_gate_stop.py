@@ -555,6 +555,25 @@ class TestStopAfterAGradingFileChange(StopProject):
         result = stop_gate.handle(self.event())
         self.assertEqual(result["decision"], "block")
         self.assertIn("grading file changed", result["reason"])
+        self.assertIn("re-run /gatekit:gate to re-approve", result["reason"])
+        self.assertIn("revert", result["reason"])
+
+    def test_the_hint_is_in_korean_and_names_every_path(self) -> None:
+        deep = self.root / "tests" / ("d" * 70) / ("e" * 70)
+        deep.mkdir(parents=True)
+        check = deep / "test_long.py"
+        check.write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
+        rel = check.relative_to(self.root).as_posix()
+        self.write_contract({"id": "c", "argv": [PY, rel], "timeout_s": 20})
+        check.write_text("import sys\nsys.exit(0)  # loosened\n", encoding="utf-8")
+        led = self.led()
+        led.data["active_pipeline"] = "build"
+        led.set_output_lang("ko")
+        led.save()
+        reason = stop_gate.handle(self.event())["reason"]
+        self.assertIn("/gatekit:gate", reason)
+        self.assertIn("되돌리", reason)
+        self.assertIn(rel, reason)
 
 
 class TestStopAfterAnUnapprovedReDerive(StopProject):

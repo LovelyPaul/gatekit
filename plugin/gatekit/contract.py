@@ -451,8 +451,13 @@ def _artifact_hashes(
     return hashes, problems
 
 
-GRADING_CHANGED = ("grading file changed since approval: %s — re-derive and "
-                   "re-approve 05-gate if the change is intended")
+#: Every grading-changed detail starts with this; the Stop gate keys its
+#: localized hint on it.
+GRADING_MARKER = "grading file changed since approval"
+#: The instruction before the paths: `execute` cuts a reason at 120
+#: characters, and the cut must land in the paths, not the instruction.
+GRADING_CHANGED = (GRADING_MARKER + " (if intended, re-run /gatekit:gate to "
+                   "re-approve; otherwise revert it): %s")
 
 
 def _run_one(
@@ -467,6 +472,7 @@ def _run_one(
         if changed:
             result["verdict"] = verdict.UNVERIFIED
             result["detail"] = GRADING_CHANGED % ", ".join(changed)
+            result["grading_changed"] = changed
     return result
 
 
