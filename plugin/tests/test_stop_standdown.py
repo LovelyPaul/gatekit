@@ -402,6 +402,67 @@ class TestStandDownContextLine(Project):
         self.assertIn("게이트를 거치지 않", text)
         self.assertIn("/gatekit:verify", text)
 
+    def test_korean_line_uses_the_manuals_terms(self) -> None:
+        """ADR-0026: "Stop 게이트 … 물러남" as in docs/manual/07-gates.md,
+        not the mixed "stop 게이트 해제" the 0.16.0 rehearsal showed."""
+        self.stood_down("ko")
+        text = prompt_gate.build_context(self.root, self.led())
+        self.assertIn("Stop 게이트 물러남", text)
+        self.assertIn("turn 등급 판정 ok", text)
+        self.assertNotIn("해제", text)
+        self.assertNotIn("stop 게이트", text)
+
+
+class TestContractFieldScope(Project):
+    """ADR-0026: `contract=ok` next to a stand-down read as "fully verified"
+    while verify-tier criteria had not been judged."""
+
+    def stood_down(self, lang: str = "en") -> None:
+        self.write_contract(counting("fast"), counting("suite", tier="verify"))
+        self.prompt(BUILD_PROMPT)
+        self.set_lang(lang)
+        self.make_job({"t1": "passed"})
+        self.assertIsNone(self.stop())
+
+    def test_turn_tier_result_names_the_deferred_count(self) -> None:
+        self.stood_down("en")
+        text = prompt_gate.build_context(self.root, self.led())
+        self.assertIn("contract=ok (turn tier; 1 deferred to /gatekit:verify)", text)
+
+    def test_korean_scope(self) -> None:
+        self.stood_down("ko")
+        text = prompt_gate.build_context(self.root, self.led())
+        self.assertIn("contract=ok (turn 등급만; 1개는 /gatekit:verify 로 미룸)", text)
+
+    def test_a_full_run_shows_plain_ok(self) -> None:
+        self.stood_down("en")
+        contract.save_last(self.root, contract.execute(self.root))
+        text = prompt_gate.build_context(self.root, self.led())
+        self.assertIn("contract=ok", text)
+        self.assertNotIn("contract=ok (", text)
+
+    def test_no_record_shows_plain_ok(self) -> None:
+        self.write_contract(counting("fast"), counting("suite", tier="verify"))
+        text = prompt_gate.build_context(self.root, self.led())
+        self.assertIn("contract=ok", text)
+        self.assertNotIn("contract=ok (", text)
+
+    def test_budget_cut_names_the_unjudged(self) -> None:
+        self.write_contract(counting("a"), counting("b"))
+        contract.save_last(self.root, {
+            "verdict": "unverified", "criteria": [{"id": "a", "verdict": "ok"}],
+            "reasons": [], "scope": ["a"],
+            "deferred": [{"id": "b", "tier": "turn", "reason": "budget"}]})
+        text = prompt_gate.build_context(self.root, self.led())
+        self.assertIn("contract=ok (1 unjudged)", text)
+
+    def test_record_for_another_contract_is_ignored(self) -> None:
+        self.stood_down("en")
+        self.write_contract(counting("fast"), counting("suite", tier="verify"),
+                            counting("extra"))
+        text = prompt_gate.build_context(self.root, self.led())
+        self.assertNotIn("contract=ok (", text)
+
     def test_line_survives_the_600_char_cut(self) -> None:
         self.stood_down("ko")
         led = self.led()

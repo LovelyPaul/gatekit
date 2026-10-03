@@ -160,7 +160,8 @@ def build_context(root, led: "ledger.Ledger") -> str:
 
     contract_status = contract.status(root)
     if contract_status != "unverified":
-        parts.append(f"contract={contract_status}")
+        scope = _contract_scope(root, led.output_lang) if contract_status == "ok" else ""
+        parts.append(f"contract={contract_status}{scope}")
 
     # ADR-0013 decision 1a: a build under host execution lives in this session,
     # so a compaction can take the narrative with it. Name the live job and the
@@ -171,6 +172,44 @@ def build_context(root, led: "ledger.Ledger") -> str:
         parts.append(build)
 
     return " | ".join(parts)
+
+
+#: ADR-0026: what the last recorded result left unjudged. `contract=ok` alone
+#: says the contract matches the approved gate file; next to a stand-down it
+#: read as "fully verified" while verify-tier criteria had not run.
+_SCOPE = {
+    "en": {"tier": "turn tier; {count} deferred to /gatekit:verify",
+           "other": "{count} unjudged"},
+    "ko": {"tier": "turn 등급만; {count}개는 /gatekit:verify 로 미룸",
+           "other": "{count}개 미판정"},
+}
+
+
+def _contract_scope(root, lang: str = "en") -> str:
+    """`` (turn tier; N deferred to /gatekit:verify)`` when the last recorded
+    result for this contract did not judge every criterion, else ""."""
+    try:
+        last = contract.load_last(root)
+        data = contract.load(root)
+        if not last or not data or last.get("source_sha256") != data.get("source_sha256"):
+            return ""
+        judged = {str(i) for i in (last.get("scope") or [])}
+        unjudged = [i for i in contract.tier_scope(root) if i not in judged]
+        if not unjudged:
+            return ""
+        verify_tier = set(contract.tier_scope(root, ("verify",)))
+        held = sum(1 for i in unjudged if i in verify_tier)
+        other = len(unjudged) - held
+        table = _SCOPE.get(lang, _SCOPE["en"])
+        pieces = []
+        if held:
+            pieces.append(table["tier"].format(count=held))
+        if other:
+            pieces.append(table["other"].format(count=other))
+        return " (" + "; ".join(pieces) + ")"
+    except Exception:
+        # The context line is a convenience; never let it break the hook.
+        return ""
 
 
 def _lang_from_spec(root, led: "ledger.Ledger") -> None:

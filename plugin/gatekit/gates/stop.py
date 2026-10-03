@@ -154,7 +154,7 @@ _MESSAGES = {
             "차단 사유가 아님, /gatekit:verify 가 실행: {ids}"
         ),
         "stood_down": (
-            "stop 게이트 해제({subject} {scope} 판정 {verdict} 기록됨{extra}): 이후 "
+            "Stop 게이트 물러남({subject} {scope} 판정 {verdict} 기록됨{extra}): 이후 "
             "수정은 게이트를 거치지 않음, 계약 재확인은 /gatekit:verify"
         ),
         "stood_down_tier": "turn 등급",
@@ -165,11 +165,11 @@ _MESSAGES = {
             "판정하지 않음, /gatekit:verify 가 실행"
         ),
         "no_turn_tier_line": (
-            "stop 게이트: turn 등급 기준 없음 — 빌드 중 턴 끝은 아무것도 판정하지 "
+            "Stop 게이트: turn 등급 기준 없음 — 빌드 중 턴 끝은 아무것도 판정하지 "
             "않음, /gatekit:verify 가 실행"
         ),
         "budget_pending": (
-            "stop 게이트: Stop 예산 소진으로 판정하지 못한 기준(미검증, ok 아님): "
+            "Stop 게이트: Stop 예산 소진으로 판정하지 못한 기준(미검증, ok 아님): "
             "{ids} — 다음 턴 끝에 먼저 실행"
         ),
         "tasks_unpassed": (
