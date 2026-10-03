@@ -288,7 +288,10 @@ _NEXT_CHAR_RE = re.compile(r"\s*(\S)")
 #: the value's ``=`` wrapped onto the next line, as Prettier does).
 _ANNOTATION_CONTINUES_BEFORE = frozenset(":|&")
 _ANNOTATION_CONTINUES_AFTER = frozenset("|&=")
-_FALLBACK = r"(?:[^,;{}\[\]\n]*?(?:\|\||\?\?)\s*)?"
+#: At most this many characters between `port:`/`url:` and `||`/`??`, so
+#: each match attempt is bounded and a window is read in linear time.
+FALLBACK_SPAN = 200
+_FALLBACK = r"(?:[^,;{}\[\]\n]{0,%d}?(?:\|\||\?\?)\s*)?" % FALLBACK_SPAN
 _PORT_RE = re.compile(r"\bport\s*:\s*" + _FALLBACK + r"(\d{1,5})\b")
 _URL_PORT_RE = re.compile(
     r"\burl\s*:\s*" + _FALLBACK

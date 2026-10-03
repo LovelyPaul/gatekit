@@ -472,6 +472,19 @@ class TestAxisProjectStatePortProbe(DoctorTestCase):
         # An expression that does end on its line is still followed.
         self.assertEqual(self.ports_of('const s = `${"`"}\n`;' + tail), [3000])
 
+    def test_many_port_keys_in_a_value_stay_linear(self) -> None:
+        # Review of 0.16.7: the `||`/`??` fallback rescanned the rest of the
+        # window for every `port:` (about 7 s on this 1 MB input).
+        import time
+
+        text = "{webServer: {" + "port:" * 1590 + "}}\n"
+        started = time.perf_counter()
+        self.assertEqual(self.ports_of(text * 125), [])
+        self.assertLess(time.perf_counter() - started, 2.0)
+        self.assertEqual(self.ports_of(
+            "{ webServer: { port: Number(process.env.PLAYWRIGHT_PORT ?? process.env.PORT) || 3858 } }"),
+            [3858])
+
     def test_long_template_expressions_stay_linear(self) -> None:
         import time
 

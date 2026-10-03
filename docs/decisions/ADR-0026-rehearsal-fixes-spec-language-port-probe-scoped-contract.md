@@ -379,7 +379,11 @@ scans (`_value_open`, `_annotation_end`, `_balanced_value`) no longer track
 quotes themselves. `port:`/`url:` are still matched in the comment-free text,
 so a URL keeps its port, but a match counts only when its key — and for
 `port:` the number too (`port: f('a || 9267')` is not 9267) — lies outside a
-string.
+string. The `||`/`??` fallback before the number may span at most 200
+characters (`doctor.FALLBACK_SPAN`); it was unbounded and lazy, so every
+`port:` in a value rescanned the rest of its 8000-character window (about
+7 s for a 1 MB file of such values). Each match attempt is now bounded, so
+reading a window is linear in its length.
 
 Still out of scope, because this stays a scan and not a parser: a regex
 literal holding a quote or backtick outside a template expression (a
