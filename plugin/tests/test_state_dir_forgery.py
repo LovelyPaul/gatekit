@@ -100,6 +100,7 @@ class TestPowerShellCannotForgeTheStateDir(Project):
         "Move-Item eval .gatebound", "Copy-Item -Recurse .gatekit\\eval .gatebound",
         "[IO.Directory]::Move('forged', '.gatebound')",
         "[IO.Directory]::CreateDirectory('.gatebound')",
+        "New-Item -Path .gatebound\\eval -ItemType Directory -Force",
     )
 
     def test_every_form_is_denied_before_and_after_approval(self) -> None:
@@ -145,6 +146,8 @@ class TestBashCannotForgeTheStateDir(Project):
         "echo x > .gatebound", "install -d .gatebound",
         # a directory the model filled, under a user-owned name
         "mv eval .gatebound", "cp -r .gatekit/eval .gatebound", "ln -s .gatekit/eval .gatebound",
+        # a state directory created on the way to one below it
+        "mkdir -p .gatebound/eval", "mkdir -p sub/.gatebound/x",
     )
 
     def test_every_form_is_denied_before_and_after_approval(self) -> None:
@@ -157,7 +160,8 @@ class TestBashCannotForgeTheStateDir(Project):
 
     def test_plain_mkdir_of_the_current_name_stays_allowed(self) -> None:
         self.approve()
-        for command in ("mkdir .gatekit", "mkdir -p .gatekit", "mkdir -p .gatekit/eval"):
+        for command in ("mkdir .gatekit", "mkdir -p .gatekit", "mkdir -p .gatekit/eval",
+                        "mkdir -p sub/.gatekit/eval"):
             with self.subTest(command=command):
                 self.assertIsNone(self.bash(command), command)
 
@@ -166,6 +170,15 @@ class TestBashCannotForgeTheStateDir(Project):
         (self.root / ".gatebound").mkdir()
         self.assertProtected(self.bash("mkdir .gatekit"), "mkdir .gatekit")
         self.assertProtected(self.ps("New-Item -ItemType Directory .gatekit"), "ni")
+
+    def test_deny_names_the_targeted_directory(self) -> None:
+        for command in ("mv ../forged .gatebound", "ln -s ../forged .gatebound"):
+            with self.subTest(command=command):
+                reason = self.bash(command)["hookSpecificOutput"]["permissionDecisionReason"]
+                self.assertIn(".gatebound/", reason)
+        reason = self.ps("Rename-Item forged -NewName .gatebound")[
+            "hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn(".gatebound/", reason)
 
     def test_write_tool_cannot_create_a_state_dir_name(self) -> None:
         for path in (".gatebound", str(self.root / ".gatekit"), ".GATEBOUND"):

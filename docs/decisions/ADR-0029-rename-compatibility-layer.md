@@ -149,7 +149,13 @@ forged one. Four layers, each sufficient for the reported forms:
    .gatekit/`). A copy, move or link whose destination is a state directory
    name that does not exist yet becomes that directory, so it is denied
    whatever the source is called (`mv eval .gatebound`). `install -d` is
-   read as creating its operands.
+   read as creating its operands, and a `mkdir -p`/`New-Item -ItemType
+   Directory` that would create a missing state directory on the way
+   (`mkdir -p .gatebound/eval`) is held to the same rule. Programs the
+   readers do not model (`ditto`, `pax`, `cpio`, `scp`, `rename`, `mktemp
+   -d .gatebound`) stay outside a static reader's reach (ADR-0004's
+   programs-invoked-by-name boundary), as do archives extracted at the
+   root; layers 3 and 4 limit what such a directory can do.
 3. **`resolve_state_dir` ignores links and prefers the current name.** A
    candidate that is a symlink, junction or other reparse point
    (`st_file_attributes & FILE_ATTRIBUTE_REPARSE_POINT` on Windows,

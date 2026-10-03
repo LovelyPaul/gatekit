@@ -982,19 +982,22 @@ def _copy_hit(root, sources: List[str], dest: str, raws: List[str]) -> Optional[
     ``.gatekit`` directory."""
     state = _state_path(root)
     dests = {_lower_abs(dest), _lower_abs(os.path.realpath(dest))}
-    into_state = any(d.rsplit("/", 1)[-1] in _STATES for d in dests)
+    named = [d.rsplit("/", 1)[-1] for d in dests if d.rsplit("/", 1)[-1] in _STATES]
+    into_state = bool(named)
+    # the deny names the state directory the command targets
+    shown = (named[0] if named else _STATE) + "/"
     into_parent = state.rsplit("/", 1)[0] in dests
     if into_state and sources and not os.path.isdir(dest):
         # ADR-0029 amendment: no such directory yet, so the copy, move or
         # link *becomes* the state directory — whatever the source is called
         # (`mv eval .gatebound` moves a directory the model filled).
-        return _STATE + "/"
+        return shown
     for source, raw in zip(sources, raws):
         base = _base(source)
         by_contents = raw.endswith("/") or raw.endswith("/.")
         if into_state and (by_contents or _GLOB_CHARS & set(base)
                            or not write.user_owned([base])):
-            return _STATE + "/"
+            return shown
         if into_parent and (any(_segment_match(s, base) for s in _STATES)
                             or (by_contents and _dir_holds(source, set(_STATES)))):
             return _STATE + "/"
@@ -1056,6 +1059,26 @@ def _state_dir_created(root, target: str, found: WriteTargets) -> Optional[str]:
     return name + "/"
 
 
+def _state_dir_made_on_the_way(root, made: str) -> Optional[str]:
+    """ADR-0029 amendment: ``mkdir -p .gatebound/eval`` creates the state
+    directory it passes through. A missing ancestor named like a state
+    directory may be created only under the rule of
+    :func:`_state_dir_created` (the current name, no other beside it)."""
+    canonical = write._canonical(made)
+    segs = canonical.split("/")
+    for index in range(1, len(segs) - 1):
+        name = segs[index].lower()
+        if name not in _STATES:
+            continue
+        ancestor = "/".join(segs[:index + 1])
+        if os.path.isdir(ancestor):
+            continue
+        parent = "/".join(segs[:index]) or "/"
+        if name != _STATE or any(s != _STATE and _dir_holds_dir(parent, s) for s in _STATES):
+            return name + "/"
+    return None
+
+
 def _dir_holds_dir(parent: str, name: str) -> bool:
     """True when *parent* has a directory (or a link) named *name*, any case."""
     try:
@@ -1074,6 +1097,10 @@ def _protected_hit(root, command: str, found: WriteTargets) -> Optional[str]:
         if _glob_state_hit(target):
             return _STATE + "/"
         hit = _state_dir_created(root, target, found)
+        if hit:
+            return hit
+    for made in found.made_dirs:
+        hit = _state_dir_made_on_the_way(root, made)
         if hit:
             return hit
     for removed in found.removed:
