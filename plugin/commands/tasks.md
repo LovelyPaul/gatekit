@@ -101,13 +101,13 @@ of ten links were unevidenced, turning three rounds into seven.
 
 ## Step 4 — write gates
 
-**Read `${CLAUDE_PLUGIN_ROOT}/spec-kit/task-gates.md` and follow it.** Every
-task carries at least one gate — an argv list, run without a shell, that
-fails when the task is not done — and that file covers what makes one
-trustworthy (verify it runs before writing it in; a gate that always passes
-manufactures false evidence), which runners need glob patterns rather than
-directories, and the two gates added by default: the **token gate** when
-`spec/tokens.json` exists, and the **screenshot criterion** on every task
+**Read `${CLAUDE_PLUGIN_ROOT}/spec-kit/task-gates.md` and follow it.** Every task
+carries at least one gate — an argv list, run without a shell, that fails when the task
+is not done — and that file covers what makes one trustworthy (verify it runs before
+writing it in; a gate that always passes manufactures false evidence), which runners
+need glob patterns rather than directories, why an e2e gate runs only its task's spec on
+one viewport against one reused server, and the two gates added by default: the **token
+gate** when `spec/tokens.json` exists, and the **screenshot criterion** on every task
 that renders a screen.
 
 ## Step 5 — show the shape, then write spec/04-tasks.md

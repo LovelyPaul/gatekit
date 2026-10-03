@@ -2,7 +2,8 @@
 
 Read by `/gatekit:tasks` Step 4. Every task in `spec/04-tasks.md` carries
 at least one gate; this file says what makes a gate trustworthy, which
-runners need glob patterns, and the two gates added by default.
+runners need glob patterns, how to keep an end-to-end gate cheap, and the two
+gates added by default.
 
 ## Step 4 — write gates
 
@@ -50,6 +51,17 @@ directory and exits 3, so write `src/**`. `jobs start` runs every gate once
 before spawning a worker (ADR-0009) and refuses to start when a gate's
 command itself errors — write the gate so that, with no code yet, it fails
 the way the runner reports "tests failed" (exit 1), not a usage error.
+
+**An end-to-end task gate runs only that task's spec, on one viewport.** Name
+the task's own spec file and one project — `["npx", "playwright", "test",
+"e2e/login.spec.ts", "--project", "mobile"]` — never the whole E2E suite and
+never every viewport project. Boot one dev or production server once and reuse
+it (Playwright's `webServer.reuseExistingServer: true`, or a server the runner
+config starts only when none is listening) instead of a fresh server per run.
+The cost is measured: in a real build each task's e2e gate ran both projects,
+about 299 s per full pass, and a gate runs at preflight, on every `jobs
+complete` and on every `recheck`. The whole suite belongs in `spec/05-gate.md`
+as one criterion, run once (`gate-criteria.md`), not in every task's gate.
 
 **The token gate.** When `spec/tokens.json` exists, add this gate by default
 to every task whose `write_scope` includes a stylesheet, component, or
