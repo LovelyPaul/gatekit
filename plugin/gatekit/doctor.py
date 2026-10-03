@@ -258,15 +258,16 @@ def axis_project_state(root) -> dict:
 # there — in the 0.16.0 rehearsal, another project's app. The port is found
 # by a small scan, not by parsing JS/TS: one pass drops comments and blanks
 # string literals (a template literal's `${…}` expressions are followed while
-# they close on their own line, so a quote inside one does not end it); then the value after each `webServer:`
-# key (quoted or not, after `{` or `,`) or `webServer =` (also
-# `const webServer: <type> =`, the annotation skipped) is taken from its first
-# `{` or `[` up to the balanced closing brace or bracket, and in it
-# `port: <n>` / `url: '<scheme>://<host>:<n>'` outside strings are read, also
-# as the fallback after `||` or `??` (`process.env.PORT || 3000`). A value
-# that does not open with `{`/`[` (`process.env.CI ? undefined : { … }`) is
-# searched for one up to its end; a `webServer` inside a value already read
-# is not read again. A port set only from a variable is not found.
+# they close on their own line, so a quote inside one does not end it); then
+# the value after each `webServer:` key (quoted or not, after `{` or `,`) or
+# `webServer =` (also `const webServer: <type> =`, the annotation skipped) is
+# taken from its first `{` or `[` up to the balanced closing brace or
+# bracket, and in it `port: <n>` / `url: '<scheme>://<host>:<n>'` outside
+# strings are read, also as the fallback after `||` or `??` within
+# FALLBACK_SPAN characters (`process.env.PORT || 3000`). A value that does
+# not open with `{`/`[` (`process.env.CI ? undefined : { … }`) is searched
+# for one up to its end; a `webServer` inside a value already read is not
+# read again. A port set only from a variable is not found.
 PLAYWRIGHT_CONFIGS = tuple("playwright.config." + ext for ext in ("ts", "js", "mjs", "cjs"))
 #: Also searched (recursively) for Playwright configs.
 E2E_CONFIG_DIR = ("spec", "design", "e2e")
@@ -351,7 +352,7 @@ def _scan_js(text: str) -> tuple:
     A template literal ends at its own closing backtick: each ``${…}`` in it
     is followed to its matching ``}``, with the strings, templates and
     comments inside, and blanked with the template. A ``${…}`` must close on
-    the line it opened on. When a line ends inside one — a regex literal's
+    the line it opened on. When a line (or the input) ends inside one — a regex literal's
     quote, ``{`` or ``//`` read as code, or an expression wrapped over lines
     — the outermost template is read again plainly, from its backtick to the
     next one, and so is every template opening on the rest of that line. So
@@ -369,9 +370,11 @@ def _scan_js(text: str) -> tuple:
     opened_at = opened_out = 0  # the outermost template: text index, output chunks
     plain_until = -1   # templates opening before this index are read plainly
     i, n = 0, len(text)
-    while i < n:
+    while i < n or depths:
         line_end = -1
-        if in_text:
+        if i >= n:
+            line_end = n  # the input ended inside a `${…}`
+        elif in_text:
             end = _TEMPLATE_TEXT_RE.match(text, i).end()
             if depths:
                 line_end = text.find("\n", i, end)
@@ -379,7 +382,7 @@ def _scan_js(text: str) -> tuple:
                 emit(text[i:end], True)
                 i = end
                 if i >= n:
-                    break
+                    continue
                 if text[i] == "`":
                     emit("`", True)
                     i += 1
@@ -394,7 +397,8 @@ def _scan_js(text: str) -> tuple:
             found = (_EXPR_STOP_RE if depths else _CODE_STOP_RE).search(text, i)
             if not found:
                 emit(text[i:], inside)
-                break
+                i = n
+                continue
             emit(text[i:found.start()], inside)
             i = found.start()
             token = found.group(0)

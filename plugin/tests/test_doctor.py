@@ -469,12 +469,19 @@ class TestAxisProjectStatePortProbe(DoctorTestCase):
                 "const s = `${ u.replace(/\\/\\//, '') }`;",
         ):
             self.assertEqual(self.ports_of(line + tail), [3000], line)
+        # The same at the end of a file without a trailing line break.
+        for text in (
+                "const c = `${ s.replace(/{/g, '') }`; export default { webServer: { port: 3000 } }",
+                "const c = `${ s.replace(/'/g, '') }`; export default { webServer: { port: 3000 } }",
+                "const a=`${s.replace(/'/g,'')}`;export default defineConfig({webServer:{port:3000}})",
+        ):
+            self.assertEqual(self.ports_of(text), [3000], text)
         # An expression that does end on its line is still followed.
         self.assertEqual(self.ports_of('const s = `${"`"}\n`;' + tail), [3000])
 
     def test_many_port_keys_in_a_value_stay_linear(self) -> None:
         # Review of 0.16.7: the `||`/`??` fallback rescanned the rest of the
-        # window for every `port:` (about 7 s on this 1 MB input).
+        # window for every `port:` (several seconds on this 1 MB input).
         import time
 
         text = "{webServer: {" + "port:" * 1590 + "}}\n"

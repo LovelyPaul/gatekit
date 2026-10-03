@@ -357,9 +357,10 @@ read as code, so its quote, `{` or `//` (`` `${ s.replace(/'/g, '') }` ``,
 `` `${ /a{2,/.test(x) }` ``) keeps the expression open; an earlier draft of
 this addendum then swallowed the template's closing backtick and blanked the
 rest of the file. Now, when a line ends inside a `${…}` (in code, a string, a
-comment or a nested template), the outermost template is read again
-plainly — from its backtick to the next unescaped one, as before 0.16.7 —
-and so is every template that opens on the rest of that line. An
+comment or a nested template), or the file ends inside one, the outermost
+template is read again plainly — from its backtick to the next unescaped
+one, as before 0.16.7 — and so is every template that opens on the rest of
+that line. An
 expression wrapped over several lines is therefore read plainly too. The
 damage of an unread regex literal is bounded by that one template, as before
 0.16.7, and the multi-line `` `${"`"}\n` `` still reads correctly because its
@@ -381,8 +382,8 @@ so a URL keeps its port, but a match counts only when its key — and for
 `port:` the number too (`port: f('a || 9267')` is not 9267) — lies outside a
 string. The `||`/`??` fallback before the number may span at most 200
 characters (`doctor.FALLBACK_SPAN`); it was unbounded and lazy, so every
-`port:` in a value rescanned the rest of its 8000-character window (about
-7 s for a 1 MB file of such values). Each match attempt is now bounded, so
+`port:` in a value rescanned the rest of its 8000-character window (several
+seconds for a 1 MB file of such values). Each match attempt is now bounded, so
 reading a window is linear in its length.
 
 Still out of scope, because this stays a scan and not a parser: a regex
