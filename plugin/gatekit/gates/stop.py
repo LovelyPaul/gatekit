@@ -101,6 +101,13 @@ _MESSAGES = {
             "stop gate: Stop-gate budget left criteria unjudged (unverified, not ok): "
             "{ids} — the next turn end runs them first"
         ),
+        "tasks_unpassed": (
+            "gatekit: build job {job} has settled, but not every task passed, so this "
+            "work is not done:\n{reasons}\n"
+            "Fix those tasks and run them again (`jobs redelegate <task>`), or start "
+            "a new job. A task that is `blocked` never ran: that is not a pass."
+        ),
+        "tasks_line": "tasks not passed in {job}: {tasks}",
         "stale": (
             "gatekit: .gatekit/contract.json no longer matches spec/05-gate.md, so "
             "completion cannot be judged (contract_stale). "
@@ -148,6 +155,13 @@ _MESSAGES = {
             "stop 게이트: Stop 예산 소진으로 판정하지 못한 기준(미검증, ok 아님): "
             "{ids} — 다음 턴 끝에 먼저 실행"
         ),
+        "tasks_unpassed": (
+            "gatekit: 빌드 잡 {job} 은 끝났지만 통과하지 못한 태스크가 있어 아직 끝난 "
+            "것이 아닙니다:\n{reasons}\n"
+            "그 태스크를 고친 뒤 다시 실행하거나(`jobs redelegate <task>`) 새 잡을 "
+            "시작하세요. `blocked` 태스크는 실행되지 않았으며 통과가 아닙니다."
+        ),
+        "tasks_line": "{job} 에서 통과하지 못한 태스크: {tasks}",
         "stale": (
             "gatekit: .gatekit/contract.json 이 spec/05-gate.md 와 더 이상 일치하지 "
             "않아 완료 여부를 판정할 수 없습니다 (contract_stale). "
@@ -196,6 +210,27 @@ def _subject(root, pipeline: Optional[str]) -> Tuple[bool, Optional[str]]:
         if state not in jobs.TERMINAL_STATES:
             return False, job_id
     return True, job_id
+
+
+#: Task states that keep a settled job from being a handoff `ok`. `stopped`
+#: is among them but does not block: `jobs stop` ended the job on purpose.
+UNPASSED_STATES = tuple(jobs.NOT_DONE_STATES) + ("blocked",)
+
+
+def _unpassed_tasks(root, job_id: Optional[str]) -> List[Tuple[str, str]]:
+    """``[(task_id, state)]`` of a job's tasks that ended without passing."""
+    if not job_id:
+        return []
+    jdir = jobs.job_dir(root, job_id)
+    job = jobs.read_json(jdir / "job.json", {}) or {}
+    task_ids = [str(t) for t in (job.get("tasks") or [])] if isinstance(job, dict) else []
+    found = []
+    for task_id in task_ids:
+        status = jobs.read_json(jdir / "tasks" / task_id / "status.json", {}) or {}
+        state = status.get("state") if isinstance(status, dict) else None
+        if state in UNPASSED_STATES:
+            found.append((task_id, str(state)))
+    return found
 
 
 def stand_down_applies(root, led: "ledger.Ledger") -> Optional[Dict[str, Any]]:
@@ -390,6 +425,7 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         led.append_event("stop_stand_down_cleared", {"pipeline": pipeline})
 
     settled, job_id = _subject(root, pipeline)
+    result: Dict[str, Any] = {"reasons": []}
 
     def settle(final: str, recorded: bool) -> None:
         """Allow, and stand down when a settled subject got its verdict."""
@@ -397,11 +433,30 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if recorded and settled:
             _stand_down(led, pipeline, job_id, final)
 
+    result = _judge(root, led, pipeline)
+    contract_clear = (result["verdict"] == verdict.OK or _nothing_in_scope(result)
+                      or _only_budget_deferred(result))
+    outcome = result["verdict"]
+
+    # Review of ADR-0024: the handoff of a settled job is not `ok` while a task
+    # in it ended without passing, whatever the contract says. `fail` when a
+    # task failed, timed out or was stopped; `unverified` when it only has
+    # tasks that never ran (`blocked`).
+    gaps = _unpassed_tasks(root, job_id) if (settled and pipeline == "build") else []
+    if gaps:
+        if outcome == verdict.FAIL or any(st in jobs.NOT_DONE_STATES for _, st in gaps):
+            outcome = verdict.FAIL
+        else:
+            outcome = verdict.UNVERIFIED
+        result["reasons"] = [_message(
+            lang, "tasks_line", job=job_id,
+            tasks=", ".join("%s (%s)" % gap for gap in gaps))] + list(result["reasons"])
+    blocking_gaps = [gap for gap in gaps if gap[1] != "stopped"]
+
     # Already inside a stop-hook continuation: never block again. Only an
     # `ok` here counts as the verdict, or one retry would end the judging.
     if bool(event.get("stop_hook_active")):
-        result = _judge(root, led, pipeline)
-        settle(result["verdict"], result["verdict"] == verdict.OK or _nothing_in_scope(result))
+        settle(outcome, not gaps and (outcome == verdict.OK or _nothing_in_scope(result)))
         return hookio.allow()
 
     try:
@@ -409,12 +464,9 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     except (TypeError, ValueError):
         block_count = 0
 
-    result = _judge(root, led, pipeline)
-    outcome = result["verdict"]
-
     # Nothing in the selected tier: there is nothing here to fix, so blocking
     # would only stall. Recorded as `unverified`, never as `ok`.
-    if outcome == verdict.OK or _nothing_in_scope(result):
+    if not gaps and (outcome == verdict.OK or _nothing_in_scope(result)):
         settle(outcome, True)
         return hookio.allow()
 
@@ -424,8 +476,14 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     # judging. The next Stop runs the deferred ones first, keeping what this
     # tree already judged, so it reaches a verdict in as many Stops as there
     # are criteria at most.
-    if _only_budget_deferred(result):
+    if not gaps and _only_budget_deferred(result):
         settle(outcome, False)
+        return hookio.allow()
+
+    # A job ended with `jobs stop`: recorded as not done, but not blocked —
+    # the user ended it on purpose and there is nothing left to run.
+    if gaps and not blocking_gaps and contract_clear:
+        settle(outcome, True)
         return hookio.allow()
 
     # Out of blocks: stand down rather than trap the session, but say plainly
@@ -447,6 +505,11 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if contract.GRADING_UNAPPROVED_REASON in result["reasons"]:
         return hookio.block_stop(_message(
             lang, "unapproved", paths=", ".join(result.get("unapproved_grading") or [])))
+    if gaps and contract_clear:
+        lines = [f"  - {line}" for line in result["reasons"]]
+        lines += _deferred_lines(lang, result, result.get("start_budget_s"))
+        return hookio.block_stop(_message(lang, "tasks_unpassed", job=job_id,
+                                          reasons="\n".join(lines)))
 
     unmet = [
         item

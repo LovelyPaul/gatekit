@@ -272,8 +272,11 @@ class TestBuildStandDown(Project):
         self.write_contract(counting("c"))
         self.prompt(BUILD_PROMPT)
         self.make_job({"t1": "passed", "t2": "failed"})
-        self.stop()  # ok on the contract: stands down
-        self.assertIsNotNone(self.led().data["stop"]["stood_down"])
+        led = self.led()
+        led.data["stop"]["block_count"] = stop_gate.MAX_BLOCKS
+        led.save()
+        self.stop()  # out of blocks: `fail` recorded, stands down
+        self.assertEqual(self.led().data["stop"]["stood_down"]["verdict"], verdict.FAIL)
         self.set_states({"t2": "queued"})
         self.touch_source()
         self.stop()
@@ -954,6 +957,100 @@ class TestStoodDownLineNamesTheTier(Project):
         text = prompt_gate.build_context(self.root, self.led())
         self.assertIn("turn", text)
         self.assertIn("1개", text)
+
+
+class TestUnpassedTasksAreNotAHandoffOk(Project):
+    """Review of ADR-0024: a settled job with a failed or blocked task is not
+    done, whatever the contract says (ADR-0024 decision 1)."""
+
+    def test_failed_task_blocks_even_with_an_ok_contract(self) -> None:
+        self.write_contract(counting("c"))
+        self.prompt(BUILD_PROMPT)
+        self.make_job({"t1": "passed", "t2": "failed", "t3": "blocked"})
+        result = self.stop()
+        self.assertEqual(result["decision"], "block")
+        self.assertIn("t2 (failed)", result["reason"])
+        self.assertIn("t3 (blocked)", result["reason"])
+        self.assertNotIn("t1", result["reason"])
+        data = self.led().data["stop"]
+        self.assertEqual(data["block_count"], 1)
+        self.assertIsNone(data["stood_down"])
+
+    def test_up_to_max_blocks_then_fail_recorded_and_stands_down(self) -> None:
+        self.write_contract(counting("c"))
+        self.prompt(BUILD_PROMPT)
+        self.make_job({"t1": "passed", "t2": "timeout"})
+        for _ in range(stop_gate.MAX_BLOCKS):
+            self.assertEqual(self.stop()["decision"], "block")
+        self.assertIsNone(self.stop())
+        data = self.led().data["stop"]
+        self.assertEqual(data["final_verdict"], verdict.FAIL)
+        self.assertEqual(data["stood_down"]["verdict"], verdict.FAIL)
+        self.assertIn("t2 (timeout)", " ".join(data["last_reasons"]))
+
+    def test_only_blocked_tasks_record_unverified(self) -> None:
+        self.write_contract(counting("c"))
+        self.prompt(BUILD_PROMPT)
+        self.make_job({"t1": "passed", "t2": "blocked"})
+        led = self.led()
+        led.data["stop"]["block_count"] = stop_gate.MAX_BLOCKS
+        led.save()
+        self.assertIsNone(self.stop())
+        data = self.led().data["stop"]
+        self.assertEqual(data["final_verdict"], verdict.UNVERIFIED)
+        self.assertEqual(data["stood_down"]["verdict"], verdict.UNVERIFIED)
+
+    def test_failing_contract_and_failed_task_name_both(self) -> None:
+        self.write_contract(counting("c", exit_code=1))
+        self.prompt(BUILD_PROMPT)
+        self.make_job({"t1": "failed"})
+        reason = self.stop()["reason"]
+        self.assertIn("c: fail", reason)
+        self.assertIn("t1 (failed)", reason)
+
+    def test_nothing_in_turn_tier_with_a_failed_task_blocks(self) -> None:
+        self.write_contract(counting("suite", tier="verify"))
+        self.prompt(BUILD_PROMPT)
+        self.make_job({"t1": "failed"})
+        self.assertEqual(self.stop()["decision"], "block")
+        self.assertIsNone(self.led().data["stop"]["stood_down"])
+
+    def test_stop_hook_active_with_a_failed_task_does_not_stand_down(self) -> None:
+        self.write_contract(counting("c"))
+        self.prompt(BUILD_PROMPT)
+        self.make_job({"t1": "failed"})
+        self.assertIsNone(self.stop(stop_hook_active=True))
+        data = self.led().data["stop"]
+        self.assertIsNone(data["stood_down"])
+        self.assertEqual(data["final_verdict"], verdict.FAIL)
+
+    def test_stopped_job_is_recorded_without_a_block(self) -> None:
+        # `jobs stop` is an explicit end: no block, but not ok either.
+        self.write_contract(counting("c"))
+        self.prompt(BUILD_PROMPT)
+        self.make_job({"t1": "passed", "t2": "stopped"})
+        self.assertIsNone(self.stop())
+        data = self.led().data["stop"]
+        self.assertEqual(data["block_count"], 0)
+        self.assertEqual(data["final_verdict"], verdict.FAIL)
+        self.assertEqual(data["stood_down"]["verdict"], verdict.FAIL)
+        self.assertIn("t2 (stopped)", " ".join(data["last_reasons"]))
+
+    def test_korean_message(self) -> None:
+        self.write_contract(counting("c"))
+        self.prompt(BUILD_PROMPT)
+        self.set_lang("ko")
+        self.make_job({"t1": "failed"})
+        reason = self.stop()["reason"]
+        self.assertIn("t1 (failed)", reason)
+        self.assertIn("태스크", reason)
+
+    def test_unsettled_job_failed_task_does_not_change_judging(self) -> None:
+        # Only the handoff check of a settled job looks at task states.
+        self.write_contract(counting("c"))
+        self.prompt(BUILD_PROMPT)
+        self.make_job({"t1": "failed", "t2": "queued"})
+        self.assertIsNone(self.stop())
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -199,6 +199,19 @@ changes.
    budget-cut build record as a full judgement. `scope` now holds the ids
    actually judged, and a record with any budget deferral is never reused,
    by any caller.
+3. **A settled job with unpassed tasks is not a handoff `ok`.** Decision 1
+   says such a job is blocked up to `MAX_BLOCKS`, but the gate looked only
+   at the contract, so an `ok` contract stood it down as `ok` with a task
+   `failed`. The handoff check now reads the job's task states. Any task in
+   `failed`, `timeout` or `blocked` blocks, naming the tasks, and counts
+   toward `MAX_BLOCKS`; after that `final_verdict` is recorded and the gate
+   stands down, as decision 1 says. The verdict is `fail` when a task
+   failed, timed out or was stopped, `unverified` when the only unpassed
+   tasks are `blocked` (never ran). A task `stopped` by `jobs stop` makes the
+   handoff `fail` too but does not block: the job was ended on purpose and
+   there is nothing left to run, so the gate records it and stands down. An
+   allow under `stop_hook_active` with such tasks is never a recorded
+   verdict.
 
 ## Consequences
 
