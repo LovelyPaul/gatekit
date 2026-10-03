@@ -74,6 +74,7 @@ gatekit/
 ├── .github/workflows/ci.yml
 ├── .github/ISSUE_TEMPLATE/{bug_report,feature_request,config}.yml, .github/PULL_REQUEST_TEMPLATE.md
 ├── README.md, README.ko.md, CHANGELOG.md, CONTRIBUTING.md, SECURITY.md, LICENSE, CLAUDE.md
+├── CODE_OF_CONDUCT.md                   # Contributor Covenant 2.1, adopted by reference
 ```
 
 ## 2. Project state layout (inside the user's project)
