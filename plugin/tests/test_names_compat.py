@@ -474,6 +474,8 @@ class TestCoexistence(Temp):
         (self.home / ".claude" / "plugins" / "installed_plugins.json").write_text(
             json.dumps({"version": 2, "plugins": {"gatekit@gatekit": {}, "gatebound@gatebound": {}}}),
             encoding="utf-8")
+        # ADR-0029 amendment: the legacy plugin's cache directory must exist
+        (self.home / ".claude" / "plugins" / "cache" / "gatekit" / "gatekit").mkdir(parents=True)
         crit = {"id": "bad", "argv": [PY, "-c", "raise SystemExit(1)"], "timeout_s": 20}
         (self.root / "spec" / "05-gate.md").write_text(_fenced("gatekit", "criterion", crit),
                                                        encoding="utf-8")
@@ -497,13 +499,14 @@ class TestCoexistence(Temp):
     def test_after_rename_new_plugin_stands_down(self) -> None:
         with self.renamed():
             self.assertEqual(names.legacy_plugin_enabled(self.root), ["gatekit@gatekit"])
+            # the snapshot is taken at the session's first prompt (amendment)
+            out = prompt_gate.handle({"session_id": "s", "cwd": str(self.root), "prompt": "hi"})
+            context = json.dumps(out)
+            self.assertIn("gatekit@gatekit", context)
             self.assertIsNone(self.stop())
             before = ledger.Ledger.load(self.root, "s").data["questions"]["asked"]
             self.assertIsNone(self.ask())
             self.assertEqual(ledger.Ledger.load(self.root, "s").data["questions"]["asked"], before)
-            out = prompt_gate.handle({"session_id": "s", "cwd": str(self.root), "prompt": "hi"})
-            context = json.dumps(out)
-            self.assertIn("gatekit@gatekit", context)
             again = json.dumps(prompt_gate.handle({"session_id": "s", "cwd": str(self.root),
                                                    "prompt": "hi"}))
             self.assertNotIn("gatekit@gatekit", again)  # once per session
@@ -540,6 +543,7 @@ class TestCoexistence(Temp):
         shutil.move(str(self.home / ".claude" / "settings.json"), str(alt / "settings.json"))
         shutil.move(str(self.home / ".claude" / "plugins" / "installed_plugins.json"),
                     str(alt / "plugins" / "installed_plugins.json"))
+        shutil.move(str(self.home / ".claude" / "plugins" / "cache"), str(alt / "plugins" / "cache"))
         os.environ["CLAUDE_CONFIG_DIR"] = str(alt)
         with self.renamed():
             self.assertEqual(names.legacy_plugin_enabled(self.root), ["gatekit@gatekit"])

@@ -97,9 +97,10 @@ and refuses (exit 1) when both directories exist. `--to` defaults to
 
 The old plugin cannot learn about the new one, so the new one yields: when a
 plugin named in `LEGACY` is enabled in Claude Code (user settings under
-`$CLAUDE_CONFIG_DIR` or `~/.claude`, project `.claude/settings.json` and
-`.claude/settings.local.json` `enabledPlugins`), is listed in
-`installed_plugins.json`, **and** the project's state directory carries that
+`$CLAUDE_CONFIG_DIR` or `~/.claude`; a project's `.claude/settings.json` and
+`.claude/settings.local.json` `enabledPlugins` can only switch it off — see
+the amendment below), is listed in `installed_plugins.json`, has its plugin
+cache directory, **and** the project's state directory carries that
 legacy name, this plugin's **Stop** and **question** gates stand down and the
 prompt hook adds a one-line warning once per session. The last condition
 matters: an old plugin reads only `.gatekit/`, so in a project migrated to
@@ -169,6 +170,32 @@ forged one. Four layers, each sufficient for the reported forms:
    directory; this is what makes that fail closed.
 
 Doctor axis 3 is unchanged: both names present is still `fail`.
+
+## Amendment (2026-10-04): the stand-down is the user's choice, taken once
+
+Review finding (plausible once `LEGACY` is set): `legacy_plugin_enabled`
+read the project's `.claude/settings.local.json`, which the session can
+write, and the Stop and question gates re-read it at every call — so after
+the rename a model could write `{"enabledPlugins": {"gatekit@gatekit": true}}`
+there and make this plugin's Stop and question gates stand down.
+
+1. **Only the user's settings enable it.** `enabledPlugins` true counts only
+   in the user's `settings.json` (`$CLAUDE_CONFIG_DIR`, else `~/.claude`).
+   A project settings file can still switch the legacy plugin **off** —
+   that only makes this plugin judge, and matches Claude Code, where the
+   old plugin then does not run either.
+2. **The plugin must really be there.** Besides `installed_plugins.json`,
+   its cache directory `<config>/plugins/cache/<marketplace>/<name>`
+   (`names.plugin_cache_dir`) must exist.
+3. **A snapshot per session.** The prompt hook stores the answer once, at
+   the session's first prompt, in the ledger's `legacy_plugins` (protected
+   state, ADR-0027). The Stop and question gates read only that snapshot,
+   never the settings; with no snapshot yet (`null`) they judge. A settings
+   file written mid-session changes nothing until a new session.
+
+Anything that can write the user's own Claude Code settings can disable this
+plugin outright, so the user scope is the user's trust domain, not a
+boundary gatekit enforces.
 
 ### Checklist for the rename itself
 

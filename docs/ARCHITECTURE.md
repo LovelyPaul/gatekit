@@ -244,14 +244,19 @@ directory" is `paths.state_dir`: `.gatebound/` counts exactly like `.gatekit/`
 (ADR-0029, §2).
 
 **Coexistence (ADR-0029).** When a plugin named in `names.LEGACY` is enabled
-in Claude Code (`enabledPlugins` true in the user's `settings.json` under
-`$CLAUDE_CONFIG_DIR` or `~/.claude`, the project's `.claude/settings.json` or
-`.claude/settings.local.json`, a later file's `false` winning), is listed in
-`installed_plugins.json`, and the project's state directory has that legacy
-name (in a migrated project the old plugin stands down by itself), the
-**stop** and **question** gates stand down
+in Claude Code by the **user's** settings (`enabledPlugins` true in
+`settings.json` under `$CLAUDE_CONFIG_DIR` or `~/.claude`; the project's
+`.claude/settings.json` / `.claude/settings.local.json` may only switch it
+off, since the session can write them), is listed in
+`installed_plugins.json`, has its cache directory
+(`<config>/plugins/cache/<marketplace>/<name>`), and the project's state
+directory has that legacy name (in a migrated project the old plugin stands
+down by itself), the **stop** and **question** gates stand down
 (allow, record nothing) and **prompt** puts one line naming the other plugin
 first in its context, once per session (`coexistence_warned` in the ledger).
+The answer is taken **once**, by the prompt hook at the session's first
+prompt, into the ledger's `legacy_plugins`; stop and question read only that
+snapshot and judge while it is absent (ADR-0029 amendment).
 The write, Bash and spawn gates keep running. `LEGACY` is empty until the
 rename, so the check returns before reading any file. Prompt arming
 recognises `/gatekit:<cmd>`, `/gatebound:<cmd>`, `$gatekit-<cmd>` and
@@ -288,6 +293,7 @@ fallback. Schema (version 1):
                 "implementation_choice": false,
                 "asked_topics": [["word", "word"]]},
   "scopes": [{"owner": "agent-label-or-prompt-hash", "write_scope": ["src/auth/**"], "declared_at": "iso"}],
+  "legacy_plugins": null | ["gatekit@gatekit"],
   "stop": {"block_count": 0, "final_verdict": null, "last_reasons": [],
            "stood_down": null | {"pipeline": "build|verify", "job_id": "…|null", "verdict": "ok|fail|unverified", "at": "iso", "skipped": 0},
            "deferred": [{"id": "…", "tier": "turn|verify", "reason": "tier|budget"}]},
@@ -295,7 +301,8 @@ fallback. Schema (version 1):
 }
 ```
 
-`events` is append-only, capped at 500 (oldest dropped).
+`events` is append-only, capped at 500 (oldest dropped). `legacy_plugins` is `null` until the session's first prompt, which
+stores `names.legacy_plugin_enabled(root)` there once (ADR-0029 amendment).
 
 Loading backfills any missing key from the blank ledger. A key whose blank
 value is an object (`questions`, `stop`) but whose stored value is not one —
@@ -1191,7 +1198,8 @@ def task_id(environ=None) -> str | None                # GATEKIT_TASK_ID, then G
 def job_id(environ=None) -> str | None
 def worker_env(task: str, job: str) -> dict[str, str]  # both names
 def enabled_plugins(root=None, home=None, candidates=None) -> dict[str, list[str]]  # read-only
-def legacy_plugin_enabled(root=None, home=None) -> list[str]   # enabled + installed + state dir has that name; [] without reading when LEGACY is empty
+def legacy_plugin_enabled(root=None, home=None) -> list[str]   # enabled in user settings (project may only disable) + installed + cache dir + state dir has that name; [] without reading when LEGACY is empty; hooks call it once per session (prompt)
+def plugin_cache_dir(key: str, home=None) -> pathlib.Path | None   # <config>/plugins/cache/<marketplace>/<name>
 def agents_markers(name: str | None = None) -> tuple[str, str]
 
 # migrate.py (ADR-0029)

@@ -343,8 +343,13 @@ _COEXIST = {
 def _coexistence_warning(root, led: "ledger.Ledger") -> str:
     """One line, the first time in a session, when a legacy-named plugin is
     enabled alongside this one; ``""`` otherwise (and always before the
-    rename, when there is no legacy name)."""
-    keys = names.legacy_plugin_enabled(root)
+    rename, when there is no legacy name). Takes the session's snapshot
+    (``legacy_plugins``) when it has none yet."""
+    if not isinstance(led.data.get("legacy_plugins"), list):
+        # ADR-0029 amendment: taken once, at the session's first prompt —
+        # before the session could have written any settings file.
+        led.data["legacy_plugins"] = list(names.legacy_plugin_enabled(root))
+    keys = [k for k in led.data["legacy_plugins"] if isinstance(k, str)]
     if not keys or led.data.get("coexistence_warned"):
         return ""
     led.data["coexistence_warned"] = True

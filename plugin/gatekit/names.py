@@ -318,13 +318,32 @@ def enabled_plugins(root=None, home: Optional[str] = None,
     return out
 
 
+def plugin_cache_dir(key: str, home: Optional[str] = None) -> Optional[pathlib.Path]:
+    """Claude Code's cache directory for plugin *key* (``name@marketplace``):
+    ``<config>/plugins/cache/<marketplace>/<name>``, or ``None`` without a
+    config directory."""
+    base = claude_config_dir(home)
+    if base is None or "@" not in key:
+        return None
+    name, market = key.split("@", 1)
+    return base / "plugins" / "cache" / market / name
+
+
 def legacy_plugin_enabled(root=None, home: Optional[str] = None) -> List[str]:
     """Keys of plugins carrying a :data:`LEGACY` name that will gate *root*
-    alongside this one, else ``[]``: enabled in some settings file, listed in
-    ``installed_plugins.json``, and — when *root* is given — this project's
-    state directory carries that legacy name (an older plugin reads only its
-    own; in a migrated project it stands down by itself, so this one must
-    not).
+    alongside this one, else ``[]``: enabled in the **user's** settings
+    (``settings.json`` under ``$CLAUDE_CONFIG_DIR`` or ``~/.claude``) and not
+    switched off by the project's, listed in ``installed_plugins.json``, its
+    plugin cache directory present, and — when *root* is given — this
+    project's state directory carrying that legacy name (an older plugin
+    reads only its own; in a migrated project it stands down by itself, so
+    this one must not).
+
+    A project settings file can only switch the legacy plugin *off*: the
+    session can write those files, and enabling the old plugin there must
+    not make this one's gates stand down (ADR-0029 amendment). Hooks call
+    this once per session, at the first prompt (``legacy_plugins`` in the
+    ledger), never mid-session.
 
     With no legacy name (before the rename) this returns at once, reading
     nothing. Never raises."""
@@ -340,8 +359,22 @@ def legacy_plugin_enabled(root=None, home: Optional[str] = None) -> List[str]:
         installed = installed_plugin_keys(home)
         if installed is None:
             return []
-        found = enabled_plugins(root, home, candidates=legacy)
-        return [key for keys in found.values() for key in keys if key in installed]
+        keys = [key for keys in enabled_plugins(None, home, candidates=legacy).values()
+                for key in keys if key in installed]
+        if root is not None:
+            off = set()
+            for path in settings_files(root, home)[-2:]:
+                data = _read_json(path)
+                table = data.get("enabledPlugins") if isinstance(data, dict) else None
+                if isinstance(table, dict):
+                    off.update(k for k, v in table.items() if v is False)
+            keys = [key for key in keys if key not in off]
+        out = []
+        for key in keys:
+            cache = plugin_cache_dir(key, home)
+            if cache is not None and cache.is_dir():
+                out.append(key)
+        return out
     except Exception:  # pragma: no cover - defensive; settings are user files
         return []
 

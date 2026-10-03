@@ -44,7 +44,7 @@ else:
 
     ensure_package_path()
 
-from gatekit import config, hookio, ledger, names, paths  # noqa: E402
+from gatekit import config, hookio, ledger, paths  # noqa: E402
 
 #: The only pipeline with a question ceiling.
 BUDGETED_PIPELINE = "interview"
@@ -204,14 +204,16 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     # it: stand down without creating state there.
     if not paths.state_dir(root).is_dir():
         return hookio.allow()
-    # ADR-0029: an older plugin of another name counts these questions.
-    if names.legacy_plugin_enabled(root):
+    led = ledger.Ledger.load(root, hookio.session_id(event))
+    # ADR-0029: an older plugin of another name counts these questions —
+    # as the session's first prompt recorded it, never re-read (amendment).
+    keys = led.data.get("legacy_plugins")
+    if isinstance(keys, list) and any(isinstance(k, str) for k in keys):
         return hookio.allow()
 
     if event.get("tool_name") in WRITE_TOOLS:
         note_write(root, hookio.session_id(event))
         return hookio.allow()
-    led = ledger.Ledger.load(root, hookio.session_id(event))
 
     questions = led.data.setdefault(
         "questions", {"asked": 0, "max_calls": 2, "budget_exceeded": False}

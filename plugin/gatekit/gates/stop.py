@@ -460,6 +460,13 @@ def _judge_raw(root, led: "ledger.Ledger", tiers, start_budget_s) -> Dict[str, A
     return result
 
 
+def legacy_snapshot(led: "ledger.Ledger") -> List[str]:
+    """The legacy plugin keys the session's first prompt recorded (ADR-0029
+    amendment); ``[]`` before any prompt or for a malformed record."""
+    keys = led.data.get("legacy_plugins")
+    return [k for k in keys if isinstance(k, str)] if isinstance(keys, list) else []
+
+
 def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Run the contract when a build/verify pipeline is active and judge it."""
     root = hookio.event_root(event)
@@ -468,12 +475,14 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     # it: stand down without creating state there.
     if not paths.state_dir(root).is_dir():
         return hookio.allow()
-    # ADR-0029: an older plugin of another name is enabled and runs its own
-    # Stop gate on the same contract; this one yields.
-    if names.legacy_plugin_enabled(root):
-        return hookio.allow()
-
     led = ledger.Ledger.load(root, hookio.session_id(event))
+    # ADR-0029: an older plugin of another name is enabled and runs its own
+    # Stop gate on the same contract; this one yields. Only the snapshot the
+    # prompt hook took at the session's first prompt counts (amendment): a
+    # settings file written mid-session changes nothing, and no snapshot yet
+    # means judge.
+    if legacy_snapshot(led):
+        return hookio.allow()
     lang = led.output_lang
 
     pipeline = led.data.get("active_pipeline")

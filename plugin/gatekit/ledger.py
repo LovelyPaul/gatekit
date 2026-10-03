@@ -82,6 +82,9 @@ def _blank(session_id: str) -> Dict[str, Any]:
         "active_pipeline": None,
         "questions": {"asked": 0, "max_calls": 2, "budget_exceeded": False},
         "scopes": [],
+        # ADR-0029 amendment: names.legacy_plugin_enabled, taken once at the
+        # session's first prompt; None until then. Stop and question read it.
+        "legacy_plugins": None,
         "stop": _blank_stop(),
         "events": [],
     }
