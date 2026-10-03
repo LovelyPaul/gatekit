@@ -56,8 +56,10 @@ that matter into things a hook enforces:
   but no participant has run a full session on it yet; CI proves the Python
   code on `windows-latest`, not that a host calls the hooks there. For
   Claude Code, install Git for Windows (Claude Code then runs hooks through
-  Git Bash). WSL also works and behaves like any Linux host. A report from a
-  real Windows session is welcome.
+  Git Bash). Shell commands Claude Code runs through its `PowerShell` tool
+  meet the same rules as Bash (the powershell gate, ADR-0028). WSL also
+  works and behaves like any Linux host. A report from a real Windows
+  session is welcome.
 
 ## Install
 
@@ -117,6 +119,7 @@ project's `.codex/` layer when Codex asks.
 | Kernel CLI, templates, `spec validate`, contracts | ok | ok |
 | write gate (spec before code, task scope) | ok | ok — observed: `apply_patch` arrives as its own event with the patch text and is denied before approval |
 | bash gate | ok | ok — observed: code-mode `exec` is unwrapped into one `Bash` event per shell command |
+| powershell gate (`PowerShell` tool, Windows) | unverified — tool name and input from the hook docs, reader tested by parsing only; no live Windows session observed yet | n/a — Codex reports every shell call as `Bash` |
 | stop gate (contract at session end) | ok | ok — Codex Stop dialect |
 | prompt gate (`active_pipeline`, language) | ok | ok — `$gatekit-<name>` invocation |
 | spawn gate (subagent scope fence) | ok | warn — `collaborationspawn_agent` hides the prompt from hooks, so the fence cannot be checked; the subagent's own writes still meet the write and bash gates (observed) |

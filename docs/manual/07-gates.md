@@ -1,12 +1,13 @@
 # 훅 게이트
 
-`plugin/hooks/hooks.json`에 스크립트 7개가 등록된다. 이 파일은 Claude Code가 자동으로 읽으며 `plugin.json`에 나열하지 않는다. 중복 참조는 플러그인 로드를 실패시킨다. 이와 별개로, `tokens` 게이트는 훅이 아니라 `spec/04-tasks.md`의 태스크가 선언하는 태스크 게이트다(아래 별도 절 참고).
+`plugin/hooks/hooks.json`에 스크립트 8개가 등록된다. 이 파일은 Claude Code가 자동으로 읽으며 `plugin.json`에 나열하지 않는다. 중복 참조는 플러그인 로드를 실패시킨다. 이와 별개로, `tokens` 게이트는 훅이 아니라 `spec/04-tasks.md`의 태스크가 선언하는 태스크 게이트다(아래 별도 절 참고).
 
 | 게이트 | 이벤트 | 대상 도구 | 차단하는가 |
 |---|---|---|---|
 | prompt | `UserPromptSubmit` | 없음 | 아니오 |
 | write | `PreToolUse` | `Write`, `Edit`, `MultiEdit`, `NotebookEdit` | 예 |
 | bash | `PreToolUse` | `Bash` | 예 |
+| powershell | `PreToolUse` | `PowerShell` | 예 |
 | spawn | `PreToolUse` | `Agent`, `Task` | 예 |
 | question | `PostToolUse` | `AskUserQuestion`, `Write`/`Edit`/`MultiEdit`/`NotebookEdit` | 아니오 (채널이 없다) |
 | compact | `PreCompact` | 없음 | 아니오 |
@@ -86,6 +87,18 @@ README*
 **한계**: 이름으로 호출되는 프로그램(`npm run build`, `python3 script.py`)이 무엇을 쓰는지는 보지 않는다. 셸 문법을 읽는 게이트이지 모든 바이너리의 동작을 아는 게이트가 아니다. 근거는 `docs/decisions/ADR-0004-bash-write-gate.md`.
 
 **예외 하나 — 워커는 승인하지 않는다**: 훅 환경에 `GATEKIT_TASK_ID`가 있으면(워커 세션) gatekit 자신의 `approve` 하위 명령을 실행하는 명령은 다른 규칙보다 먼저 거부한다. `env -u GATEKIT_TASK_ID python3 …/gatekit.py approve spec/05-gate.md`처럼 환경변수를 지워 `approve`의 거부를 피하는 길을 막기 위해서다. `gatekit.py`·`gatekit`·`-m gatekit` 뒤의 `approve`를 단순 명령마다, `env`/`VAR=` 접두 뒤에서도, `sh -c`·`eval` 문자열 안에서도, 따옴표 경로나 `${CLAUDE_PLUGIN_ROOT}`가 있어도 찾고, 렉싱이 안 되면 패턴으로 찾는다. `approve check`와 `approve list`는 허용한다. 근거는 ADR-0023.
+
+## powershell 게이트
+
+**언제**: Claude Code의 `PowerShell` 도구가 실행되기 직전. Windows에서는 이 도구가 켜져 있으면 PowerShell이 기본 셸이고(Git Bash가 없으면 `Bash` 도구 자체가 등록되지 않는다), 이 도구의 호출은 `Bash` 매처에 걸리지 않는다. 도구 이름은 `PowerShell`, 명령 문자열은 `tool_input.command`다(공식 훅 문서 기준).
+
+**하는 일**: bash 게이트와 **같은 판정**을 같은 순서로 적용한다 — 워커의 `approve` 거부, 보호 상태(규칙 (c), 승인 전후 언제나), 규칙이 살아 있을 때만 규칙 (a)·(b)와 판별 불가 거부. 다른 것은 명령을 읽는 방식뿐이다. PowerShell 문법을 실행하지 않고 읽는다: 줄바꿈·`;`·`&&`·`||`·`|`로 문장을 나누고, `'…'`(`''`), `"…"`(백틱 이스케이프, `""`), 히어스트링 `@'…'@`·`@"…"@`, 백틱 줄 이음, `#`·`<# #>` 주석, 타이포그래피 따옴표·대시를 PowerShell처럼 읽는다. 리다이렉션 `>`, `>>`, `2>`, `*>`, `*>>`는 쓰기다(`2>&1`, `$null`은 아님). cmdlet·매개변수 이름은 대소문자를 가리지 않고, 모듈 접두(`Microsoft.PowerShell.Management\Remove-Item`)와 기본 별칭(`sc`, `ac`, `ni`, `md`, `cp`/`copy`/`cpi`, `mv`/`move`/`mi`, `rm`/`del`/`ri`/`rd`, `ren`, `tee`, `iex`, `cd`/`sl`, `pushd`/`popd` 등)을 풀고, 매개변수 접두 축약(`-Pa`는 `-Path`)과 `-Path:값`, 위치 인자, 쉼표 배열을 cmdlet마다 묶는다. 인식하는 쓰기: `Set-Content`·`Add-Content`·`Clear-Content`·`Out-File`·`Tee-Object -FilePath`, `New-Item`(`-Name`, 심볼릭 링크·하드 링크·정션의 대상 포함), `Copy-Item`·`Move-Item`·`Remove-Item`·`Rename-Item`, `Set-Item`·`*-ItemProperty`·`Set-Acl`, `Export-*`, `Start-Transcript`, `Compress-Archive`·`Expand-Archive`, `Invoke-WebRequest -OutFile`, `Start-Process -RedirectStandardOutput`, 리터럴 인자의 `[IO.File]::WriteAllText`·`AppendAllText`·`WriteAllBytes`·`Copy`·`Move`·`Delete` 등. `Set-Location`·`Push-Location`·`Pop-Location`으로 현재 위치를 추적하고, Windows 경로(백슬래시, 드라이브 문자, `\\?\` 접두, `FileSystem::`, `::$DATA`, 끝의 점·공백, 대소문자)는 write 게이트와 같은 함수로 정규화한다. `Env:`·`Variable:`·`HKLM:` 같은 파일이 아닌 경로는 쓰기가 아니다. 스크립트 블록 `{…}`과 `(…)`·`$(…)`(큰따옴표 안 포함)은 실행될 수 있으므로 코드로 읽고, 리터럴 문자열의 `iex`와 `pwsh -Command "…"`는 재귀로 읽으며, `-EncodedCommand`는 디코딩해 읽는다(판별 불가로도 표시). 네이티브 프로그램은 bash 게이트의 단순 명령 분석에 그대로 넘기므로 `git`, `tar`, `python -c`, `node -e`, 파이프로 코드를 받는 인터프리터, `bash -c '…'`는 bash에서와 같이 판정된다.
+
+**판별 불가는 거부**: 규칙이 살아 있을 때 경로 안의 변수·부분식·스플랫(`@params`), 파이프라인에서 오는 경로(`Get-ChildItem | Remove-Item`), 쓰기 cmdlet의 모르는 매개변수, 알 수 없는 현재 위치, `& $cmd`, `cmd /c`, `wsl`, 셸·인터프리터를 띄우는 `Start-Process`, 문자열이 아닌 `iex`, `Add-Type`, `Set-Alias`, COM 객체(`New-Object -ComObject`), I/O·네트워크 .NET 형식, 리플렉션, 쓸 수 있는 인스턴스 메서드(`.Delete()`, `.MoveTo()`, `.Save()` 등), `--%`는 거부한다. 승인 후에는 bash와 같이 보호 상태 점검만 남는다 — 판별 불가 명령의 본문(따옴표·백틱·`+` 이어 붙이기를 걷어낸 형태, 디코딩한 `-EncodedCommand`, `GATEKI~1` 같은 8.3 짧은 이름 포함)이 `.gatekit` 경로를 적었으면 거부한다.
+
+**워커는 승인하지 않는다**: `GATEKIT_TASK_ID`가 있으면 `Remove-Item Env:GATEKIT_TASK_ID; python …\gatekit.py approve …`, `& python "$env:CLAUDE_PLUGIN_ROOT\bin\gatekit.py" approve …`, `pwsh -Command "…"`, `Start-Process python -ArgumentList …` 안의 `approve`를 찾아 거부한다. `approve check`와 `approve list`는 허용한다.
+
+**한계**: 이름으로 호출되는 프로그램과 스크립트(`.\build.ps1`, `npm run build`)가 무엇을 쓰는지는 보지 않는다. 실행 시점에 조립되는 경로(`-join`, `-f`, `[char]` 코드, Base64)는 승인 전에는 거부되지만 승인 후에는 `.gatekit`을 적지 않는 한 허용된다. 위 목록 밖의 COM·.NET·리플렉션 경로, 모듈이 제공하는 cmdlet도 마찬가지다. 스킬의 `` !`명령` `` 줄은 PreToolUse 훅을 거치지 않으므로 `Skill` 도구에는 매처를 두지 않는다. Codex는 모든 셸 호출을 `Bash`로 보고하므로 Codex 레이어에는 대응 훅이 없다. 실제 Windows 세션에서의 동작은 아직 관측되지 않았다(테스트는 파싱만 검증한다). 근거는 `docs/decisions/ADR-0028-powershell-tool-gate.md`.
 
 ## spawn 게이트
 

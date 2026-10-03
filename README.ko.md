@@ -52,8 +52,10 @@ gatekit은 [Claude Code](https://claude.com/claude-code)에서 AI 보조 개발�
   아직 실제 세션을 끝까지 돌려본 사용자가 없습니다. CI는 `windows-latest`에서
   파이썬 코드가 도는 것까지만 증명하고, 호스트가 훅을 실제로 부르는지는
   증명하지 못합니다. Claude Code에서는 Git for Windows를 설치하십시오
-  (그러면 Claude Code가 Git Bash로 훅을 실행합니다). WSL에서도 리눅스와
-  똑같이 동작합니다. 실제 Windows 사용 보고를 환영합니다.
+  (그러면 Claude Code가 Git Bash로 훅을 실행합니다). Claude Code가 셸
+  명령을 `PowerShell` 도구로 실행해도 Bash와 같은 규칙이 적용됩니다
+  (powershell 게이트, ADR-0028). WSL에서도 리눅스와 똑같이 동작합니다.
+  실제 Windows 사용 보고를 환영합니다.
 
 ## 설치
 
@@ -112,6 +114,7 @@ python3 "gatekit/plugin/bin/gatekit.py" install --host codex
 | 커널 CLI, 템플릿, `spec validate`, 계약 | ok | ok |
 | write 게이트 (스펙 우선, 태스크 범위) | ok | ok — 관측: `apply_patch`가 패치 본문과 함께 별도 이벤트로 도착해 승인 전 거부됨 |
 | bash 게이트 | ok | ok — 관측: code-mode `exec`가 셸 명령 하나당 `Bash` 이벤트로 풀려서 전달됨 |
+| powershell 게이트 (`PowerShell` 도구, Windows) | unverified — 도구 이름과 입력은 훅 문서 기준, 리더는 파싱 테스트로만 검증, 실제 Windows 세션은 아직 관측되지 않음 | n/a — Codex는 모든 셸 호출을 `Bash`로 보고함 |
 | stop 게이트 (세션 종료 시 계약 실행) | ok | ok — Codex Stop 형식 |
 | prompt 게이트 (`active_pipeline`, 언어) | ok | ok — `$gatekit-<name>` 호출 인식 |
 | spawn 게이트 (서브에이전트 범위 펜스) | ok | warn — `collaborationspawn_agent`는 프롬프트를 훅에 숨겨 펜스를 검사할 수 없음. 서브에이전트의 쓰기는 write·bash 게이트를 그대로 거침(관측됨) |

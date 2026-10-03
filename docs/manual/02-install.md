@@ -10,7 +10,7 @@
 
 gatekit 커널은 파이썬 표준 라이브러리만 쓴다. `pip install`이 필요 없다. `codex` CLI는 선택이며 기본적으로 비활성이다.
 
-**Windows는 미리보기다.** 같은 릴리스에서 네이티브 Windows를 지원하지만 실제 세션으로 끝까지 검증되지 않았다. CI(`windows-latest`)는 파이썬 코드가 도는 것까지만 증명한다. Claude Code에서는 Git for Windows를 설치한다(훅이 Git Bash로 실행된다). WSL에서는 리눅스와 같다.
+**Windows는 미리보기다.** 같은 릴리스에서 네이티브 Windows를 지원하지만 실제 세션으로 끝까지 검증되지 않았다. CI(`windows-latest`)는 파이썬 코드가 도는 것까지만 증명한다. Claude Code에서는 Git for Windows를 설치한다(훅이 Git Bash로 실행된다). Windows에서 Claude Code가 셸 명령을 `PowerShell` 도구로 실행해도 bash 게이트와 같은 규칙이 적용된다(powershell 게이트, ADR-0028). WSL에서는 리눅스와 같다.
 
 ## 설치
 
