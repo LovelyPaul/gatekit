@@ -294,3 +294,12 @@ reads the latest ledger; this is for the language only — scopes are still
 resolved by session id alone. Every command file now calls
 `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang --spec`. The positional
 form `gatekit lang <text...>` is unchanged.
+
+### C4. Spec templates name the launcher, and CI checks them
+
+The spec templates (`RECOVERY.md`, `PROGRESS.md`, `01-prd.md`, `04-tasks.md`,
+`05-gate.md`, both languages) told the reader to run `python3 -m gatekit …`,
+which does not run from a user's project. They now name
+`python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" …`, as the commands and the
+manual do, and `tools/gate_command_invocations.py` scans
+`plugin/spec-kit/templates/**/*.md` as well as commands and policies.

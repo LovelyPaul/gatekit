@@ -64,7 +64,7 @@ gatekit은 **클린룸 구현**이다. 훅 강제 게이트, 가정 원장, 해�
 | `gate_forbidden_phrases.py` | 스킬에 "Step 1:", "EXECUTE IMMEDIATELY" 같은 명령형 실행 단계가 들어가 스킬이 조용히 두 번째 실행 경로가 되는 것 |
 | `gate_manifest.py` | `marketplace.json`과 `plugin.json`이 디스크의 실제 파일과 어긋나는 것. 이름이 바뀐 훅 스크립트, `CHANGELOG.md`에 닿지 않은 버전 범프, `plugin.json`에 `hooks.json`을 중복 참조해 플러그인 로드가 실패하는 것 |
 | `gate_readme_sync.py` | `README.md`와 `README.ko.md`의 커맨드 목록이 `plugin/commands/*.md`와 어긋나, 한국어 문서를 읽는 사용자가 다른 그림을 보게 되는 것 |
-| `gate_command_invocations.py` | 커맨드나 정책 파일에 사용자 프로젝트 디렉터리에서 실행되지 않는 호출 형식이 들어가는 것. 모듈 실행 형식, 플러그인 루트로 `cd`하는 형식, 존재하지 않는 서브커맨드 이름 |
+| `gate_command_invocations.py` | 커맨드·정책 파일이나 스펙 템플릿에 사용자 프로젝트 디렉터리에서 실행되지 않는 호출 형식이 들어가는 것. 모듈 실행 형식, 플러그인 루트로 `cd`하는 형식, 존재하지 않는 서브커맨드 이름 |
 
 ## 테스트 규약
 

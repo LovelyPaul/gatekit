@@ -14,7 +14,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" <subcommand> [args]
 
 플러그인 루트로 `cd`한 뒤 실행하는 것도 안 된다. 작업 디렉터리가 바뀌면 프로젝트 루트 탐지와 상대 경로가 전부 플러그인 쪽을 가리키게 된다.
 
-이 규칙은 CI 게이트 `tools/gate_command_invocations.py`가 강제한다. 커맨드나 정책 파일에 실행되지 않는 호출 형식이 들어가면 빌드가 실패한다.
+이 규칙은 CI 게이트 `tools/gate_command_invocations.py`가 강제한다. 커맨드·정책 파일이나 스펙 템플릿(`plugin/spec-kit/templates/`)에 실행되지 않는 호출 형식이 들어가면 빌드가 실패한다.
 
 ## 서브커맨드 9개
 

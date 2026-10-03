@@ -371,6 +371,28 @@ class TestCommandInvocations(unittest.TestCase):
             self.assertEqual(proc.returncode, 1)
             self.assertIn("launcher", proc.stdout)
 
+    def test_module_form_in_a_spec_template_is_rejected(self) -> None:
+        # Review of 0.16.3: templates/ko/RECOVERY.md told the user to run
+        # `python3 -m gatekit contract run`, which does not run from a project.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            minimal_clean_repo(root)
+            write(root / "plugin" / "spec-kit" / "templates" / "ko" / "RECOVERY.md",
+                  "6. 다시 실행한다. `python3 -m gatekit contract run`.\n")
+            proc = run_gate("gate_command_invocations.py", root)
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("templates/ko/RECOVERY.md", proc.stdout)
+
+    def test_unregistered_subcommand_in_a_spec_template_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            minimal_clean_repo(root)
+            write(root / "plugin" / "spec-kit" / "templates" / "en" / "05-gate.md",
+                  '| x | `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" frobnicate` |\n')
+            proc = run_gate("gate_command_invocations.py", root)
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            self.assertIn("frobnicate", proc.stdout)
+
     def test_cd_into_plugin_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)

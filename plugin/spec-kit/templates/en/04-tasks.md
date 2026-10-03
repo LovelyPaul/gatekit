@@ -55,6 +55,6 @@ Field rules:
 ## Scope rules
 
 - Two tasks in the same round must not have intersecting `write_scope`.
-  `python3 -m gatekit spec validate` fails when they do.
+  `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" spec validate` fails when they do.
 - A worker cannot write outside its own `write_scope`. The write gate blocks it.
 - If a task needs a wider scope, split the task instead of widening it silently.

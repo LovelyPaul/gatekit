@@ -7,9 +7,11 @@ there is the launcher::
 
     python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" <subcommand> ...
 
-This gate fails the build when a command or policy file uses a form that
-breaks at runtime (``python3 -m gatekit``, or ``cd "${CLAUDE_PLUGIN_ROOT}"``
-which retargets relative paths into the plugin), or names a subcommand that
+This gate fails the build when a command, policy or spec template file
+(templates are copied into the user's project, and the commands they name
+are run there) uses a form that breaks at runtime (``python3 -m gatekit``,
+or ``cd "${CLAUDE_PLUGIN_ROOT}"`` which retargets relative paths into the
+plugin), or names a subcommand that
 ``plugin/gatekit/cli.py`` does not register. It exists because an earlier
 draft shipped 29 unrunnable invocations that read correctly and passed every
 other gate.
@@ -40,7 +42,9 @@ def registered_subcommands(root: pathlib.Path) -> set:
 def scan(root: pathlib.Path) -> list:
     findings = []
     subs = registered_subcommands(root)
-    files = sorted((root / "plugin" / "commands").glob("*.md")) + sorted((root / "plugin" / "policy").glob("*.md"))
+    files = (sorted((root / "plugin" / "commands").glob("*.md"))
+             + sorted((root / "plugin" / "policy").glob("*.md"))
+             + sorted((root / "plugin" / "spec-kit" / "templates").rglob("*.md")))
     for path in files:
         rel = path.relative_to(root).as_posix()
         for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
