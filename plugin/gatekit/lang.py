@@ -196,11 +196,16 @@ def from_spec(root) -> Optional[str]:
     return None
 
 
-def _latest_ledger_lang(root) -> Optional[str]:
-    """``output_lang`` of the most recently updated session ledger, else
-    ``None``. Used only by ``lang --spec`` when the spec gives no answer: a
-    command does not know its session id, and the language is the one thing
-    read this way — never scopes (``ledger.py`` resolves those by id only)."""
+def _latest_ledger(root) -> Optional[dict]:
+    """The most recently updated session ledger's data, else ``None``.
+
+    Used only by ``lang --spec``: a command does not know its session id, and
+    the prompt hook saves the current session's ledger on every prompt, so
+    the newest ledger is almost always this session's. The language is the
+    one thing read this way — never scopes (``ledger.py`` resolves those by
+    id only). Two sessions prompting concurrently in one project can still
+    pick the other's ledger; commands prefer the ``output_lang=`` context
+    line the hook injected this turn, which has no such ambiguity."""
     import json
 
     from gatekit import paths
@@ -215,15 +220,26 @@ def _latest_ledger_lang(root) -> Optional[str]:
             data = json.load(handle)
     except (OSError, ValueError):
         return None
-    value = data.get("output_lang") if isinstance(data, dict) else None
-    return value if value in (KO, EN) else None
+    if not isinstance(data, dict):
+        return None
+    from gatekit import ledger
+
+    # Read it as the hook does: an older ledger gets the same backfill.
+    return ledger._backfill(data, str(data.get("session_id") or ""))
 
 
 def spec_lang(root) -> str:
-    """What ``lang --spec`` prints: :func:`from_spec`, else the latest
-    session ledger's ``output_lang``, else ``en``."""
+    """What ``lang --spec`` prints — the same precedence the prompt hook
+    applies: the newest session ledger's ``output_lang`` when a prompt set it
+    (``lang_source == "prompt"``), else :func:`from_spec`, else that ledger's
+    ``output_lang``, else ``en``."""
     try:
-        return from_spec(root) or _latest_ledger_lang(root) or EN
+        data = _latest_ledger(root) or {}
+        stored = data.get("output_lang")
+        stored = stored if stored in (KO, EN) else None
+        if stored and data.get("lang_source") == "prompt":
+            return stored
+        return from_spec(root) or stored or EN
     except Exception:  # noqa: BLE001 — a language answer must never crash a command
         return EN
 

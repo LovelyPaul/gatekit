@@ -13,7 +13,7 @@ Input: `$ARGUMENTS` — optional constraints on scope or ordering.
 
 1. Read `${CLAUDE_PLUGIN_ROOT}/policy/language.md` and
    `${CLAUDE_PLUGIN_ROOT}/policy/verification.md`.
-2. Detect the language from the spec:
+2. Use the `output_lang=` value from the gatekit context line the prompt hook injected this turn; only if it is absent, run:
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang --spec

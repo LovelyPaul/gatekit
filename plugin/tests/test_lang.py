@@ -274,13 +274,15 @@ class TestRunSpec(unittest.TestCase):
         (self.root / "spec").mkdir(exist_ok=True)
         (self.root / "spec" / "01-prd.md").write_text(text, encoding="utf-8")
 
-    def write_ledger(self, name: str, output_lang: str, mtime: float) -> None:
+    def write_ledger(self, name: str, output_lang: str, mtime: float,
+                     lang_source=None) -> None:
         import json
 
         runs = self.root / ".gatekit" / "runs"
         runs.mkdir(parents=True, exist_ok=True)
         path = runs / (name + ".json")
-        path.write_text(json.dumps({"session_id": name, "output_lang": output_lang}),
+        path.write_text(json.dumps({"session_id": name, "output_lang": output_lang,
+                                    "lang_source": lang_source}),
                         encoding="utf-8")
         os.utime(path, (mtime, mtime))
 
@@ -306,6 +308,41 @@ class TestRunSpec(unittest.TestCase):
         (self.root / ".gatekit" / "runs" / "contract-last.json").write_text(
             '{"output_lang": "en"}', encoding="utf-8")
         os.utime(self.root / ".gatekit" / "runs" / "contract-last.json", (3000, 3000))
+        self.assertEqual(self.run_spec(), "ko")
+
+    # Review of 0.16.4: the prompt hook keeps a language the user signalled
+    # in a prompt over the spec; `lang --spec` must agree with it.
+    def test_prompt_signalled_ledger_wins_over_an_english_spec(self) -> None:
+        self.write_prd("# Memo board\n\nA shared memo board for a small team.\n")
+        self.write_ledger("old", "en", 1000, lang_source="prompt")
+        self.write_ledger("new", "ko", 2000, lang_source="prompt")
+        self.assertEqual(self.run_spec(), "ko")
+
+    def test_spec_sourced_ledger_does_not_override_the_spec(self) -> None:
+        self.write_prd("# Memo board\n\nA shared memo board for a small team.\n")
+        self.write_ledger("new", "ko", 2000, lang_source="spec")
+        self.assertEqual(self.run_spec(), "en")
+
+    def test_only_the_newest_ledger_is_consulted_for_a_prompt_signal(self) -> None:
+        self.write_prd("# Memo board\n\nA shared memo board for a small team.\n")
+        self.write_ledger("old", "ko", 1000, lang_source="prompt")
+        self.write_ledger("new", "en", 2000)
+        self.assertEqual(self.run_spec(), "en")
+
+    def test_pre_adr_0026_ledger_is_read_as_the_hook_reads_it(self) -> None:
+        import json
+
+        # No `lang_source` key: the hook's backfill counts a Korean ledger as
+        # prompt-set, so `lang --spec` must too.
+        self.write_prd("# Memo board\n\nA shared memo board for a small team.\n")
+        runs = self.root / ".gatekit" / "runs"
+        runs.mkdir(parents=True)
+        (runs / "legacy.json").write_text(
+            json.dumps({"session_id": "legacy", "output_lang": "ko"}), encoding="utf-8")
+        self.assertEqual(self.run_spec(), "ko")
+
+    def test_no_spec_uses_a_spec_sourced_ledger(self) -> None:
+        self.write_ledger("new", "ko", 2000, lang_source="spec")
         self.assertEqual(self.run_spec(), "ko")
 
     def test_no_spec_no_ledger_is_en(self) -> None:
@@ -335,6 +372,21 @@ class TestRunSpec(unittest.TestCase):
             # the positional form stays for the user's own words.
             self.assertNotIn('lang "$(head', text, path.name)
             self.assertNotIn("lang \"$(cat spec/", text, path.name)
+
+    def test_commands_prefer_the_hook_context_line(self) -> None:
+        # Review of 0.16.4: the hook already injected this turn's language;
+        # `lang --spec` is only the fallback when that line is absent.
+        users = 0
+        for path in sorted((PLUGIN_DIR / "commands").glob("*.md")):
+            text = path.read_text(encoding="utf-8")
+            if "lang --spec" not in text:
+                continue
+            users += 1
+            self.assertIn("`output_lang=`", text, path.name)
+            self.assertLess(text.index("`output_lang=`"), text.index("lang --spec"),
+                            path.name)
+            self.assertIn("only if it is absent", text, path.name)
+        self.assertGreaterEqual(users, 4)
 
     def test_positional_form_is_unchanged(self) -> None:
         import io

@@ -10,14 +10,18 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang "<the user's own words>"
 ```
 
 The result is `ko` or `en`. Use the user's text, not your own paraphrase, as
-the input. When a session ledger already holds an `output_lang` for this
-session, prefer that value — the prompt gate recorded it from the same rule.
+the input. When the prompt hook injected a `gatekit: output_lang=X` context
+line this turn, use that value: it is this session's language, recorded by
+the same rule (a language the user signalled in a prompt, else the spec's).
 
-A command that works from the spec rather than from new words detects with
-`python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang --spec`: the spec's
-prose, read as the prompt gate reads it, else the most recently updated
-session ledger (the prompt gate saves this session's on every prompt), else
-`en`.
+A command that works from the spec rather than from new words uses that
+`output_lang=` value too; only if it is absent does it run
+`python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang --spec`, which applies
+the hook's precedence: the most recently updated session ledger's language
+when a prompt set it, else the spec's prose, else that ledger's language,
+else `en`. A command does not know its session id, so the newest ledger
+stands in for this session's; with two sessions prompting in one project at
+once it can be the other's.
 
 ## What follows the detected language
 

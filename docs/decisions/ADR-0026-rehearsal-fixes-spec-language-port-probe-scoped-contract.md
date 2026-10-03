@@ -286,14 +286,25 @@ A2 left the commands' `gatekit lang "$(head -40 spec/01-prd.md)"` calls
 unchanged, so `/gatekit:build`, `/gatekit:tasks`, `/gatekit:gate` and
 `/gatekit:verify` still read a table-heavy Korean PRD (English frontmatter,
 an English feature table) as `en` while the hook read it as `ko`. A new form
-`gatekit lang --spec [--root PATH]` prints `lang.spec_lang(root)`:
-`from_spec` (the prose head of `spec/01-prd.md`, else `spec/00-discovery.md`),
-else the `output_lang` of the most recently updated session ledger, else
-`en`, always with exit 0. A command does not know its session id, so it
-reads the latest ledger; this is for the language only — scopes are still
-resolved by session id alone. Every command file now calls
-`python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang --spec`. The positional
-form `gatekit lang <text...>` is unchanged.
+`gatekit lang --spec [--root PATH]` prints `lang.spec_lang(root)`, always
+with exit 0. It applies the prompt hook's precedence, so the command and the
+hook name the same language in the same turn: the `output_lang` of the most
+recently updated session ledger when its `lang_source` is `"prompt"` (the
+user signalled a language in a prompt; the ledger is read with the same
+backfill the hook applies), else `from_spec` (the prose head of
+`spec/01-prd.md`, else `spec/00-discovery.md`), else that ledger's
+`output_lang`, else `en`. An earlier draft put the spec first, so an English
+spec and a user writing Korean gave `ko` from the hook and `en` from the
+command. A command does not know its session id, so it reads the newest
+ledger: the hook saves the current session's on every prompt, so it is almost
+always this session's, but two sessions prompting concurrently in one project
+can read the other's. That residual risk is why every command file
+(`build`, `tasks`, `gate`, `verify`) first uses the `output_lang=` value of
+the context line the hook injected this turn, and runs
+`python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang --spec` only if it is
+absent. The language is the only thing read from the newest ledger — scopes
+are still resolved by session id alone. The positional form
+`gatekit lang <text...>` is unchanged.
 
 ### C4. Spec templates name the launcher, and CI checks them
 

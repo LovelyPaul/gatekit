@@ -576,12 +576,18 @@ no prompt in the session has carried a signal (ledger `lang_source` is `null`
 or `"spec"`) and records `lang_source = "spec"`; a prompt with a signal sets
 `lang_source = "prompt"` and the spec is not read again in that session.
 
-Commands detect the language with `gatekit lang --spec [--root PATH]`
-(`spec_lang`, ADR-0026 0.16.4): `from_spec`, else the `output_lang` of the
-most recently updated session ledger under `.gatekit/runs/` (a command does
-not know its session id; only the language is read this way, never scopes),
-else `en`; always exit 0. The positional form `gatekit lang <text...>` prints
-`detect(text)` as before.
+Commands use the `output_lang=` value of the context line the prompt gate
+injected this turn; only if it is absent do they run
+`gatekit lang --spec [--root PATH]` (`spec_lang`, ADR-0026 0.16.4), which
+applies the prompt gate's precedence: the `output_lang` of the most recently
+updated session ledger under `.gatekit/runs/` when its `lang_source` is
+`"prompt"` (read with the ledger's backfill), else `from_spec`, else that
+ledger's `output_lang`, else `en`; always exit 0. A command does not know its
+session id: the prompt gate saves the current session's ledger on every
+prompt, so the newest ledger is almost always this session's, but two
+sessions prompting concurrently in one project can pick the other's. Only the
+language is read this way, never scopes. The positional form
+`gatekit lang <text...>` prints `detect(text)` as before.
 
 ## 9. Config (`config.py`)
 

@@ -20,7 +20,7 @@ three or more independent tasks.
 ## Step 0 — load policy and language
 
 1. Read `${CLAUDE_PLUGIN_ROOT}/policy/language.md` and `${CLAUDE_PLUGIN_ROOT}/policy/verification.md`.
-2. Detect the language and call it `output_lang`:
+2. Use the `output_lang=` value from the gatekit context line the prompt hook injected this turn; only if it is absent, run (call it `output_lang`):
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang --spec

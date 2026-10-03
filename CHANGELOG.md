@@ -26,9 +26,12 @@ Fixes from a review of 0.16.3 (ADR-0026, amended).
 - **Commands detect the language the way the prompt hook does.**
   `/gatekit:build`, `/gatekit:tasks`, `/gatekit:gate` and `/gatekit:verify` ran
   `gatekit lang "$(head -40 spec/01-prd.md)"`, which reads a table-heavy
-  Korean PRD as `en`. They now run `gatekit lang --spec`: the spec's prose
-  head (`lang.from_spec`), else the latest session ledger's language, else
-  `en`. The positional `gatekit lang <text>` is unchanged.
+  Korean PRD as `en`. They now use the `output_lang=` value the prompt hook
+  injected this turn and, only if it is absent, run `gatekit lang --spec`,
+  which applies the hook's precedence: the newest session ledger's language
+  when a prompt set it, else the spec's prose head (`lang.from_spec`), else
+  that ledger's language, else `en`. The positional `gatekit lang <text>` is
+  unchanged.
 - **Spec templates name the launcher.** `RECOVERY.md`, `PROGRESS.md`,
   `01-prd.md`, `04-tasks.md` and `05-gate.md` (ko and en) said
   `python3 -m gatekit …`, which does not run from a project; they now name
