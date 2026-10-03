@@ -3524,6 +3524,13 @@ class TestEvaluatorBriefScratch(unittest.TestCase):
     def test_brief_forbids_writing_outside_the_project(self) -> None:
         self.assertIn("outside the project", self.bullets)
 
+    def test_default_brief_names_the_scratch_directory(self) -> None:
+        # Review of 0.16.2: the built-in brief called any write a finding,
+        # contradicting the scratch allowance (ADR-0026 A1).
+        text = jobs.evaluator_brief(None)
+        self.assertIn(".gatekit/eval/", text)
+        self.assertIn("outside the project", text)
+
     def test_scratch_rule_survives_for_a_cli_evaluator(self) -> None:
         # A CLI evaluator is given every bullet but "Record the result under".
         start = self.bullets.index("- Record the result under")

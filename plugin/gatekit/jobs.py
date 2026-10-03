@@ -1056,7 +1056,10 @@ EVALUATOR_BRIEF = """# Evaluator brief
 
 You are the evaluator. You did not write this code and you must not change it.
 Your session is read-only: the CLI sandbox and the write gate both refuse
-writes, and any attempt to write is itself a finding against you.
+writes, and any attempt to write is itself a finding against you. The one
+exception is scratch files (a driver script, a server log, a screenshot you
+take): they go only under `.gatekit/eval/` in the project root, and nothing
+is written outside the project.
 
 1. Run `{launcher} contract run --json` from the project root.
 2. Read `spec/05-gate.md` and carry out every E2E step it describes by hand,

@@ -226,3 +226,11 @@ record had judged every criterion. The prompt hook now reads the record
 (`contract.load_last`), requires a `scope` list and at least one unjudged
 criterion, and only then checks that the record is for this contract and
 this tree. What the suffix says is unchanged.
+
+### B3. The built-in evaluator brief names the scratch directory
+
+A1 made `.gatekit/eval/**` writable for the CLI evaluator, but the brief
+`jobs evaluate` writes when no `--prompt` is given (`jobs.EVALUATOR_BRIEF`)
+still said any attempt to write is a finding. It now names `.gatekit/eval/`
+in the project root as the one exception for scratch files and says nothing
+is written outside the project, as `spec-kit/evaluator-brief.md` does.
