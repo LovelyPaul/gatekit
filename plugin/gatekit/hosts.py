@@ -193,15 +193,20 @@ def merged_agents_md(existing: Optional[str], plugin_root: pathlib.Path) -> str:
     block = _agents_block(plugin_root).rstrip("\n") + "\n"
     if not existing:
         return block
-    # ADR-0029: a block written under any of the plugin's names is replaced.
+    # ADR-0029: blocks written under any of the plugin's names are replaced
+    # by one, at the place of the first.
+    text, first = existing, None
     for name in names.all_names():
         begin, end_marker = names.agents_markers(name)
-        if begin in existing and end_marker in existing:
-            start = existing.index(begin)
-            end = existing.index(end_marker, start) if end_marker in existing[start:] else -1
-            if end > start:
-                return existing[:start] + block.rstrip("\n") + existing[end + len(end_marker):]
-        # markers out of order: leave the user's text alone and append a fresh block
+        start = text.find(begin)
+        end = text.find(end_marker, start) if start >= 0 else -1
+        if start >= 0 and end > start:
+            text = text[:start] + "\0" + text[end + len(end_marker):]
+            first = True
+        # markers out of order: leave the user's text alone
+    if first:
+        head, _, tail = text.partition("\0")
+        return head + block.rstrip("\n") + tail.replace("\0", "").replace("\n\n\n", "\n\n")
     joiner = "" if existing.endswith("\n\n") else ("\n" if existing.endswith("\n") else "\n\n")
     return existing + joiner + block
 

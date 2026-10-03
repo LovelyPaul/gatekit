@@ -72,17 +72,32 @@ def existing_state_dirs(root) -> List[pathlib.Path]:
     return [base / d for d in state_dirnames() if (base / d).is_dir()]
 
 
+#: Entries only gatekit writes; a state directory holding one is in use.
+#: ``config.json`` and ``eval/`` are the user's and do not count, or a session
+#: could move the hooks away from their ledgers by writing a settings file.
+_OWNED_ENTRIES = ("contract.json", "runs", "jobs", "attempts.json", "baseline.json")
+
+
+def _state_rank(candidate: pathlib.Path) -> int:
+    if (candidate / "approvals.json").is_file():
+        return 0
+    if any((candidate / e).exists() for e in _OWNED_ENTRIES):
+        return 1
+    if candidate.name == state_dirname():
+        return 2
+    return 3
+
+
 def resolve_state_dir(root) -> pathlib.Path:
     """``<root>/.gatebound`` if present, else ``.gatekit`` if present, else the
-    current name. When several are present the one holding ``approvals.json``
-    wins (newest first among those), since that is the project's approval."""
+    current name. When several are present: the one holding
+    ``approvals.json``, else one holding other gatekit-written state, else
+    the current name, else the newest (ADR-0029)."""
     found = existing_state_dirs(root)
     if not found:
         return pathlib.Path(root) / state_dirname()
     if len(found) > 1:
-        for candidate in found:
-            if (candidate / "approvals.json").is_file():
-                return candidate
+        return min(found, key=_state_rank)  # stable: newest first among ties
     return found[0]
 
 
@@ -109,6 +124,15 @@ def env_names(suffix: str) -> Tuple[str, ...]:
 
 def env_prefixes() -> Tuple[str, ...]:
     return tuple(n.upper() + "_" for n in all_names())
+
+
+def env_var_set(suffix: str, environ=None) -> Optional[str]:
+    """The name of the first non-empty variable among :func:`env_names`."""
+    environ = os.environ if environ is None else environ
+    for key in env_names(suffix):
+        if environ.get(key):
+            return key
+    return None
 
 
 def env_get(suffix: str, environ=None) -> Optional[str]:
@@ -153,13 +177,34 @@ def _read_json(path) -> object:
         return None
 
 
+def claude_config_dir(home: Optional[str] = None) -> Optional[pathlib.Path]:
+    """``$CLAUDE_CONFIG_DIR``, else ``<home>/.claude``; ``None`` without either."""
+    if home is None:
+        configured = os.environ.get("CLAUDE_CONFIG_DIR")
+        if configured:
+            return pathlib.Path(configured)
+        home = os.environ.get("HOME") or os.environ.get("USERPROFILE")
+    return pathlib.Path(home) / ".claude" if home else None
+
+
+def installed_plugin_keys(home: Optional[str] = None) -> Optional[List[str]]:
+    """Keys in Claude Code's ``plugins/installed_plugins.json``, or ``None``
+    when it cannot be read. Only ever reads."""
+    base = claude_config_dir(home)
+    data = _read_json(base / "plugins" / "installed_plugins.json") if base else None
+    if not isinstance(data, dict):
+        return None
+    table = data.get("plugins") if isinstance(data.get("plugins"), dict) else data
+    return [k for k in table if isinstance(k, str)]
+
+
 def settings_files(root=None, home: Optional[str] = None) -> List[pathlib.Path]:
     """Claude Code settings that can enable a plugin: the user's, then the
     project's shared and local ones."""
     out: List[pathlib.Path] = []
-    home = home if home is not None else os.environ.get("HOME") or os.environ.get("USERPROFILE")
-    if home:
-        out.append(pathlib.Path(home) / ".claude" / "settings.json")
+    base = claude_config_dir(home)
+    if base:
+        out.append(base / "settings.json")
     if root is not None:
         out.append(pathlib.Path(root) / ".claude" / "settings.json")
         out.append(pathlib.Path(root) / ".claude" / "settings.local.json")
@@ -189,17 +234,31 @@ def enabled_plugins(root=None, home: Optional[str] = None,
 
 
 def legacy_plugin_enabled(root=None, home: Optional[str] = None) -> List[str]:
-    """Keys of enabled plugins carrying a :data:`LEGACY` name, else ``[]``.
+    """Keys of plugins carrying a :data:`LEGACY` name that will gate *root*
+    alongside this one, else ``[]``: enabled in some settings file, listed in
+    ``installed_plugins.json``, and — when *root* is given — this project's
+    state directory carries that legacy name (an older plugin reads only its
+    own; in a migrated project it stands down by itself, so this one must
+    not).
 
     With no legacy name (before the rename) this returns at once, reading
     nothing. Never raises."""
     if not LEGACY:
         return []
     try:
-        found = enabled_plugins(root, home, candidates=tuple(n for n in LEGACY if n != CURRENT))
+        legacy = tuple(n for n in LEGACY if n != CURRENT)
+        if root is not None:
+            state = resolve_state_dir(root).name
+            legacy = tuple(n for n in legacy if "." + n == state)
+            if not legacy:
+                return []
+        installed = installed_plugin_keys(home)
+        if installed is None:
+            return []
+        found = enabled_plugins(root, home, candidates=legacy)
+        return [key for keys in found.values() for key in keys if key in installed]
     except Exception:  # pragma: no cover - defensive; settings are user files
         return []
-    return [key for keys in found.values() for key in keys]
 
 
 # --------------------------------------------------------------- markers

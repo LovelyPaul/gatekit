@@ -115,7 +115,8 @@ def _dual_plugin(root, installed):
     the user's or the project's settings (and, when ``installed_plugins.json``
     was readable, listed there). Codex: cached under more than one name. Only
     reads."""
-    enabled = names.enabled_plugins(root)
+    # Same ~/.claude as the rest of this axis.
+    enabled = names.enabled_plugins(root, home=os.environ.get("HOME") or "")
     if installed is not None:
         listed = set(_installed_name_keys(installed, names.all_names()))
         enabled = {n: [k for k in ks if k in listed] for n, ks in enabled.items()}

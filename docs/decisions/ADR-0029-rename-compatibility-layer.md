@@ -58,7 +58,7 @@ keys. The rename sets `CURRENT = "gatebound"` and `LEGACY = ("gatekit",)`.
 |---|---|---|---|
 | Fences `<name>-task/criterion/budget/discovery/scope` | either prefix, everywhere a fence is read (`spec`, `contract`, `jobs`, `design`, the spawn gate) | `gatekit-*` | **permanent** — approved specs are hash-pinned |
 | State directory | `.gatebound/` if present, else `.gatekit/` if present, else the current name | the resolved one; a new project gets `.<CURRENT>/` | `.gatekit` read-through removed in **1.0** |
-| Both state directories | hooks use the one holding `approvals.json` (else the newest name); doctor axis 3 **fail** | — | — |
+| Both state directories | hooks use the one holding `approvals.json`, else one holding other gatekit-written state (`contract.json`, `runs/`, `jobs/`, `attempts.json`, `baseline.json`), else the current name — never one that holds only the user's `config.json`/`eval/`, so a session cannot move the hooks off their ledgers; doctor axis 3 **fail** | — | — |
 | Protected state (ADR-0027), write allowlist, evaluator scratch, opaque-text mentions | `.gatekit/` and `.gatebound/` alike (`config.json`, `eval/**` the user's under both) | — | with the read-through |
 | argv `…/<name>/gates/<gate>.py`, `…/bin/<name>.py` that does not exist | mapped to this plugin's file at run time (`paths.expand_argv`) | — | **permanent** |
 | Env `GATEKIT_TASK_ID`, `GATEKIT_JOB_ID` | current name first, then the other | both names; every inherited `GATEKIT_*` and `GATEBOUND_*` stripped | alias removed in **1.0** |
@@ -96,11 +96,15 @@ and refuses (exit 1) when both directories exist. `--to` defaults to
 ### Coexistence: the newer plugin stands down
 
 The old plugin cannot learn about the new one, so the new one yields: when a
-plugin named in `LEGACY` is enabled in Claude Code (user
-`~/.claude/settings.json`, project `.claude/settings.json` and
-`.claude/settings.local.json` `enabledPlugins`), this plugin's **Stop** and
-**question** gates stand down and the prompt hook adds a one-line warning once
-per session. The write, Bash and spawn gates keep running — two denies of the
+plugin named in `LEGACY` is enabled in Claude Code (user settings under
+`$CLAUDE_CONFIG_DIR` or `~/.claude`, project `.claude/settings.json` and
+`.claude/settings.local.json` `enabledPlugins`), is listed in
+`installed_plugins.json`, **and** the project's state directory carries that
+legacy name, this plugin's **Stop** and **question** gates stand down and the
+prompt hook adds a one-line warning once per session. The last condition
+matters: an old plugin reads only `.gatekit/`, so in a project migrated to
+`.gatebound/` it already stands down by itself, and this plugin must keep
+judging or nothing would. The write, Bash and spawn gates keep running — two denies of the
 same write are the same deny. With `LEGACY` empty (today) the check returns
 before reading any file. ~/.claude is only ever read.
 
@@ -114,3 +118,14 @@ before reading any file. ~/.claude is only ever read.
 - After the rename, a project that still has `.gatekit/` keeps working until
   1.0; `migrate --apply` moves it.
 - Out of scope here: the rename itself, any CHANGELOG or version change.
+
+### Checklist for the rename itself
+
+Values computed at import from `names.py` follow the flip without edits
+(`paths.STATE_DIRNAME`/`ROOT_MARKERS`, `hosts.BLOCK_BEGIN`,
+`write.SPEC_ALLOWLIST`/`EVAL_SCRATCHES`, the Bash and prompt patterns). These
+still spell the old name and must change with it: the package directory and
+`bin/gatekit.py`, `approval.WORKER_ENV`, the `gatekit-` skill directory prefix
+in `hosts.install` (old skill directories are then left beside the new ones
+and should be removed), `/gatekit:` in `hookio`'s Codex rewrite, template
+fences, and every user-facing message.

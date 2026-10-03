@@ -59,6 +59,7 @@ class Temp(unittest.TestCase):
         os.environ["HOME"] = str(home)
         os.environ["USERPROFILE"] = str(home)
         os.environ["CODEX_HOME"] = str(home / ".codex")
+        os.environ.pop("CLAUDE_CONFIG_DIR", None)
         return home
 
 
@@ -159,9 +160,22 @@ class TestStateDir(Temp):
 
     def test_both_prefers_the_one_with_approvals(self) -> None:
         (self.root / ".gatekit").mkdir()
-        (self.root / ".gatebound").mkdir()
+        (self.root / ".gatebound" / "runs").mkdir(parents=True)
         self.assertEqual(paths.state_dir(self.root), self.root / ".gatebound")
         (self.root / ".gatekit" / "approvals.json").write_text("{}", encoding="utf-8")
+        self.assertEqual(paths.state_dir(self.root), self.root / ".gatekit")
+
+    def test_empty_second_dir_does_not_capture_state(self) -> None:
+        # review: an agent writing .gatebound/config.json must not move the
+        # hooks away from the ledgers in .gatekit/.
+        (self.root / ".gatekit" / "runs").mkdir(parents=True)
+        (self.root / ".gatebound").mkdir()
+        (self.root / ".gatebound" / "config.json").write_text("{}", encoding="utf-8")
+        self.assertEqual(paths.state_dir(self.root), self.root / ".gatekit")
+
+    def test_both_empty_prefers_current_name(self) -> None:
+        (self.root / ".gatekit").mkdir()
+        (self.root / ".gatebound").mkdir()
         self.assertEqual(paths.state_dir(self.root), self.root / ".gatekit")
 
     def test_gatebound_project_is_governed(self) -> None:
@@ -325,8 +339,9 @@ class TestEnv(Temp):
         (self.root / ".gatekit").mkdir()
         os.environ.pop("GATEKIT_TASK_ID", None)
         os.environ["GATEBOUND_TASK_ID"] = "t1"
-        with self.assertRaises(PermissionError):
+        with self.assertRaises(PermissionError) as caught:
             approval.approve(self.root, "spec/05-gate.md")
+        self.assertIn("GATEBOUND_TASK_ID=t1", str(caught.exception))
 
 
 # ------------------------------------------------------------------ 5. approve guard / arming
@@ -375,6 +390,17 @@ class TestAgentsMarkers(Temp):
             self.assertEqual(merged.count(":begin"), 1, name)
             self.assertIn(hosts.BLOCK_BEGIN, merged)
         self.assertEqual(hosts.BLOCK_BEGIN, names.agents_markers()[0])
+
+    def test_blocks_under_both_names_collapse_to_one(self) -> None:
+        old, new = names.agents_markers("gatekit"), names.agents_markers("gatebound")
+        existing = "A\n%s\nx\n%s\nB\n%s\ny\n%s\nC\n" % (old[0], old[1], new[0], new[1])
+        merged = hosts.merged_agents_md(existing, paths.plugin_root())
+        self.assertEqual(merged.count(":begin"), 1)
+        self.assertEqual(merged.count(":end -->"), 1)
+        for keep in ("A\n", "B\n", "C\n"):
+            self.assertIn(keep, merged)
+        self.assertNotIn("\nx\n", merged)
+        self.assertNotIn("\ny\n", merged)
 
 
 # ------------------------------------------------------------------ 7. doctor
@@ -445,6 +471,9 @@ class TestCoexistence(Temp):
         (self.home / ".claude" / "settings.json").write_text(
             json.dumps({"enabledPlugins": {"gatekit@gatekit": True, "gatebound@gatebound": True}}),
             encoding="utf-8")
+        (self.home / ".claude" / "plugins" / "installed_plugins.json").write_text(
+            json.dumps({"version": 2, "plugins": {"gatekit@gatekit": {}, "gatebound@gatebound": {}}}),
+            encoding="utf-8")
         crit = {"id": "bad", "argv": [PY, "-c", "raise SystemExit(1)"], "timeout_s": 20}
         (self.root / "spec" / "05-gate.md").write_text(_fenced("gatekit", "criterion", crit),
                                                        encoding="utf-8")
@@ -490,6 +519,30 @@ class TestCoexistence(Temp):
         with self.renamed():
             self.assertEqual(names.legacy_plugin_enabled(self.root), [])
             self.assertEqual(self.stop()["decision"], "block")
+
+    def test_stale_enabled_key_without_install_does_not_stand_down(self) -> None:
+        (self.home / ".claude" / "plugins" / "installed_plugins.json").write_text(
+            json.dumps({"version": 2, "plugins": {"gatebound@gatebound": {}}}), encoding="utf-8")
+        with self.renamed():
+            self.assertEqual(names.legacy_plugin_enabled(self.root), [])
+
+    def test_migrated_project_keeps_new_gates(self) -> None:
+        # The old plugin reads only .gatekit/; once state lives in .gatebound/
+        # it stands down itself, so the new plugin must not.
+        (self.root / ".gatekit").rename(self.root / ".gatebound")
+        with self.renamed():
+            self.assertEqual(names.legacy_plugin_enabled(self.root), [])
+            self.assertEqual(self.stop()["decision"], "block")
+
+    def test_claude_config_dir_is_honoured(self) -> None:
+        alt = self.root / "_cfg"
+        (alt / "plugins").mkdir(parents=True)
+        shutil.move(str(self.home / ".claude" / "settings.json"), str(alt / "settings.json"))
+        shutil.move(str(self.home / ".claude" / "plugins" / "installed_plugins.json"),
+                    str(alt / "plugins" / "installed_plugins.json"))
+        os.environ["CLAUDE_CONFIG_DIR"] = str(alt)
+        with self.renamed():
+            self.assertEqual(names.legacy_plugin_enabled(self.root), ["gatekit@gatekit"])
 
     def test_unreadable_settings_never_raise(self) -> None:
         (self.home / ".claude" / "settings.json").write_text("{not json", encoding="utf-8")

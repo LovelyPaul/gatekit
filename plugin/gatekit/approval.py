@@ -130,7 +130,7 @@ def approve(
         raise PermissionError(
             "a worker never approves (%s=%s is set); approval is the user's "
             "decision, taken in the host session through /gatekit:gate"
-            % (WORKER_ENV, names.task_id()))
+            % (names.env_var_set("TASK_ID") or WORKER_ENV, names.task_id()))
     key = _normalize(relpath)
     target = pathlib.Path(root) / key
     digest = sha256_file(target)

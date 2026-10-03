@@ -161,7 +161,7 @@ def alias_path(token: str) -> str:
     try:
         if not token or not (os.path.isabs(token) or _ABS_DRIVE_RE.match(token)):
             return token
-        if os.path.exists(token):
+        if os.path.exists(token) or os.path.exists(from_msys(token)):
             return token
         match = _alias_re().search(token.replace("\\", "/"))
         if not match:

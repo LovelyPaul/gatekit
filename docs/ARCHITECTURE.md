@@ -118,8 +118,10 @@ are read wherever the name is an on-disk contract:
 
 - `paths.state_dir(root)` is `.gatebound/` if present, else `.gatekit/` if
   present, else `.<CURRENT>/` (`.gatekit/` today). With both present, the one
-  holding `approvals.json` wins (newest name among ties) and doctor axis 3
-  fails. Protected state (ADR-0027), the write allowlist, the evaluator
+  holding `approvals.json` wins, else one holding other gatekit-written state
+  (`contract.json`, `runs/`, `jobs/`, `attempts.json`, `baseline.json`), else
+  the current name — the user's `config.json`/`eval/` never count — and doctor
+  axis 3 fails. Protected state (ADR-0027), the write allowlist, the evaluator
   scratch (`<state>/eval/**`) and the Bash gate's state checks treat both
   names alike. `gatekit migrate` (dry run unless `--apply`) renames the
   directory, rewrites `.gitignore` lines and regenerates the Codex layer;
@@ -225,9 +227,12 @@ directory" is `paths.state_dir`: `.gatebound/` counts exactly like `.gatekit/`
 (ADR-0029, §2).
 
 **Coexistence (ADR-0029).** When a plugin named in `names.LEGACY` is enabled
-in Claude Code (`enabledPlugins` true in `~/.claude/settings.json`, the
-project's `.claude/settings.json` or `.claude/settings.local.json`, a later
-file's `false` winning), the **stop** and **question** gates stand down
+in Claude Code (`enabledPlugins` true in the user's `settings.json` under
+`$CLAUDE_CONFIG_DIR` or `~/.claude`, the project's `.claude/settings.json` or
+`.claude/settings.local.json`, a later file's `false` winning), is listed in
+`installed_plugins.json`, and the project's state directory has that legacy
+name (in a migrated project the old plugin stands down by itself), the
+**stop** and **question** gates stand down
 (allow, record nothing) and **prompt** puts one line naming the other plugin
 first in its context, once per session (`coexistence_warned` in the ledger).
 The write, Bash and spawn gates keep running. `LEGACY` is empty until the
@@ -1158,7 +1163,7 @@ def task_id(environ=None) -> str | None                # GATEKIT_TASK_ID, then G
 def job_id(environ=None) -> str | None
 def worker_env(task: str, job: str) -> dict[str, str]  # both names
 def enabled_plugins(root=None, home=None, candidates=None) -> dict[str, list[str]]  # read-only
-def legacy_plugin_enabled(root=None, home=None) -> list[str]   # [] without reading when LEGACY is empty
+def legacy_plugin_enabled(root=None, home=None) -> list[str]   # enabled + installed + state dir has that name; [] without reading when LEGACY is empty
 def agents_markers(name: str | None = None) -> tuple[str, str]
 
 # migrate.py (ADR-0029)
