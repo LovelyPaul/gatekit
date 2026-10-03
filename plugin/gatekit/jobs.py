@@ -727,6 +727,16 @@ def _argv_tokens(argv) -> list:
     return tokens
 
 
+def _names_token(line: str, token: str) -> bool:
+    """True when *token* appears in *line* as a whole name, not inside a
+    longer one: `run` names nothing in `C:\\Users\\runneradmin\\…`, while
+    `e2e` still names `/proj/e2e/index.js` and `e2e.sh`."""
+    if not token:
+        return False
+    pattern = r"(?<![\w-])" + re.escape(token) + r"(?![\w-])"
+    return re.search(pattern, line) is not None
+
+
 def classify_gate_result(gate: dict, argv=None, root=None, tasks=None) -> str:
     """ADR-0009 decision 1: `command_error`, `suspicious`, or `expected`;
     ADR-0022 adds `not_yet_runnable`.
@@ -787,11 +797,11 @@ def classify_gate_result(gate: dict, argv=None, root=None, tasks=None) -> str:
         if not any(p.search(line) for p in COMMAND_ERROR_PATTERNS):
             continue
         if "command not found" in line.lower():
-            if program and program in line:
+            if program and _names_token(line, program):
                 return "command_error"
             matched_without_name = True
             continue
-        if any(tok in line for tok in tokens):
+        if any(_names_token(line, tok) for tok in tokens):
             return "command_error"
         matched_without_name = True
     if matched_without_name:

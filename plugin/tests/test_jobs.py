@@ -2818,6 +2818,32 @@ class TestNotYetRunnable(JobTestCase):
         # without task scopes, ADR-0009's rules still apply
         self.assertEqual(jobs.classify_gate_result(gate, argv), "suspicious")
 
+    def test_an_argv_token_inside_a_longer_name_names_nothing(self) -> None:
+        """windows-latest CI: the project root sat under
+        C:\\Users\\runneradmin\\…, so `run` from `npm run e2e` matched inside
+        `runneradmin` and the gate was refused as a command error."""
+        argv = ["npm", "run", "e2e", "--", "e2e/login.spec.ts"]
+        for root in ("C:\\Users\\runneradmin\\AppData\\Local\\Temp\\tmpab12",
+                     "/home/runneradmin/work/e2etest", "/srv/rerun/e2e_suite"):
+            gate = {"verdict": verdict.FAIL, "exit": 254, "stdout_tail": "",
+                    "stderr_tail": NPM_ENOENT_TEXT.replace("{root}", root)}
+            with self.subTest(root=root):
+                self.assertEqual(jobs.classify_gate_result(gate, argv), "suspicious")
+
+    def test_an_argv_token_as_a_whole_path_component_still_refuses(self) -> None:
+        cases = [
+            (["npm", "run", "e2e"], "Error: Cannot find module '/proj/e2e/index.js'"),
+            (["python3", "tests/run.py"],
+             "python3: can't open file 'C:\\proj\\tests\\run.py': [Errno 2] No such file"),
+            (["bash", "scripts/e2e.sh"], "bash: scripts/e2e.sh: No such file or directory"),
+            (["node", "e2e"], "Error: Cannot find module 'e2e'"),
+        ]
+        for argv, line in cases:
+            gate = {"verdict": verdict.FAIL, "exit": 1, "stdout_tail": "",
+                    "stderr_tail": line}
+            with self.subTest(argv=argv):
+                self.assertEqual(jobs.classify_gate_result(gate, argv), "command_error")
+
     def test_an_unowned_manifest_refuses_and_names_the_path(self) -> None:
         self.host_config()
         self.write_tasks(self.e2e_task("gallery"))

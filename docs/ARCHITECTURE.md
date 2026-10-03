@@ -784,8 +784,10 @@ ADR-0009 adds four rules to the runner:
   worker runs — only when the exit code is 126 or 127, or a line matching
   `COMMAND_ERROR_PATTERNS` (`Cannot find module`, `can't open file`, `No such
   file or directory`, `command not found`, `is a directory`) **also names one
-  of the gate's own arguments** (or, for `command not found`, its program):
-  the interpreter could not run what the fence points at. `suspicious` — the
+  of the gate's own arguments** (or, for `command not found`, its program)
+  as a whole name — not inside a longer word, so `run` does not name
+  `runneradmin` (ADR-0009 amendment): the interpreter could not run what the
+  fence points at. `suspicious` — the
   job starts and a warning line is printed and stored in
   `job.json.preflight_warnings` — for exit ≥ 2 on its own, a pattern line that
   names nothing from argv (a failing test that mentions a missing fixture),

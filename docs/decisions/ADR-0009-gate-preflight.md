@@ -96,6 +96,14 @@ and on any pattern match; the reviewer showed three false positives
 output), each of which would have refused a legitimate job with no
 override short of `--no-preflight`.*
 
+*Amended (2026-10-04, windows-latest CI): "names" means the argument appears
+as a whole name — not preceded or followed by a letter, digit, `_` or `-`.
+Plain substring matching let `run` from `npm run e2e` match inside the
+Windows temp root `C:\Users\runneradmin\…`, refusing a gate that only
+needed a task-written `package.json`. `e2e` still names `/proj/e2e/index.js`
+and `e2e.sh`; it no longer names `e2etest` or `e2e_suite`. The same rule
+applies to the program name on a `command not found` line.*
+
 A gate that passes at preflight on a task whose write scope contains no
 files yet is reported separately as `warn: gate passed before any work —
 check that it can fail`. It is not refused, because a legitimate gate can
