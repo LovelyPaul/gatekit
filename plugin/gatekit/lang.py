@@ -117,17 +117,60 @@ def detect(text: Optional[str]) -> str:
 #: session has said anything (ADR-0026), in order of preference.
 SPEC_LANG_FILES = ("01-prd.md", "00-discovery.md")
 #: Only the head of the file is read: the title and the first sections are
-#: the user's words; later sections may quote code or English sources.
+#: the user's words; later sections may quote code or English sources. The
+#: head is counted in prose lines (headings, paragraphs, list items), not raw
+#: lines: YAML frontmatter, fenced code, table rows and inline code are often
+#: English in a Korean spec and say nothing about the user's language.
 SPEC_LANG_LINES = 40
+#: Raw lines scanned at most while collecting the head, so a file that is
+#: nearly all code or tables is never read to the end.
+SPEC_LANG_SCAN_LINES = 1000
+_INLINE_CODE_RE = re.compile(r"`+[^`\n]*`+")
+_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+
+
+def prose_head(lines, limit: int = SPEC_LANG_LINES) -> str:
+    """The first *limit* prose lines of a Markdown file's *lines*.
+
+    Skips a leading YAML frontmatter block, fenced code blocks, table rows
+    (lines starting with ``|``) and blank lines, and drops inline code spans
+    from what is kept.
+    """
+    kept = []
+    fence = None
+    in_frontmatter = False
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if index == 0 and stripped == "---":
+            in_frontmatter = True
+            continue
+        if in_frontmatter:
+            if stripped in ("---", "..."):
+                in_frontmatter = False
+            continue
+        match = _FENCE_RE.match(line)
+        if fence is not None:
+            if match and match.group(1)[0] == fence[0] and len(match.group(1)) >= len(fence):
+                fence = None
+            continue
+        if match:
+            fence = match.group(1)
+            continue
+        if not stripped or stripped.startswith("|"):
+            continue
+        kept.append(_INLINE_CODE_RE.sub(" ", line.rstrip("\n")))
+        if len(kept) >= limit:
+            break
+    return "\n".join(kept)
 
 
 def from_spec(root) -> Optional[str]:
     """``"ko"``/``"en"`` from the project's spec, else ``None``.
 
     The first of :data:`SPEC_LANG_FILES` under ``spec/`` whose first
-    :data:`SPEC_LANG_LINES` lines carry a signal decides. A missing or
-    unreadable file, or one with no letters, gives no answer — never a
-    default.
+    :data:`SPEC_LANG_LINES` prose lines (:func:`prose_head`) carry a signal
+    decides. A missing or unreadable file, or one with no letters in its
+    prose, gives no answer — never a default.
     """
     from gatekit import paths
 
@@ -135,7 +178,8 @@ def from_spec(root) -> Optional[str]:
         try:
             with open(paths.spec_dir(root) / name, encoding="utf-8",
                       errors="replace") as handle:
-                head = "".join(line for _, line in zip(range(SPEC_LANG_LINES), handle))
+                head = prose_head(
+                    line for _, line in zip(range(SPEC_LANG_SCAN_LINES), handle))
         except (OSError, ValueError):
             continue
         if carries_signal(head):

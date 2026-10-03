@@ -138,3 +138,14 @@ task that happens to be called `evaluate` gains nothing. The Write gate,
 other path stays denied for the evaluator, including anything outside the
 root; every other task id is unchanged. For the `agent` evaluator, which runs
 under no task id, the bullet is still an instruction only.
+
+### A2. The spec's language is read from its prose, not its raw head
+
+Decision 1 read the first 40 raw lines. A Korean PRD whose head is mostly an
+English metric table and a TypeScript fence read as `en`. `lang.from_spec`
+now reads the first 40 *prose* lines (`lang.prose_head`): headings,
+paragraphs and list items. A leading YAML frontmatter block, fenced code
+blocks, table rows (lines starting with `|`) and inline code spans are
+skipped, and at most 1000 raw lines are scanned. An English PRD that names a
+Korean product is still `en`. The commands' own `gatekit lang "$(head -40
+spec/01-prd.md)"` calls are unchanged.

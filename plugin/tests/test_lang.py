@@ -120,6 +120,41 @@ class TestFromSpec(unittest.TestCase):
         self.write("01-prd.md", body)
         self.assertEqual(lang.from_spec(self.root), "en")
 
+    def test_korean_prd_with_english_tables_and_code(self) -> None:
+        # Review of 0.16.1: Korean headings and prose, but the head is mostly
+        # an English metric table and a TypeScript fence.
+        self.write("01-prd.md", (
+            '---\ntitle: "Checkout API — 제품 요구 정의"\ndate: "2026-10-01"\n'
+            'status: "draft"\n---\n'
+            "# Checkout API — 제품 요구 정의\n## 문제\n"
+            "| Metric | Current | Source | Date |\n|---|---|---|---|\n"
+            "| p95 latency of POST /orders endpoint | 1200ms | Datadog APM dashboard | 2026-09 |\n"
+            "| error rate for payment webhook retries | 2.3% | Sentry issues | 2026-09 |\n"
+            "| conversion rate checkout funnel step three | 41% | Amplitude funnel report | 2026-09 |\n"
+            "```ts\nexport async function createOrder(request: Request, response: Response) "
+            '{ return response.json({ status: "created", orderId }) }\n```\n'
+            "결제 실패가 많다. `POST /orders` 응답이 느리다.\n"))
+        self.assertEqual(lang.from_spec(self.root), "ko")
+
+    def test_english_prd_with_korean_product_name(self) -> None:
+        self.write("01-prd.md", (
+            '---\ntitle: "모두의가계부 — Product requirements"\n---\n'
+            "# 모두의가계부 — Product requirements\n## Problem\n"
+            "Users of 모두의가계부 lose track of shared spending.\n"
+            "| 항목 | 값 |\n|---|---|\n| 월간 사용자 | 1200 |\n"
+            "## Goals\n- cut reconciliation to 60s\n"))
+        self.assertEqual(lang.from_spec(self.root), "en")
+
+    def test_head_counts_prose_lines_not_raw_lines(self) -> None:
+        # A long English table at the top does not use up the head.
+        table = "| Metric | Value |\n|---|---|\n" + "| p95 latency | 1200ms |\n" * 60
+        self.write("01-prd.md", table + "# 결제 개선\n결제 실패를 줄인다.\n")
+        self.assertEqual(lang.from_spec(self.root), "ko")
+
+    def test_only_code_and_tables_is_none(self) -> None:
+        self.write("01-prd.md", "```ts\nconst a = 1\n```\n| a | b |\n|---|---|\n")
+        self.assertIsNone(lang.from_spec(self.root))
+
     def test_spec_without_letters_is_none(self) -> None:
         self.write("01-prd.md", "---\n1. 2. 3.\n")
         self.assertIsNone(lang.from_spec(self.root))

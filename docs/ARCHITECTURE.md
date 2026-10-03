@@ -558,8 +558,10 @@ for `ko` and `en`; other languages fall back to `en` templates and the command
 must say so once.
 
 `from_spec(root) -> "ko" | "en" | None` (ADR-0026): `detect` over the first
-40 lines of `spec/01-prd.md`, else `spec/00-discovery.md` — the first that
-carries a signal; `None` when neither does. The prompt gate uses it only while
+40 prose lines (`prose_head`: headings, paragraphs and list items; YAML
+frontmatter, fenced code, table rows and inline code are skipped; at most
+1000 raw lines scanned) of `spec/01-prd.md`, else `spec/00-discovery.md` —
+the first that carries a signal; `None` when neither does. The prompt gate uses it only while
 no prompt in the session has carried a signal (ledger `lang_source` is `null`
 or `"spec"`) and records `lang_source = "spec"`; a prompt with a signal sets
 `lang_source = "prompt"` and the spec is not read again in that session.
