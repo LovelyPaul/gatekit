@@ -195,12 +195,17 @@ def _contract_scope(root, lang: str = "en") -> str:
     judged (a ``scope`` list, ADR-0024), and did not judge every criterion;
     else ""."""
     try:
-        last = contract.same_tree_record(root)
+        # Cheap checks first: the tree fingerprint behind same_tree_record
+        # walks up to 20 000 files and this runs on every prompt.
+        last = contract.load_last(root)
         if not last or not isinstance(last.get("scope"), list):
             return ""
         judged = {str(i) for i in last["scope"]}
         unjudged = [i for i in contract.tier_scope(root) if i not in judged]
         if not unjudged:
+            return ""
+        # Only now the costly check that the record is for this tree.
+        if contract.same_tree_record(root) != last:
             return ""
         verify_tier = set(contract.tier_scope(root, ("verify",)))
         held = sum(1 for i in unjudged if i in verify_tier)

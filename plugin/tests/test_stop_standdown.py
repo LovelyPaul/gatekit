@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -471,6 +472,37 @@ class TestContractFieldScope(Project):
         text = prompt_gate.build_context(self.root, self.led())
         self.assertIn("contract=ok", text)
         self.assertNotIn("contract=ok (", text)
+
+    def test_no_fingerprint_when_nothing_is_unjudged(self) -> None:
+        # Review of 0.16.2: the tree fingerprint (an os.walk of up to 20 000
+        # files) ran on every prompt before the cheap checks.
+        self.stood_down("en")
+        contract.save_last(self.root, contract.execute(self.root))
+        with mock.patch.object(contract, "same_tree_record",
+                               wraps=contract.same_tree_record) as spy:
+            text = prompt_gate.build_context(self.root, self.led())
+        spy.assert_not_called()
+        self.assertNotIn("contract=ok (", text)
+
+    def test_no_fingerprint_without_a_record_or_a_scope(self) -> None:
+        self.write_contract(counting("a"), counting("b", tier="verify"))
+        with mock.patch.object(contract, "same_tree_record") as spy:
+            prompt_gate.build_context(self.root, self.led())
+            contract.save_last(self.root, {"verdict": "ok", "criteria": [], "reasons": []})
+            path = contract._last_result_path(self.root)
+            record = json.loads(path.read_text(encoding="utf-8"))
+            del record["scope"]
+            path.write_text(json.dumps(record), encoding="utf-8")
+            prompt_gate.build_context(self.root, self.led())
+        spy.assert_not_called()
+
+    def test_fingerprint_still_decides_when_something_is_unjudged(self) -> None:
+        self.stood_down("en")
+        with mock.patch.object(contract, "same_tree_record",
+                               wraps=contract.same_tree_record) as spy:
+            text = prompt_gate.build_context(self.root, self.led())
+        spy.assert_called_once()
+        self.assertIn("contract=ok (last run: turn tier", text)
 
     def test_record_without_scope_is_ignored(self) -> None:
         # A pre-ADR-0024 record does not say what it judged.

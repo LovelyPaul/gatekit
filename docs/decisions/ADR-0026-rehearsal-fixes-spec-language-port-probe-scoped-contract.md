@@ -217,3 +217,12 @@ next line, strings respected, at most 8000 characters. The balanced value is
 read from there as before. A `webServer` match inside a value already read is
 skipped, so a file of nested matches costs one read per 8000-character
 window instead of one per match.
+
+### B2. The contract field computes the tree fingerprint last
+
+A4 called `contract.same_tree_record` first, so every prompt walked the tree
+(up to 20 000 files) for the fingerprint, even when no record existed or the
+record had judged every criterion. The prompt hook now reads the record
+(`contract.load_last`), requires a `scope` list and at least one unjudged
+criterion, and only then checks that the record is for this contract and
+this tree. What the suffix says is unchanged.
