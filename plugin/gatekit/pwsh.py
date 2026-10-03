@@ -488,10 +488,11 @@ _OPAQUE_PATTERNS = (
      ".NET I/O type"),
     (re.compile(r"\[\s*(?:system\.)?io\.(?:file|directory)\s*\]\s*::\s*new\b", re.I),
      ".NET I/O type"),
-    (re.compile(r"(?im)^\s*using\s+namespace\b"), "using namespace"),
+    # `[ \t]`, not `\s`: `\s*` after `^` crossed newlines, so every blank
+    # line of a masked here-string rescanned the rest — quadratic (review).
+    (re.compile(r"(?im)^[ \t]*using[ \t]+namespace\b"), "using namespace"),
     (re.compile(r"(?:\)|\$[\w:{}]+)\s*::"), "static call on a computed type"),
     (re.compile(r"::\s*['\"(]"), "computed member name"),
-    (re.compile(r"\[[^\]\n]*,[^\]\n]*\]\s*::"), "assembly-qualified type"),
     (re.compile(r"\[\s*(?:system\.)?environment\s*\]\s*::\s*currentdirectory", re.I),
      "process current directory"),
     (re.compile(r"(?i)(?<![\w-])(?:alias|function):"), "alias or function through a provider"),
@@ -501,6 +502,25 @@ _OPAQUE_PATTERNS = (
                 r"writeallbytes|writealllines|appendalltext|setaccesscontrol)\s*\(", re.I),
      "method call that may write"),
 )
+
+_TYPE_CALL_RE = re.compile(r"\][ \t]*::")
+
+
+def _assembly_qualified(masked: str) -> bool:
+    """A static call on a type literal holding a comma (``[T, Assembly]::``)
+    on one line — what ``\\[[^\\]\\n]*,[^\\]\\n]*\\]\\s*::`` matched, read in
+    linear time: that pattern rescanned the line from every ``[`` (review)."""
+    for match in _TYPE_CALL_RE.finditer(masked):
+        end = match.start()
+        # back to the previous `]` (each region is scanned once), then the line
+        start = max(masked.rfind("]", 0, end), 0)
+        start = max(start, masked.rfind("\n", start, end))
+        region = masked[start:end]
+        opening = region.find("[")
+        if opening >= 0 and "," in region[opening + 1:]:
+            return True
+    return False
+
 
 #: ``[IO.File]::…`` / ``[IO.Directory]::…`` static calls.
 _STATIC_RE = re.compile(r"\[\s*(?:system\.)?io\.(file|directory)\s*\]\s*::\s*([a-z]+)\s*\(", re.I)
@@ -842,6 +862,8 @@ def _read_text(text: str, ctx: _Ctx) -> None:
     for pattern, why in _OPAQUE_PATTERNS:
         if pattern.search(masked):
             ctx.result.mark_opaque(why)
+    if _assembly_qualified(masked):
+        ctx.result.mark_opaque("assembly-qualified type")
     _static_calls(text, masked, ctx)
     for code in nested:
         _read_nested(code, ctx)
@@ -1860,6 +1882,18 @@ def _spell_short(match: "re.Match[str]") -> str:
     return match.group(0)  # pragma: no cover - the pattern holds only known stems
 
 
+def _unconcat(text: str) -> str:
+    """*text* with every ``+`` and the blanks around it removed — what
+    ``re.sub(r"\\s*\\+\\s*", "", text)`` did, in linear time (that pattern
+    rescanned a blank run from each of its characters)."""
+    parts = text.split("+")
+    if len(parts) == 1:
+        return text
+    last = len(parts) - 1
+    return "".join((p if i == 0 else p.lstrip()) if i == last else
+                   (p.rstrip() if i == 0 else p.strip()) for i, p in enumerate(parts))
+
+
 def mention_text(command: str, found: PSWriteTargets) -> str:
     """The text the protected-state mention check reads for an opaque command:
     the command and every code string found inside it, each also with
@@ -1870,7 +1904,7 @@ def mention_text(command: str, found: PSWriteTargets) -> str:
     out: List[str] = []
     for text in texts:
         out.append(text)
-        joined = re.sub(r"\s*\+\s*", "", re.sub(r"['\"`]", "", text))
+        joined = _unconcat(re.sub(r"['\"`]", "", text))
         out.append(joined)
         out.append(_flatten(text))
     return _SHORT_STATE_RE.sub(_spell_short, "\n".join(out))

@@ -196,6 +196,13 @@ shell was therefore a convention.
   opaque too.
 - **Injected skill commands** (`` !`…` ``) and `skill shell: powershell`
   blocks never reach a PreToolUse hook (decision 8).
+- **Commands over 64 KB** (amendment below) are not parsed: while a
+  restriction is active they are refused as opaque; after approval only the
+  protected-state mention scan reads them, so an over-cap command that writes
+  gatekit's state without spelling it (a path assembled at run time) is
+  allowed — the same boundary as any opaque command after approval. A long
+  command that merely mentions `.gatekit` (other than `config.json`/`eval/`)
+  is refused after approval too.
 
 ## Integration with ADR-0029
 
@@ -239,3 +246,38 @@ created path, so the Bash gate's copy rule (`bash._copy_hit`) decides them
 exactly as it decides `mv` and `ln -s`. A plain `New-Item -ItemType
 Directory`/`mkdir`/`md` is recorded in `made_dirs`, the one creation of a
 state directory name left to the model (ADR-0029 amendment, layer 2).
+
+## Amendment (2026-10-04): the reader finishes inside the hook timeout
+
+Review finding, confirmed: `(?im)^\s*using\s+namespace\b` ran over the
+masked command, where a here-string body is blank lines; `\s*` after `^`
+crossed newlines, so the match attempt at every line start rescanned the
+rest of the body — quadratic. A 40,000-line here-string took 7.3 s and a
+100,000-line one 45 s, against the 10 s hook timeout in `hooks.json`; a
+PreToolUse hook that times out does not block in Claude Code, so the
+command ran unjudged.
+
+1. **Patterns stay linear.** `using namespace` is matched with `[ \t]`
+   (it is a statement on one line). The assembly-qualified type check
+   (`\[[^\]\n]*,[^\]\n]*\]\s*::`, which rescanned a line from every `[`) is
+   a linear scan back from each `]::` to the previous `]` or newline
+   (`pwsh._assembly_qualified`), and the `+`-concatenation removal of
+   `mention_text` (`\s*\+\s*`, which rescanned a blank run from each of its
+   characters) is a split on `+` (`pwsh._unconcat`). The other patterns in
+   `pwsh.py` and `gates/bash.py` were audited: each starts at a literal
+   (`[`, `.`, `::`, `$`, `<<`, a name) or is anchored to one token, so a
+   blank run is scanned once.
+2. **A size cap.** `bash.MAX_COMMAND_BYTES` = 64 KB (UTF-8). A larger
+   command is not parsed by either gate (`bash.too_large`,
+   `bash.oversized`): while a restriction is active — always in a worker —
+   it is denied as opaque ("command larger than 64 KB, not read"); otherwise
+   only the protected-state mention scan reads it (for PowerShell on
+   `pwsh.mention_text`: quotes, backticks and `+` removed, 8.3 short names
+   and `-EncodedCommand` decoded), denying when it names gatekit's state and
+   allowing otherwise. That scan is a single linear regex pass.
+3. **No separate time budget.** With both, the review's inputs (40k and
+   100k lines) finish in about 0.01 s and pathological shapes just under the
+   cap in well under a second; a wall-clock guard inside the reader would add
+   checks to every loop for no remaining case, so none is added. The tests
+   (`test_gate_size_cap.py`) hold every such input under 2 s.
+

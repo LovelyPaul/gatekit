@@ -1125,6 +1125,39 @@ def _protected_hit(root, command: str, found: WriteTargets) -> Optional[str]:
 # --------------------------------------------------------------------------
 # the gate
 # --------------------------------------------------------------------------
+#: ADR-0028 amendment: a command larger than this (UTF-8 bytes) is not parsed.
+#: A PreToolUse hook that times out does not block, so a reading that cannot
+#: finish inside the hook timeout must not be attempted: while a restriction
+#: is active such a command is opaque; otherwise only the linear
+#: protected-state mention scan judges it.
+MAX_COMMAND_BYTES = 64 * 1024
+
+
+def too_large(command: str) -> bool:
+    """True when *command* is over :data:`MAX_COMMAND_BYTES`. Cheap: the
+    character count bounds the byte count from both sides."""
+    if len(command) * 4 <= MAX_COMMAND_BYTES:
+        return False
+    return len(command) > MAX_COMMAND_BYTES or len(
+        command.encode("utf-8", "surrogatepass")) > MAX_COMMAND_BYTES
+
+
+def oversized(root, event: Dict[str, Any], command: str, mention_text: str,
+              opaque_message) -> Optional[Dict[str, Any]]:
+    """The verdict on an over-cap command, shared with the PowerShell gate:
+    opaque while a restriction is active (a worker always has one), else a
+    protected-state deny when *mention_text* names gatekit's state, else
+    allow. Linear in the command's length."""
+    lang = write.session_lang(root, event)
+    if write.restrictions_active(root):
+        return hookio.deny(opaque_message(
+            lang, "command larger than %d KB, not read" % (MAX_COMMAND_BYTES // 1024)))
+    mention = _mentions_state(mention_text)
+    if mention:
+        return write.deny_protected(mention, lang)
+    return hookio.allow()
+
+
 def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Judge every file this Bash command would write."""
     if event.get("tool_name") != "Bash":
@@ -1135,6 +1168,9 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return hookio.allow()
 
     root = hookio.event_root(event)
+    if too_large(command):
+        return oversized(root, event, command, command, lambda lang, why: _message(
+            lang, "opaque", why=why, cmd=_shown(command)))
     task_id = names.task_id()
     if task_id and invokes_gatekit_approve(command):
         return hookio.deny(_message(

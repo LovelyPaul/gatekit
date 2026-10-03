@@ -35,6 +35,8 @@ from gatekit.gates import bash, write  # noqa: E402
 
 #: The tool name Claude Code sends in ``tool_name`` (code.claude.com/docs/en/hooks).
 TOOL_NAME = "PowerShell"
+#: ADR-0028 amendment: the same cap as the Bash gate's.
+MAX_COMMAND_BYTES = bash.MAX_COMMAND_BYTES
 
 _MESSAGES = {
     "en": {
@@ -86,6 +88,14 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return hookio.allow()
 
     root = hookio.event_root(event)
+    if bash.too_large(command):
+        # Not parsed (ADR-0028 amendment); the mention scan reads the text
+        # with quotes, backticks and `+` concatenation removed and 8.3 short
+        # names spelled out, as for an opaque command.
+        return bash.oversized(root, event, command,
+                              pwsh.mention_text(command, pwsh.PSWriteTargets()),
+                              lambda lang, why: _message(lang, "opaque", why=why,
+                                                         cmd=_shown(command)))
     task_id = names.task_id()  # either name (ADR-0029)
     if task_id and pwsh.invokes_gatekit_approve(command):
         return hookio.deny(_message(write.session_lang(root, event), "approve",
