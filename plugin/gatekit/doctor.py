@@ -158,6 +158,7 @@ def axis_project_state(root) -> dict:
                      "no .gatekit/ in this project yet",
                      paths.cli_invocation() + " doctor --root <project>  # after /gatekit:setup")
     problems = []
+    warnings = []
     cfg = state / "config.json"
     if cfg.is_file():
         try:
@@ -165,6 +166,11 @@ def axis_project_state(root) -> dict:
                 loaded = json.load(handle)
             if not isinstance(loaded, dict):
                 problems.append("config.json is not a JSON object")
+            else:
+                from gatekit import config as config_mod
+                problem = config_mod.stop_budget_s(loaded)[1]
+                if problem:
+                    warnings.append(problem)
         except (OSError, ValueError) as exc:
             problems.append("config.json invalid: %s" % exc)
     approvals = state / "approvals.json"
@@ -179,7 +185,38 @@ def axis_project_state(root) -> dict:
     if problems:
         return _axis("project state", verdict.FAIL, "; ".join(problems),
                      "fix or delete the offending file under .gatekit/")
-    return _axis("project state", verdict.OK, ".gatekit/ present and parseable")
+    detail = ".gatekit/ present and parseable"
+    note = _stand_down_note(state)
+    if note:
+        detail += "; " + note
+    if warnings:
+        return _axis("project state", verdict.WARN, "; ".join(warnings) + "; " + detail,
+                     "edit stop.budget_s in .gatekit/config.json (seconds, at most 570)")
+    return _axis("project state", verdict.OK, detail)
+
+
+def _stand_down_note(state) -> str:
+    """ADR-0024: name a Stop-gate stand-down in the most recently updated
+    session ledger, so "why did the Stop hook not run?" has an answer."""
+    try:
+        runs = state / "runs"
+        ledgers = [p for p in runs.glob("*.json") if p.name != "contract-last.json"]
+        if not ledgers:
+            return ""
+        latest = max(ledgers, key=lambda p: p.stat().st_mtime)
+        with latest.open(encoding="utf-8") as handle:
+            data = json.load(handle)
+        stood = ((data.get("stop") or {}).get("stood_down")
+                 if isinstance(data, dict) else None)
+        if not isinstance(stood, dict):
+            return ""
+        return ("Stop gate stood down in session %s after %s (verdict %s, %s turn end(s) "
+                "not judged): follow-up edits are not gated; /gatekit:verify re-checks"
+                % (data.get("session_id") or latest.stem,
+                   stood.get("job_id") or stood.get("pipeline") or "?",
+                   stood.get("verdict") or verdict.UNVERIFIED, stood.get("skipped", 0)))
+    except Exception:  # noqa: BLE001 — a diagnosis must never crash doctor
+        return ""
 
 
 # ------------------------------------------------------------------- axis 4

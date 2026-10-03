@@ -35,6 +35,9 @@ else:
 from gatekit import approval, contract, hookio, lang, ledger, paths  # noqa: E402
 
 
+#: Pipelines whose invocation re-arms the Stop gate (ADR-0024).
+STOP_ARMING_PIPELINES = ("build", "verify")
+
 #: Commands that are not pipelines. Invoking one clears ``active_pipeline`` so
 #: a stop gate armed by an earlier ``/gatekit:build`` does not outlive it.
 NON_PIPELINE_COMMANDS = ("doctor", "setup")
@@ -96,6 +99,11 @@ def apply_command(led: "ledger.Ledger", text: str) -> None:
         return
     if name in ledger.PIPELINES:
         led.set_pipeline(name)
+        if name in STOP_ARMING_PIPELINES:
+            # ADR-0024: invoking build/verify — again included — is the user
+            # asking for a judgement, so a stand-down from an earlier verdict
+            # and its spent blocks do not carry over.
+            led.rearm_stop()
     elif name in NON_PIPELINE_COMMANDS:
         led.set_pipeline(None)
 
@@ -141,9 +149,13 @@ def build_context(root, led: "ledger.Ledger") -> str:
         f"gatekit: output_lang={led.output_lang} (reply in this language;"
         " never translate identifiers)",
         f"pipeline={pipeline}",
-        question_line,
-        _gate_state(root),
     ]
+    # ADR-0024: say so while the Stop gate judges nothing. Early in the line,
+    # so the 600-character cut never drops it.
+    stood_down = _stand_down_line(root, led)
+    if stood_down:
+        parts.append(stood_down)
+    parts += [question_line, _gate_state(root)]
 
     contract_status = contract.status(root)
     if contract_status != "unverified":
@@ -158,6 +170,16 @@ def build_context(root, led: "ledger.Ledger") -> str:
         parts.append(build)
 
     return " | ".join(parts)
+
+
+def _stand_down_line(root, led: "ledger.Ledger") -> str:
+    try:
+        from gatekit.gates import stop as stop_gate
+
+        return stop_gate.stand_down_line(root, led)
+    except Exception:
+        # The context line is a convenience; never let it break the hook.
+        return ""
 
 
 def _live_build(root) -> str:

@@ -71,6 +71,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" ledger show --session <session_id
 - `questions.asked` / `budget_exceeded` — 인터뷰가 질문을 몇 번 했는가
 - `scopes` — 어떤 에이전트가 어떤 범위를 잡고 있는가
 - `stop.block_count` / `final_verdict` — 몇 번 차단됐고 최종 판정이 무엇인가
+- `stop.stood_down` — Stop 게이트가 끝난 잡의 판정을 기록하고 물러났는가(ADR-0024). 값이 있으면 이후 턴 끝에서는 계약을 실행하지 않는다. `skipped`는 판정 없이 넘긴 턴 끝 수다. 다시 확인하려면 `/gatekit:verify`
+- `stop.deferred` — 마지막 판정에서 미룬 기준(`tier`: verify 등급, `budget`: `stop.budget_s` 소진)
 
 ## 잡 상태 직접 보기
 

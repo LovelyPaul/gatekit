@@ -39,7 +39,10 @@ When writing `spec/05-gate.md`, fill its YAML frontmatter block (`title`/
 covers deriving by runner invocation rather than by task (ADR-0020), the
 fence fields and their requirements, measuring before declaring a budget,
 booting the app once, the single screenshot criterion (ADR-0017 decision
-9), and why every criterion must run here before it is written in.
+9), which criteria get `"tier": "verify"` (ADR-0024: the full regression
+suite that repeats the task gates; the Stop hook defers them to
+`/gatekit:verify`), and why every criterion must run here before it is
+written in.
 
 ## Step 3 — write the "not counted as done" section
 

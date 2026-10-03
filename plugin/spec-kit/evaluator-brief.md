@@ -67,6 +67,8 @@ The rest of the evaluator's prompt says, in `output_lang`:
 
 - You are the evaluator. You did not write this code and you must not change it.
 - Run `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract run --json` from the project root.
+  It runs every criterion, `"tier": "verify"` ones included — those the Stop
+  hook deferred during the build (ADR-0024) are judged here for the first time.
 - Read `spec/05-gate.md` and carry out every E2E step it describes by hand,
   in order. Record what you actually observed, not what should happen.
 - For each criterion and each E2E step, give one verdict from

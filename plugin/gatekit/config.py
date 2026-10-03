@@ -74,7 +74,37 @@ DEFAULTS: Dict[str, Any] = {
     # is not the model that wrote the code. A user who wants the host's own
     # subagent writes "agent" here explicitly and that always wins.
     "verify": {"evaluator": ""},
+    # ADR-0024: how long the Stop gate under `build` keeps starting criteria.
+    # What it does not start is deferred to /gatekit:verify, never judged.
+    "stop": {"budget_s": 120},
 }
+
+#: ADR-0024: `stop.budget_s` default and ceiling. The ceiling is the Stop
+#: gate's cap below the 600 s hook timeout (`gates/stop.STOP_BUDGET_CAP_S`).
+STOP_BUDGET_DEFAULT_S = 120.0
+STOP_BUDGET_MAX_S = 570.0
+
+
+def stop_budget_s(cfg: Dict[str, Any]) -> "tuple":
+    """``(value in force, problem or "")`` for ``stop.budget_s``.
+
+    A non-number, a boolean, zero or a negative value means the default; a
+    value above :data:`STOP_BUDGET_MAX_S` means the ceiling. Either way the
+    problem string says so, for `doctor` to report.
+    """
+    section = cfg.get("stop") if isinstance(cfg, dict) else None
+    if not isinstance(section, dict) or "budget_s" not in section:
+        return STOP_BUDGET_DEFAULT_S, ""
+    raw = section.get("budget_s")
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or raw != raw or raw <= 0:
+        return STOP_BUDGET_DEFAULT_S, (
+            "stop.budget_s must be a positive number of seconds (got %r); using %g"
+            % (raw, STOP_BUDGET_DEFAULT_S))
+    if raw > STOP_BUDGET_MAX_S:
+        return STOP_BUDGET_MAX_S, (
+            "stop.budget_s %g is above the %g s ceiling; using %g"
+            % (raw, STOP_BUDGET_MAX_S, STOP_BUDGET_MAX_S))
+    return float(raw), ""
 
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:

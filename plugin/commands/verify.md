@@ -65,6 +65,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract run --json
 
 Run it once, in the main session. Two independent runs that disagree is itself a
 finding — report the disagreement rather than picking the better result.
+`contract run` runs every tier and takes no Stop-gate budget: criteria the
+Stop hook deferred during the build (`"tier": "verify"`, or past
+`stop.budget_s`, ADR-0024) are judged here, and this is the run that counts.
 
 ## Step 4 — report
 

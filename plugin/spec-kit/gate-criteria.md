@@ -21,6 +21,18 @@ E2E runner:
 - **cheap static criteria** stay as they are: typecheck, unit tests, a TODO
   scan, the token gate over `src/**`
 
+**Tier each criterion (ADR-0024).** `"tier": "turn"` (the default) runs at
+the end of every turn while a build is being judged, inside the Stop gate's
+`stop.budget_s` (default 120 s). `"tier": "verify"` runs only in
+`/gatekit:verify`, `contract run` and `contract baseline`; the Stop gate lists
+it as deferred and never judges it. Put in `verify` the full regression suite
+that repeats what the task gates already passed. Keep in `turn` one
+happy-path journey (the wiring criterion), the screenshot criterion, unit
+tests, typecheck and the static checks. Within `turn`, declare the slow ones
+last: the Stop gate runs last run's failures first, then declared order, and
+starts nothing once its budget is spent, so an early slow criterion leaves the
+rest deferred at every turn.
+
 Add a per-spec criterion only for an acceptance criterion the suite does not
 cover, or when the measured suite cannot finish inside the budget as a whole.
 A project without an E2E runner keeps one criterion per acceptance criterion
@@ -28,7 +40,7 @@ in 01, plus one per task in 04 whose completion is not already covered. Each
 is a ` ```gatekit-criterion ` fence:
 
 ```json
-{"id": "e2e-suite", "argv": ["npx", "playwright", "test", "--project", "mobile"],
+{"id": "e2e-suite", "tier": "verify", "argv": ["npx", "playwright", "test", "--project", "mobile"],
  "expect": {"exit": 0, "stdout_not_contains": ["skipped"]}, "timeout_s": 240, "artifacts": []}
 ```
 
@@ -51,6 +63,8 @@ Requirements:
   once (`next build && next start`, or the runner's `reuseExistingServer`
   against a server you start before the run) over a cold `next dev` in every
   criterion; dev servers compile each page on first request
+- `tier` is `"turn"` or `"verify"`; anything else fails `spec validate` and
+  `contract derive`.
 - `artifacts` only for files the command genuinely produces. A declared
   artifact that does not appear is a `fail`, so do not declare aspirational ones.
 - `expect` beyond `exit` when the exit code alone can lie. A test runner that

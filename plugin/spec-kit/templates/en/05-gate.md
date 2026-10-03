@@ -40,6 +40,7 @@ Field rules:
 | `expect.exit` | The exit code that counts as passing. Usually 0. |
 | `timeout_s` | Per-criterion ceiling. The run-wide budget defaults to 45 s and can be raised to at most 600 s with the `gatekit-budget` fence below. |
 | `artifacts` | Relative paths that must exist afterwards. Missing → `fail`. |
+| `tier` | Optional. `"turn"` (default) runs at the end of every turn while the build is judged; `"verify"` runs only in `/gatekit:verify` — use it for the full regression suite that repeats the task gates. |
 
 ## Not counted as done
 

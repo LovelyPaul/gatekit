@@ -98,6 +98,7 @@
 | `expect` | 객체 | `exit`(정수, 기본 0) 외에 `stdout_contains` / `stdout_not_contains` / `stderr_contains` / `stderr_not_contains`(문자열 또는 문자열 리스트, 전부 성립해야 함), `stdout_regex` / `stderr_regex`(패턴 하나). 출력 검사는 저장된 꼬리가 아니라 전체 스트림에 대해 한다. 모르는 키·잘못된 타입·잘못된 정규식은 `derive` 오류이자 `validate` `fail` |
 | `timeout_s` | 숫자 | 이 기준의 상한 |
 | `artifacts` | 상대 경로 리스트 | 실행 후 존재해야 한다. 없으면 `fail` |
+| `tier` | `"turn"` 또는 `"verify"` | 선택, 기본 `"turn"`(ADR-0024). `turn`은 빌드를 판정하는 동안 Stop 게이트가 매 턴 끝에 실행하고, `verify`는 `/gatekit:verify`·`contract run`·`contract baseline`에서만 실행한다. 다른 값은 `derive` 오류이자 `validate` `fail` |
 
 ```json
 {"id": "task-note-search-works",

@@ -16,10 +16,23 @@ Three safety valves keep the block from becoming a trap:
 Whenever the gate lets the session stop it records ``stop.final_verdict``, and
 that value is **never blank**: an unrun contract is recorded as ``unverified``,
 not silently as success.
+
+ADR-0024 bounds what the gate judges:
+
+* **Stand-down.** Under ``build`` it judges while the latest job is absent or
+  unsettled, and once more after every task is terminal (the handoff check).
+  Once that settled job has a recorded verdict (``ok``, or ``final_verdict``
+  after ``MAX_BLOCKS``) it stands down: later Stops run nothing until
+  ``/gatekit:build`` or ``/gatekit:verify`` re-arms it. ``verify`` is the same
+  without the job.
+* **Tiers.** Under ``build`` only ``turn`` criteria run; ``verify`` ones are
+  deferred to ``/gatekit:verify``, never judged, never ``ok``.
+* **Budget.** Under ``build`` no criterion starts once ``stop.budget_s`` is
+  spent; those are deferred too. What did run is judged as before.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 if __name__ == "__main__" or __package__ in (None, ""):  # pragma: no cover
     from _bootstrap import ensure_package_path
@@ -30,7 +43,7 @@ else:
 
     ensure_package_path()
 
-from gatekit import contract, hookio, ledger, paths, verdict  # noqa: E402
+from gatekit import config, contract, hookio, jobs, ledger, paths, verdict  # noqa: E402
 
 #: Pipelines whose completion is contract-enforced.
 ENFORCED_PIPELINES = ("build", "verify")
@@ -48,7 +61,11 @@ STOP_HOOK_TIMEOUT_S = 600.0
 #: declared ``gatekit-budget`` above this runs in full under ``contract run``
 #: but is cut here — and a cut run is ``unverified``, which is honest, where a
 #: hook killed by Claude Code would record no verdict and no log line at all.
-STOP_BUDGET_CAP_S = 570.0
+STOP_BUDGET_CAP_S = config.STOP_BUDGET_MAX_S
+
+#: ADR-0024: the tiers the gate runs under ``build``. Under ``verify`` it runs
+#: every tier, as ``contract run`` does.
+BUILD_TIERS = ("turn",)
 
 _MESSAGES = {
     "en": {
@@ -61,6 +78,17 @@ _MESSAGES = {
         "reused": (
             "  (no file changed since the run at {at}; that result is reused. "
             "Change the code to run the contract again.)"
+        ),
+        "deferred_tier": (
+            "  deferred to /gatekit:verify — not judged here, does not block: {ids}"
+        ),
+        "deferred_budget": (
+            "  deferred: Stop-gate budget ({budget:g} s) spent — not judged here, "
+            "does not block; /gatekit:verify runs them: {ids}"
+        ),
+        "stood_down": (
+            "stop gate stood down ({subject} verdict {verdict} recorded): follow-up "
+            "edits are not gated; /gatekit:verify re-checks the contract"
         ),
         "stale": (
             "gatekit: .gatekit/contract.json no longer matches spec/05-gate.md, so "
@@ -91,6 +119,17 @@ _MESSAGES = {
             "  ({at} 실행 이후 바뀐 파일이 없어 그 결과를 다시 썼습니다. "
             "코드를 고치면 계약을 다시 실행합니다.)"
         ),
+        "deferred_tier": (
+            "  /gatekit:verify 로 미룸 — 여기서 판정하지 않으며 차단 사유가 아님: {ids}"
+        ),
+        "deferred_budget": (
+            "  Stop 게이트 예산({budget:g}초) 소진으로 미룸 — 여기서 판정하지 않으며 "
+            "차단 사유가 아님, /gatekit:verify 가 실행: {ids}"
+        ),
+        "stood_down": (
+            "stop 게이트 해제({subject} 판정 {verdict} 기록됨): 이후 수정은 게이트를 "
+            "거치지 않음, 계약 재확인은 /gatekit:verify"
+        ),
         "stale": (
             "gatekit: .gatekit/contract.json 이 spec/05-gate.md 와 더 이상 일치하지 "
             "않아 완료 여부를 판정할 수 없습니다 (contract_stale). "
@@ -116,6 +155,88 @@ def _message(lang: str, key: str, **fields: Any) -> str:
     return table.get(key, _MESSAGES["en"][key]).format(**fields)
 
 
+def _subject(root, pipeline: Optional[str]) -> Tuple[bool, Optional[str]]:
+    """``(settled, job_id)`` for what the gate is judging (ADR-0024).
+
+    Under ``verify`` there is no job: the subject is always settled. Under
+    ``build`` it is the latest job, settled when every task's state is
+    terminal; no job, or a job with no tasks, is not settled.
+    """
+    if pipeline != "build":
+        return True, None
+    job_id = jobs.latest_job_id(root)
+    if not job_id:
+        return False, None
+    jdir = jobs.job_dir(root, job_id)
+    job = jobs.read_json(jdir / "job.json", {}) or {}
+    task_ids = [str(t) for t in (job.get("tasks") or [])] if isinstance(job, dict) else []
+    if not task_ids:
+        return False, job_id
+    for task_id in task_ids:
+        status = jobs.read_json(jdir / "tasks" / task_id / "status.json", {}) or {}
+        state = status.get("state") if isinstance(status, dict) else None
+        if state not in jobs.TERMINAL_STATES:
+            return False, job_id
+    return True, job_id
+
+
+def stand_down_applies(root, led: "ledger.Ledger") -> Optional[Dict[str, Any]]:
+    """The recorded stand-down when it still applies, else ``None``.
+
+    It applies while the pipeline is the one it was recorded under, the
+    latest job is the same one and it is still settled. A new job or a
+    redelegated task means the gate judges again.
+    """
+    stood = (led.data.get("stop") or {}).get("stood_down")
+    pipeline = led.data.get("active_pipeline")
+    if not isinstance(stood, dict) or pipeline not in ENFORCED_PIPELINES:
+        return None
+    if stood.get("pipeline") != pipeline:
+        return None
+    settled, job_id = _subject(led.root, pipeline)
+    if not settled or stood.get("job_id") != job_id:
+        return None
+    return stood
+
+
+def stand_down_line(root, led: "ledger.Ledger") -> str:
+    """The prompt hook's context line while a stand-down applies, else ""."""
+    stood = stand_down_applies(root, led)
+    if stood is None:
+        return ""
+    return _message(led.output_lang, "stood_down",
+                    subject=stood.get("job_id") or stood.get("pipeline") or "?",
+                    verdict=stood.get("verdict") or verdict.UNVERIFIED)
+
+
+def _stand_down(led: "ledger.Ledger", pipeline: str, job_id: Optional[str], final: str) -> None:
+    """Record that the gate judges nothing more for this job (ADR-0024)."""
+    stop_state = led.data.setdefault("stop", {})
+    stop_state["stood_down"] = {"pipeline": pipeline, "job_id": job_id,
+                                "verdict": final or verdict.UNVERIFIED,
+                                "at": ledger._now(), "skipped": 0}
+    led.append_event("stop_stood_down", {"pipeline": pipeline, "job_id": job_id,
+                                         "verdict": final or verdict.UNVERIFIED})
+    led.save()
+
+
+def _nothing_in_scope(result: Dict[str, Any]) -> bool:
+    return contract.NO_CRITERIA_IN_TIER_REASON in (result.get("reasons") or [])
+
+
+def _deferred_lines(lang: str, result: Dict[str, Any], budget_s: Optional[float]) -> List[str]:
+    lines = []
+    deferred = result.get("deferred") or []
+    by_tier = [str(d.get("id")) for d in deferred if d.get("reason") == "tier"]
+    by_budget = [str(d.get("id")) for d in deferred if d.get("reason") == "budget"]
+    if by_tier:
+        lines.append(_message(lang, "deferred_tier", ids=", ".join(by_tier)))
+    if by_budget:
+        lines.append(_message(lang, "deferred_budget", ids=", ".join(by_budget),
+                              budget=float(budget_s or 0)))
+    return lines
+
+
 def _finish(led: "ledger.Ledger", final: str, reasons: Optional[List[str]] = None) -> None:
     """Record the outcome and allow the stop. ``final`` is never blank."""
     stop_state = led.data.setdefault(
@@ -128,14 +249,31 @@ def _finish(led: "ledger.Ledger", final: str, reasons: Optional[List[str]] = Non
     led.save()
 
 
-def _judge(root, led: "ledger.Ledger") -> Dict[str, Any]:
+def _plan(root, pipeline: Optional[str]) -> Tuple[Optional[Tuple[str, ...]], Optional[float]]:
+    """``(tiers, start_budget_s)`` for this pipeline (ADR-0024)."""
+    if pipeline == "build":
+        return BUILD_TIERS, config.stop_budget_s(config.load(root))[0]
+    return None, None
+
+
+def _judge(root, led: "ledger.Ledger", pipeline: Optional[str] = None) -> Dict[str, Any]:
     """Run the contract, or reuse the last result for an unchanged tree.
 
     ADR-0020: a Stop with no file changed since the last run judges that run
     again instead of re-proving it; any change runs the contract, last run's
     failures first. Only this gate reuses; `contract run` always executes.
+    ADR-0024: under ``build`` only the turn tier runs, within
+    ``stop.budget_s``; reuse needs a record of the same scope.
     """
-    last = contract.reusable_last(root)
+    tiers, start_budget_s = _plan(root, pipeline)
+    result = _judge_raw(root, led, tiers, start_budget_s)
+    result["start_budget_s"] = start_budget_s
+    led.data.setdefault("stop", {})["deferred"] = list(result.get("deferred") or [])
+    return result
+
+
+def _judge_raw(root, led: "ledger.Ledger", tiers, start_budget_s) -> Dict[str, Any]:
+    last = contract.reusable_last(root, tiers)
     if last is not None:
         result = dict(last["result"])
         result["reused_from"] = last.get("recorded_at")
@@ -148,7 +286,8 @@ def _judge(root, led: "ledger.Ledger") -> Dict[str, Any]:
     if previous.get("source_sha256") == data.get("source_sha256"):
         first = [c.get("id") for c in ((previous.get("result") or {}).get("criteria") or [])
                  if c.get("verdict") in (verdict.FAIL, verdict.UNVERIFIED)]
-    result = contract.execute(root, cap_s=STOP_BUDGET_CAP_S, first=first)
+    result = contract.execute(root, cap_s=STOP_BUDGET_CAP_S, first=first,
+                              tiers=tiers, start_budget_s=start_budget_s)
     if result.get("criteria"):
         try:
             contract.save_last(root, result)
@@ -177,31 +316,58 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         _finish(led, verdict.UNVERIFIED)
         return hookio.allow()
 
-    # Already inside a stop-hook continuation: never block again.
-    if bool(event.get("stop_hook_active")):
-        result = _judge(root, led)
-        _finish(led, result["verdict"], result["reasons"])
-        return hookio.allow()
-
     stop_state = led.data.setdefault(
         "stop", {"block_count": 0, "final_verdict": None, "last_reasons": []}
     )
+
+    # ADR-0024: the job this gate was armed for already has its verdict.
+    # Judge nothing; `final_verdict` keeps what was recorded.
+    stood = stand_down_applies(root, led)
+    if stood is not None:
+        try:
+            stood["skipped"] = int(stood.get("skipped", 0) or 0) + 1
+        except (TypeError, ValueError):
+            stood["skipped"] = 1
+        led.save()
+        return hookio.allow()
+    if stop_state.get("stood_down"):
+        # A new job, a redelegated task or another pipeline: judge again.
+        stop_state["stood_down"] = None
+        led.append_event("stop_stand_down_cleared", {"pipeline": pipeline})
+
+    settled, job_id = _subject(root, pipeline)
+
+    def settle(final: str, recorded: bool) -> None:
+        """Allow, and stand down when a settled subject got its verdict."""
+        _finish(led, final, result["reasons"])
+        if recorded and settled:
+            _stand_down(led, pipeline, job_id, final)
+
+    # Already inside a stop-hook continuation: never block again. Only an
+    # `ok` here counts as the verdict, or one retry would end the judging.
+    if bool(event.get("stop_hook_active")):
+        result = _judge(root, led, pipeline)
+        settle(result["verdict"], result["verdict"] == verdict.OK or _nothing_in_scope(result))
+        return hookio.allow()
+
     try:
         block_count = int(stop_state.get("block_count", 0))
     except (TypeError, ValueError):
         block_count = 0
 
-    result = _judge(root, led)
+    result = _judge(root, led, pipeline)
     outcome = result["verdict"]
 
-    if outcome == verdict.OK:
-        _finish(led, outcome, result["reasons"])
+    # Nothing in the selected tier: there is nothing here to fix, so blocking
+    # would only stall. Recorded as `unverified`, never as `ok`.
+    if outcome == verdict.OK or _nothing_in_scope(result):
+        settle(outcome, True)
         return hookio.allow()
 
     # Out of blocks: stand down rather than trap the session, but say plainly
     # that the work did not pass.
     if block_count >= MAX_BLOCKS:
-        _finish(led, outcome, result["reasons"])
+        settle(outcome, True)
         return hookio.allow()
 
     stop_state["block_count"] = block_count + 1
@@ -231,6 +397,8 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         # The reason line is cut at 120 characters; the instruction and the
         # full path list stand on their own here.
         reasons_text += "\n" + _message(lang, "grading_hint", paths=", ".join(changed))
+    for line in _deferred_lines(lang, result, result.get("start_budget_s")):
+        reasons_text += "\n" + line
     if result.get("reused_from"):
         reasons_text += "\n" + _message(lang, "reused", at=result["reused_from"])
     return hookio.block_stop(

@@ -31,7 +31,7 @@ import re
 import subprocess
 import sys
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from . import approval, config, paths, runcheck, verdict
 
@@ -136,6 +136,21 @@ BUDGET_FENCE_NAME = "gatekit-budget"
 
 STALE_REASON = "contract_stale"
 
+#: ADR-0024: criterion tiers. `turn` criteria run at every Stop under build;
+#: `verify` criteria only under /gatekit:verify, `contract run` and baseline.
+TIERS = ("turn", "verify")
+DEFAULT_TIER = "turn"
+
+#: ``execute`` reason when the selected tiers cover no criterion.
+NO_CRITERIA_IN_TIER_REASON = "no_criteria_in_tier"
+
+
+def validate_tier(tier: Any, ident: str = "?") -> List[str]:
+    """Problems with a criterion's ``tier``; empty when valid."""
+    if isinstance(tier, str) and tier in TIERS:
+        return []
+    return [f"criterion '{ident}' has tier {tier!r}; expected one of: {', '.join(TIERS)}"]
+
 # Matches a fenced block whose info string is exactly the fence name. The
 # opening fence must start at the beginning of a line, which keeps prose that
 # merely mentions the fence name out of the results.
@@ -203,12 +218,18 @@ def _normalize_criterion(raw: Dict[str, Any], index: int) -> Dict[str, Any]:
     if timeout_s <= 0:
         timeout_s = float(DEFAULT_TIMEOUT_S)
 
+    tier = raw.get("tier", DEFAULT_TIER)
+    problems = validate_tier(tier, ident.strip())
+    if problems:
+        raise ValueError("; ".join(problems))
+
     return {
         "id": ident.strip(),
         "argv": list(argv),
         "expect": expect,
         "timeout_s": timeout_s,
         "artifacts": [str(a) for a in artifacts],
+        "tier": tier,
     }
 
 
@@ -562,6 +583,8 @@ def execute(
     total_budget_s: Optional[float] = None,
     cap_s: Optional[float] = None,
     first: Optional[List[str]] = None,
+    tiers: Optional[Sequence[str]] = None,
+    start_budget_s: Optional[float] = None,
 ) -> Dict[str, Any]:
     """Run every criterion within *total_budget_s* and aggregate the verdict.
 
@@ -573,6 +596,13 @@ def execute(
     *first* names criterion ids to run before the rest, in their declared
     order (ADR-0020: the Stop gate puts last run's failures first, so a budget
     cut lands on criteria that last passed).
+
+    *tiers* (ADR-0024) limits the run to criteria of those tiers; ``None``
+    runs every tier. *start_budget_s* stops starting criteria once that many
+    seconds have passed since the run began, while the run-wide budget still
+    has time left. Criteria left out either way are returned in ``deferred``
+    — not run, not judged, not in ``criteria`` and not in the aggregate.
+    ``scope`` is the sorted ids the tier selection covers.
 
     Returns ``{"verdict", "criteria", "reasons"}``. ``reasons`` holds short
     human-readable strings naming what failed or went unverified; the stop gate
@@ -610,6 +640,23 @@ def execute(
             "reasons": ["contract has no criteria"],
         }
 
+    deferred: List[Dict[str, Any]] = []
+    if tiers is not None:
+        wanted_tiers = set(tiers)
+        for crit in criteria:
+            if _tier_of(crit) not in wanted_tiers:
+                deferred.append({"id": crit.get("id"), "tier": _tier_of(crit), "reason": "tier"})
+        criteria = [c for c in criteria if _tier_of(c) in wanted_tiers]
+    scope = sorted(str(c.get("id")) for c in criteria)
+    if not criteria:
+        return {
+            "verdict": verdict.UNVERIFIED,
+            "criteria": [],
+            "reasons": [NO_CRITERIA_IN_TIER_REASON],
+            "scope": scope,
+            "deferred": deferred,
+        }
+
     if total_budget_s is None:
         declared = data.get("total_budget_s")
         budget = float(declared) if isinstance(declared, (int, float)) and not isinstance(declared, bool) else TOTAL_BUDGET_S
@@ -617,7 +664,8 @@ def execute(
         budget = float(total_budget_s)
     if cap_s is not None:
         budget = min(budget, float(cap_s))
-    deadline = time.monotonic() + budget
+    started = time.monotonic()
+    deadline = started + budget
     if first:
         wanted = set(first)
         criteria = [c for c in criteria if c.get("id") in wanted] + [
@@ -625,7 +673,15 @@ def execute(
         ]
     results: List[Dict[str, Any]] = []
     for crit in criteria:
-        results.append(_run_one(root, crit, deadline - time.monotonic()))
+        now = time.monotonic()
+        # ADR-0024: once the Stop gate's start budget is spent, the rest are
+        # deferred — unless the contract's own budget is spent too, which is
+        # still "budget exhausted" `unverified` (the contract's limit).
+        if (start_budget_s is not None and now - started >= float(start_budget_s)
+                and deadline - now > 0):
+            deferred.append({"id": crit.get("id"), "tier": _tier_of(crit), "reason": "budget"})
+            continue
+        results.append(_run_one(root, crit, deadline - now))
 
     reasons: List[str] = []
     for item in results:
@@ -640,7 +696,23 @@ def execute(
         "criteria": results,
         "total_budget_s": budget,
         "reasons": reasons,
+        "scope": scope,
+        "deferred": deferred,
     }
+
+
+def _tier_of(crit: Dict[str, Any]) -> str:
+    """A criterion's tier; a contract derived before ADR-0024 has none."""
+    tier = crit.get("tier")
+    return tier if tier in TIERS else DEFAULT_TIER
+
+
+def tier_scope(root: pathlib.Path, tiers: Optional[Sequence[str]] = None) -> List[str]:
+    """Sorted ids of the current contract's criteria in *tiers* (``None``: all)."""
+    data = load(root) or {}
+    wanted = set(tiers) if tiers is not None else set(TIERS)
+    return sorted(str(c.get("id")) for c in data.get("criteria") or []
+                  if _tier_of(c) in wanted)
 
 
 # --------------------------------------------------------------------------
@@ -721,14 +793,19 @@ def save_last(root: pathlib.Path, result: Dict[str, Any]) -> None:
         # there were any) must not be reused.
         "signatures_sha256": runcheck.signatures_digest(),
         "recorded_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        # ADR-0024: which criteria the run covered, so a turn-tier result is
+        # never reused where a full one is needed, and vice versa.
+        "scope": list(result.get("scope") or []),
         "result": result,
     }
     config.write_json_atomic(_last_result_path(root), record)
 
 
-def reusable_last(root: pathlib.Path) -> Optional[Dict[str, Any]]:
-    """The last record when the contract, the tree and the no-tests
-    signatures are all unchanged."""
+def reusable_last(root: pathlib.Path,
+                  tiers: Optional[Sequence[str]] = None) -> Optional[Dict[str, Any]]:
+    """The last record when the contract, the tree, the no-tests signatures
+    and the scope that *tiers* selects (``None``: every tier) are all
+    unchanged."""
     last = load_last(root)
     data = load(root)
     if not last or not data or status(root) != verdict.OK:
@@ -737,6 +814,9 @@ def reusable_last(root: pathlib.Path) -> Optional[Dict[str, Any]]:
         return None
     if "signatures_sha256" not in last or (
             last.get("signatures_sha256") != runcheck.signatures_digest()):
+        return None
+    if not isinstance(last.get("scope"), list) or (
+            sorted(str(i) for i in last["scope"]) != tier_scope(root, tiers)):
         return None
     current = tree_fingerprint(root)
     if not current or current != last.get("fingerprint"):

@@ -211,8 +211,10 @@ Runtime state lives under `.gatekit/` in your project. `config.json` and
 
 `.gatekit/config.json` controls whether code changes are gated behind an
 approved spec (`enforce_spec_before_code`, on by default), which worker
-backend builds run against, retry/parallelism limits, and the interview
-question budget. See `docs/ARCHITECTURE.md` §9 for the full schema and
+backend builds run against, retry/parallelism limits, the interview
+question budget, and `stop.budget_s` — how long the Stop hook keeps starting
+completion criteria at a turn end during a build (default 120 s; the rest are
+deferred to `/gatekit:verify`). See `docs/ARCHITECTURE.md` §9 for the full schema and
 defaults.
 
 ## Security posture

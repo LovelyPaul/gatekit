@@ -170,6 +170,7 @@ MESSAGES = {
         "crit_duplicate_id": "완료 기준 id가 중복됩니다: {id}",
         "crit_argv": "완료 기준 {id}의 argv는 비어 있지 않은 문자열 리스트여야 합니다.",
         "crit_expect": "완료 기준 {id}의 expect 가 잘못되었습니다: {detail}",
+        "crit_tier": "완료 기준 {id}의 tier 는 \"turn\" 또는 \"verify\" 여야 합니다 (현재 {tier}).",
         "crit_not_done_section": "\"완료로 보지 않는 조건\" 절이 없습니다.",
         "trace_missing": "작업 {id}를 참조하는 완료 기준이 없습니다.",
         "progress_stale": "PROGRESS.md 가 마지막 잡 결과({job} · {when})보다 오래되었습니다. 세션이 중간에 끊긴 흔적입니다. `jobs results` 로 확인하고 갱신하세요.",
@@ -236,6 +237,7 @@ MESSAGES = {
         "crit_duplicate_id": "Duplicate criterion id: {id}",
         "crit_argv": "Criterion {id} needs argv to be a non-empty list of strings.",
         "crit_expect": "Criterion {id} has an invalid expect: {detail}",
+        "crit_tier": "Criterion {id} has tier {tier}; it must be \"turn\" or \"verify\".",
         "crit_not_done_section": "The \"not counted as done\" section is missing.",
         "trace_missing": "No completion criterion references task {id}.",
         "progress_stale": "PROGRESS.md is older than the latest job result ({job} · {when}); a session was cut short. Check `jobs results` and update it.",
@@ -801,6 +803,13 @@ def _check_criteria(text: str, lang: str) -> List[dict]:
 
             for problem in contract_mod.validate_expect(crit["expect"], cid):
                 findings.append(_finding(name, V.FAIL, _msg(lang, "crit_expect", id=cid, detail=problem)))
+        if "tier" in crit:
+            from gatekit import contract as contract_mod
+
+            # ADR-0024: the same check `derive` makes, so they cannot disagree.
+            if contract_mod.validate_tier(crit["tier"], cid):
+                findings.append(_finding(name, V.FAIL, _msg(
+                    lang, "crit_tier", id=cid, tier=json.dumps(crit["tier"], ensure_ascii=False))))
 
     not_done = _not_done_heading(lang)
     if not_done not in set(_present_headings(text)):

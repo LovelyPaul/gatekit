@@ -63,6 +63,12 @@ def _safe_session_id(session_id: str) -> str:
     return cleaned or "unknown-session"
 
 
+def _blank_stop() -> Dict[str, Any]:
+    """The Stop gate's state. ``stood_down`` and ``deferred`` are ADR-0024."""
+    return {"block_count": 0, "final_verdict": None, "last_reasons": [],
+            "stood_down": None, "deferred": []}
+
+
 def _blank(session_id: str) -> Dict[str, Any]:
     now = _now()
     return {
@@ -74,7 +80,7 @@ def _blank(session_id: str) -> Dict[str, Any]:
         "active_pipeline": None,
         "questions": {"asked": 0, "max_calls": 2, "budget_exceeded": False},
         "scopes": [],
-        "stop": {"block_count": 0, "final_verdict": None, "last_reasons": []},
+        "stop": _blank_stop(),
         "events": [],
     }
 
@@ -310,6 +316,12 @@ class Ledger:
             }
             self.append_event("pipeline_set", {"pipeline": name, "previous": previous})
         return True
+
+    def rearm_stop(self) -> None:
+        """Arm the Stop gate afresh (ADR-0024): a new `/gatekit:build` or
+        `/gatekit:verify` clears a stand-down and the block count."""
+        self.data["stop"] = _blank_stop()
+        self.append_event("stop_rearmed", {"pipeline": self.data.get("active_pipeline")})
 
 
 def run(argv: List[str]) -> int:

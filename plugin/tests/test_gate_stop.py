@@ -301,8 +301,9 @@ class TestStopGateCapsDeclaredBudget(StopProject):
         seen = {}
         original = contract.execute
 
-        def recorder(root, total_budget_s=None, cap_s=None, first=None):
-            result = original(root, total_budget_s=total_budget_s, cap_s=cap_s, first=first)
+        def recorder(root, total_budget_s=None, cap_s=None, first=None, **kwargs):
+            result = original(root, total_budget_s=total_budget_s, cap_s=cap_s, first=first,
+                              **kwargs)
             seen["budget"] = result["total_budget_s"]
             return result
 
