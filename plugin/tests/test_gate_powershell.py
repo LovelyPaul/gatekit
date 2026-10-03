@@ -16,7 +16,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gatekit import approval, ledger, pwsh  # noqa: E402
+from gatekit import approval, ledger, names, pwsh  # noqa: E402
 from gatekit.gates import powershell as ps_gate  # noqa: E402
 
 PLUGIN = pathlib.Path(__file__).resolve().parents[1]
@@ -287,7 +287,7 @@ class TestApproveDetection(unittest.TestCase):
 # hook level
 # --------------------------------------------------------------------------
 def run_gate_subprocess(event: dict, env_extra: "dict | None" = None, raw: "str | None" = None):
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GATEKIT_")}
+    env = {k: v for k, v in os.environ.items() if not k.startswith(names.env_prefixes())}
     env.pop("PYTHONPATH", None)
     env.update(env_extra or {})
     proc = subprocess.run(
@@ -304,11 +304,11 @@ class PSProject(unittest.TestCase):
         (self.root / ".gatekit").mkdir()
         (self.root / "spec").mkdir()
         (self.root / "spec" / "05-gate.md").write_text("# Gate\n", encoding="utf-8")
-        self._env = {k: os.environ.pop(k) for k in list(os.environ) if k.startswith("GATEKIT_")}
+        self._env = {k: os.environ.pop(k) for k in list(os.environ) if k.startswith(names.env_prefixes())}
 
     def tearDown(self) -> None:
         for key in list(os.environ):
-            if key.startswith("GATEKIT_"):
+            if key.startswith(names.env_prefixes()):
                 del os.environ[key]
         os.environ.update(self._env)
         self._tmp.cleanup()
@@ -650,6 +650,135 @@ class TestSubprocessContract(PSProject):
         self.assertEqual(code, 0)
         log = self.root / ".gatekit" / "runs" / "hook-errors.log"
         self.assertIn("reader exploded", log.read_text(encoding="utf-8"))
+
+
+# --------------------------------------------------------------------------
+# ADR-0028 integration with ADR-0029: every name, as the Bash gate reads them
+# --------------------------------------------------------------------------
+class TestApproveDetectionEveryName(unittest.TestCase):
+    def test_gatebound_forms_detected(self) -> None:
+        for cmd in (
+            "python C:\\gk\\plugin\\bin\\gatebound.py approve spec/05-gate.md",
+            '& python "$env:CLAUDE_PLUGIN_ROOT\\bin\\gatebound.py" approve spec\\05-gate.md',
+            "gatebound approve spec/05-gate.md",
+            "python -m gatebound approve spec/05-gate.md",
+            "python3 -m gatebound.approval spec/05-gate.md",
+            "python3 -m gatebound.cli approve x",
+            "python3 -mgatebound.__main__ approve x",
+            "Start-Process python -ArgumentList 'bin\\gatebound.py','approve','spec/05-gate.md'",
+            "python bin/gatebound.`py approve spec/05-gate.md",
+            "pwsh -enc " + encoded("python bin/gatebound.py approve spec/05-gate.md"),
+            "Remove-Item Env:GATEBOUND_TASK_ID; python bin/GateBound.py approve x",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertTrue(pwsh.invokes_gatekit_approve(cmd))
+
+    def test_gatebound_check_list_and_lookalikes_allowed(self) -> None:
+        for cmd in (
+            "python bin/gatebound.py approve check spec/05-gate.md",
+            "python bin\\gatebound.py approve list",
+            "python3 -m gatebound.approval check spec/05-gate.md",
+            "python3 -m gatebound.approval list",
+            "python bin/gatebound.py jobs status",
+            "Select-String -Pattern gatekit.approval -Path src/a.ts",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertFalse(pwsh.invokes_gatekit_approve(cmd))
+
+    def test_start_process_of_a_gatebound_launcher_is_opaque(self) -> None:
+        for program in ("gatebound", "gatebound.py", "bin\\gatebound.py"):
+            with self.subTest(program=program):
+                found = pwsh.read("Start-Process %s -ArgumentList 'approve','x'" % program, "/proj")
+                self.assertTrue(found.opaque)
+
+
+class TestWorkerNeverApprovesEveryName(PSProject):
+    def setUp(self) -> None:
+        super().setUp()
+        self.approve()
+
+    def test_gatebound_launcher_denied_in_a_gatekit_worker(self) -> None:
+        os.environ["GATEKIT_TASK_ID"] = "auth"
+        for cmd in ("python bin\\gatebound.py approve spec/05-gate.md",
+                    "python3 -m gatebound.approval spec/05-gate.md",
+                    "python3 -m gatekit.approval spec/05-gate.md"):
+            with self.subTest(cmd=cmd):
+                self.assertDenied(cmd, "never approves")
+
+    def test_worker_under_the_gatebound_variable_denied(self) -> None:
+        os.environ["GATEBOUND_TASK_ID"] = "auth"
+        self.assertDenied("python bin\\gatekit.py approve spec/05-gate.md", "never approves")
+        self.assertDenied("python bin/gatebound.py approve spec/05-gate.md", "never approves")
+
+
+class GateboundProject(PSProject):
+    """A project already migrated: its state directory is ``.gatebound``."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.root / ".gatekit").rmdir()
+        (self.root / ".gatebound").mkdir()
+
+
+class TestProtectedStateEveryName(GateboundProject):
+    DENIED = (
+        "Set-Content .gatebound\\approvals.json x",
+        "Set-Content .GATEBOUND\\Approvals.JSON x",
+        "Remove-Item -Recurse -Force .gatebound",
+        "Set-Content .gate*\\approvals.json x",
+        "Set-Content .gateb?und/approvals.json x",
+        "Set-Content .gate[b]ound/contract.json x",
+        "Remove-Item -Recurse -Force .g*",
+        "Set-Content GATEBO~1\\approvals.json x",
+        "[IO.File]::WriteAllText($p + 'GATEBO~1\\approvals.json', 'x')",
+        "iex ('Set-Content .gate' + 'bound/approvals.json x')",
+        "pwsh -enc " + encoded("Set-Content .gatebound/approvals.json x"),
+        "cd .gatebound; Set-Content approvals.json x",
+        # The other name is gatekit's state too, also in a gatebound project.
+        "Set-Content .gatekit\\approvals.json x",
+        "[IO.File]::WriteAllText($p + 'GATEKI~1\\approvals.json', 'x')",
+    )
+
+    def test_denied_before_approval(self) -> None:
+        for cmd in self.DENIED:
+            with self.subTest(cmd=cmd):
+                self.assertDenied(cmd, "ADR-0027")
+
+    def test_denied_after_approval(self) -> None:
+        self.approve()
+        self.assertTrue((self.root / ".gatebound" / "approvals.json").is_file())
+        for cmd in self.DENIED:
+            with self.subTest(cmd=cmd):
+                self.assertDenied(cmd, "ADR-0027")
+
+    def test_user_owned_allowed(self) -> None:
+        self.approve()
+        for cmd in ("Set-Content .gatebound\\config.json '{}'",
+                    "'log' > .gatebound\\eval\\run.log",
+                    "Get-Content .gatebound\\approvals.json"):
+            with self.subTest(cmd=cmd):
+                self.assertAllowed(cmd)
+
+
+class TestEvaluatorScratchEveryName(GateboundProject):
+    def setUp(self) -> None:
+        super().setUp()
+        self.approve()
+        edir = self.root / ".gatebound" / "jobs" / "job-eval" / "evaluate"
+        edir.mkdir(parents=True)
+        (edir / "task.json").write_text(json.dumps({"id": "evaluate", "write_scope": "read-only"}))
+        os.environ["GATEBOUND_TASK_ID"] = "evaluate"
+        os.environ["GATEBOUND_JOB_ID"] = "job-eval"
+
+    def test_scratch_allowed(self) -> None:
+        self.assertAllowed("New-Item -ItemType Directory -Force .gatebound\\eval")
+        self.assertAllowed("npx playwright test *> .gatebound\\eval\\run.log")
+        self.assertAllowed("Set-Content .gatebound/eval/drive.mjs x")
+
+    def test_other_writes_denied(self) -> None:
+        self.assertDenied("Set-Content .gatebound\\approvals.json x")
+        self.assertDenied("Set-Content .gate*\\approvals.json x")
+        self.assertDenied("Set-Content src\\app.ts x")
 
 
 class TestRegistration(unittest.TestCase):

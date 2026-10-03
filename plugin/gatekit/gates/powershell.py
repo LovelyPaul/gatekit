@@ -19,7 +19,6 @@ Denial reasons are written in the session's ``output_lang``.
 """
 from __future__ import annotations
 
-import os
 from typing import Any, Dict, Optional
 
 if __name__ == "__main__" or __package__ in (None, ""):  # pragma: no cover
@@ -31,7 +30,7 @@ else:
 
     ensure_package_path()
 
-from gatekit import hookio, pwsh  # noqa: E402
+from gatekit import hookio, names, pwsh  # noqa: E402
 from gatekit.gates import bash, write  # noqa: E402
 
 #: The tool name Claude Code sends in ``tool_name`` (code.claude.com/docs/en/hooks).
@@ -87,7 +86,7 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return hookio.allow()
 
     root = hookio.event_root(event)
-    task_id = os.environ.get("GATEKIT_TASK_ID")
+    task_id = names.task_id()  # either name (ADR-0029)
     if task_id and pwsh.invokes_gatekit_approve(command):
         return hookio.deny(_message(write.session_lang(root, event), "approve",
                                     task=task_id, cmd=_shown(command)))

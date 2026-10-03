@@ -190,13 +190,35 @@ shell was therefore a convention.
 - **Shared with the Bash gate** (review): `Expand-Archive -DestinationPath .`,
   `git clean -fdx`/`reset --hard`/`stash -u` after approval, a launcher
   copied under another name, and a program (not a script) written and run
-  by name. The Bash gate does not recognise `python3 -m gatekit.approval`
-  as a worker approval either; that is left to a Bash-gate change.
+  by name.
 - **Conservative refusals**: a write to `$env:TEMP\…` is opaque, so it is
   refused while a restriction is active; `Get-ChildItem function:` is
   opaque too.
 - **Injected skill commands** (`` !`…` ``) and `skill shell: powershell`
   blocks never reach a PreToolUse hook (decision 8).
+
+## Integration with ADR-0029
+
+ADR-0029 landed on main while this gate was built; the two meet here.
+
+- Every name contract in `pwsh.py` and `gates/powershell.py` goes through
+  `names.py`, so the PowerShell gate reads `gatebound` exactly as the Bash
+  gate does: `Start-Process` of any launcher name (`names.launcher_names`)
+  is opaque; a wildcard segment adds the path once per state directory name
+  (`names.state_dirnames`: `.gatebound`, `.gatekit`); the 8.3 short names of
+  both (`GATEBO~1`, `GATEKI~1`; `names.state_short_names`) are spelled out
+  in targets, removed paths and `mention_text`; the worker test reads
+  `names.task_id()` (`GATEKIT_TASK_ID` or `GATEBOUND_TASK_ID`).
+- Both approve detectors ask one function, `names.entry_kind`, what a word
+  starts: the CLI (a launcher, `-m <name>`, `-m <name>.cli`,
+  `-m <name>.__main__`) or the approval module (`-m <name>.approval`, whose
+  arguments are `approve`'s), for every name. A dotted module counts only
+  after `-m` (attached, the previous word, or a computed previous word), so
+  `grep gatekit.approval src` is not an approval. This closes the Bash
+  gap recorded above as left to a Bash-gate change: `python3 -m
+  gatekit.approval spec/05-gate.md` and `python -m gatekit.cli approve …`
+  are now denied in a worker by the Bash gate too (also in its unlexable
+  fallback pattern); `approve check`/`approve list` stay allowed.
 
 ## Consequences
 

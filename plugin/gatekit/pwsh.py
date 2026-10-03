@@ -30,6 +30,7 @@ import posixpath
 import re
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from gatekit import names as _names  # local variables are called names
 from gatekit.gates import bash, write
 
 #: How deep code inside strings (``iex '…'``, ``pwsh -Command '…'``,
@@ -1280,7 +1281,7 @@ def _run_cmdlet(cmdlet: str, spec: dict, args: List[List[_Tok]], ctx: _Ctx, pipe
         if name.endswith(".ps1"):
             ctx.ran_script = True
             return
-        if name in _RUNNERS or _VERSIONED_RUNNER.match(name) or name in ("gatekit", "gatekit.py"):
+        if name in _RUNNERS or _VERSIONED_RUNNER.match(name) or name in _names.launcher_names():
             result.mark_opaque("Start-Process %s" % name)
             return
         values: List[_Value] = []
@@ -1645,23 +1646,37 @@ def read(command: str, cwd: Optional[str]) -> PSWriteTargets:
     if ctx.ran_script and result.targets:
         result.mark_opaque("a script runs in the command that writes")
     _dot_globs(result)
+    _short_names(result)
     return result
 
 
 def _dot_globs(result: PSWriteTargets) -> None:
     """PowerShell wildcards match names that start with a dot (``*`` matches
-    ``.gatekit``), which the shell-glob checks do not assume: add each target
-    or removed path once more with such segments spelled ``.gatekit``."""
+    ``.gatekit`` and ``.gatebound``), which the shell-glob checks do not
+    assume: add each target or removed path once more per state directory
+    name, with such segments spelled as it (ADR-0029)."""
     from fnmatch import fnmatchcase
     for paths in (result.targets, result.removed):
         for path in list(paths):
             segs = path.split("/")
             if not any(c in seg for seg in segs for c in "*?["):
                 continue
-            variant = [paths_seg if not any(c in paths_seg for c in "*?[")
-                       or not fnmatchcase(".gatekit", paths_seg.lower()) else ".gatekit"
-                       for paths_seg in segs]
-            joined = "/".join(variant)
+            for state in _names.state_dirnames():
+                variant = [seg if not any(c in seg for c in "*?[")
+                           or not fnmatchcase(state, seg.lower()) else state
+                           for seg in segs]
+                joined = "/".join(variant)
+                if joined != path and joined not in paths:
+                    paths.append(joined)
+
+
+def _short_names(result: PSWriteTargets) -> None:
+    """Windows 8.3 short names reach the state directory too (``GATEKI~1``,
+    ``GATEBO~1``): add each target or removed path once more with them
+    spelled out."""
+    for paths in (result.targets, result.removed):
+        for path in list(paths):
+            joined = _SHORT_STATE_RE.sub(_spell_short, path)
             if joined != path and joined not in paths:
                 paths.append(joined)
 
@@ -1685,7 +1700,9 @@ def _flatten(text: str) -> str:
     return re.sub(r"[`]", "", re.sub(r"['\",()\[\]{}]", " ", text))
 
 
-_GATEKIT_RE = re.compile(r"(?i)(?:^|[\s\\/=:])gatekit(?:\.py)?(?=\s)")
+#: The fallback reading: a launcher or module of any name (ADR-0029).
+_GATEKIT_RE = re.compile(r"(?i)(?:^|[\s\\/=:])(?:-m)?%s(?:\.py|\.cli|\.__main__)?(?=\s)"
+                         % _names.names_pattern())
 _APPROVE_OPERANDS = ("--root", "--note", "--by")
 
 
@@ -1711,10 +1728,6 @@ def invokes_gatekit_approve(command: str) -> bool:
             if _approves(tail.split()):
                 return True
     return False
-
-
-_GATEKIT_WORD = re.compile(r"^(?:-m)?gatekit(?:\.py|\.cli|\.__main__)?$")
-_APPROVAL_MODULE = re.compile(r"^(?:-m)?gatekit\.approval(?:\.py)?$")
 
 
 def _approve_in_code(text: str, depth: int) -> bool:
@@ -1750,11 +1763,18 @@ def _element_approves(toks: List[_Tok]) -> bool:
         if tok.kind != "word" or tok.dynamic:
             computed_before = computed_before or index > 0
             continue
-        base = re.split(r"[\\/]", tok.value.lower())[-1]
-        if _APPROVAL_MODULE.match(base):
-            return _approve_rest(toks, index + 1, seen=True)
-        if _GATEKIT_WORD.match(base) and _approve_rest(toks, index + 1, seen=False):
+        # Every name, as the Bash gate reads it (ADR-0029); a computed word
+        # before a module counts as ``-m``.
+        prev = None
+        if index:
+            before = toks[index - 1]
+            prev = "$" if before.kind != "word" or before.dynamic else before.value
+        kind = _names.entry_kind(tok.value, prev)
+        if kind == "approval" and _approve_rest(toks, index + 1, seen=True):
             return True
+        if kind == "cli" and _approve_rest(toks, index + 1, seen=False):
+            return True
+        base = re.split(r"[\\/]", tok.value.lower())[-1]
         if base == "approve" and computed_before and _approve_rest(toks, index, seen=False):
             return True
     return False
@@ -1806,14 +1826,24 @@ def _approves(words: List[str]) -> bool:
     return seen_approve
 
 
-_SHORT_STATE_RE = re.compile(r"(?i)gateki~\d")
+#: 8.3 short names of every state directory (``GATEKI~1``, ``GATEBO~1``).
+_SHORT_STATE_RE = re.compile(
+    r"(?i)(%s)~\d" % "|".join(re.escape(stem) for stem, _ in _names.state_short_names()))
+
+
+def _spell_short(match: "re.Match[str]") -> str:
+    stem = match.group(1).lower()
+    for short, dirname in _names.state_short_names():
+        if short == stem:
+            return "/" + dirname
+    return match.group(0)  # pragma: no cover - the pattern holds only known stems
 
 
 def mention_text(command: str, found: PSWriteTargets) -> str:
     """The text the protected-state mention check reads for an opaque command:
     the command and every code string found inside it, each also with
     backticks, quotes and ``+`` concatenation removed and 8.3 short names of
-    ``.gatekit`` (``GATEKI~1``) spelled out."""
+    the state directories (``GATEKI~1``, ``GATEBO~1``) spelled out."""
     command = _normal(command)
     texts = [command] + list(found.texts) + _decoded_texts(command)
     out: List[str] = []
@@ -1822,4 +1852,4 @@ def mention_text(command: str, found: PSWriteTargets) -> str:
         joined = re.sub(r"\s*\+\s*", "", re.sub(r"['\"`]", "", text))
         out.append(joined)
         out.append(_flatten(text))
-    return _SHORT_STATE_RE.sub("/.gatekit", "\n".join(out))
+    return _SHORT_STATE_RE.sub(_spell_short, "\n".join(out))
