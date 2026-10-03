@@ -1359,7 +1359,11 @@ def _run_cmdlet(cmdlet: str, spec: dict, args: List[List[_Tok]], ctx: _Ctx, pipe
                     result.mark_opaque("variable in the new name")
                     continue
                 parent = posixpath.dirname(source)
-                _target(ctx, _Value(parent + "/" + new.text.replace("\\", "/"), False), why)
+                renamed = _target(ctx, _Value(parent + "/" + new.text.replace("\\", "/"), False),
+                                  why)
+                if renamed:
+                    # A rename is a move: judged by the copy rule like `mv`.
+                    result.copies.append(([source], renamed, [value.text.replace("\\", "/")]))
         return
 
 
@@ -1397,6 +1401,10 @@ def _new_item(binding: _Binding, ctx: _Ctx, piped: bool, why: str, kind: str) ->
             if path:
                 created.append(path)
     itemtypes = [v.text.lower() for v in binding.values("itemtype")]
+    if kind == "mkdir" or (itemtypes and all(t in ("directory", "d", "dir") for t in itemtypes)):
+        # ADR-0029 amendment: a plain directory, the one creation of a state
+        # directory name the model may make itself.
+        ctx.result.made_dirs.extend(created)
     if kind == "new" and any(t in _LINK_TYPES for t in itemtypes):
         for value in binding.values("target"):
             if value.dynamic:
@@ -1406,10 +1414,15 @@ def _new_item(binding: _Binding, ctx: _Ctx, piped: bool, why: str, kind: str) ->
             if linked:
                 ctx.result.linked.append(linked)
             text = value.text.replace("\\", "/")
-            if not posixpath.isabs(text) and not re.match(r"^[A-Za-z]:", text):
-                for link in created:
+            relative = not posixpath.isabs(text) and not re.match(r"^[A-Za-z]:", text)
+            for link in created:
+                if relative:
                     ctx.result.linked.append(posixpath.normpath(
                         posixpath.join(posixpath.dirname(link), text)))
+                # A link is a copy of its target under the link's name, so the
+                # copy rule (bash._copy_hit) judges a link named like a state
+                # directory as it judges `ln -s x .gatebound` (ADR-0028).
+                ctx.result.copies.append(([linked or link], link, [value.text]))
 
 
 def _copy_move(binding: _Binding, ctx: _Ctx, piped: bool, why: str, kind: str) -> None:
@@ -1518,6 +1531,7 @@ def _merge(into: PSWriteTargets, found: bash.WriteTargets) -> None:
     into.unresolved.extend(found.unresolved)
     into.linked.extend(_fix(p) for p in found.linked)
     into.subtrees.extend(_fix(p) for p in found.subtrees)
+    into.made_dirs.extend(_fix(p) for p in found.made_dirs)
     into.dollar.extend(d.lower() for d in found.dollar)
     into.assigns.update({k.lower(): v for k, v in found.assigns.items()})
     if found.opaque:

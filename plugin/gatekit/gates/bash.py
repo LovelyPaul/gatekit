@@ -136,7 +136,7 @@ class WriteTargets:
     """Result of :func:`extract_write_targets`."""
 
     __slots__ = ("targets", "opaque", "why", "removed", "copies", "cwds", "unresolved",
-                 "linked", "subtrees", "dollar", "assigns")
+                 "linked", "subtrees", "dollar", "assigns", "made_dirs")
 
     def __init__(self) -> None:
         self.targets: List[str] = []
@@ -159,6 +159,10 @@ class WriteTargets:
         #: ``VAR=value`` assignments seen earlier in the command.
         self.dollar: List[str] = []
         self.assigns: Dict[str, str] = {}
+        #: ADR-0029 amendment: targets a plain ``mkdir`` (or PowerShell
+        #: ``New-Item -ItemType Directory``) creates — the one way the model may
+        #: create a state directory itself (:func:`_state_dir_created`).
+        self.made_dirs: List[str] = []
         self.opaque: bool = False
         self.why: str = ""
 
@@ -706,6 +710,12 @@ def _analyze(words: List[str], result: WriteTargets, cwd: Optional[str],
     if name in ("cp", "mv", "ln", "install", "rsync"):
         positional = _positional(rest, consuming=("-t", "--target-directory", "-m", "-o", "-g"))
         target_dir = _target_directory(rest)
+        if name == "install" and any(a == "--directory" or re.match(r"^-[A-Za-z]*d", a)
+                                     for a in rest):
+            # `install -d a b`: every operand is a directory it creates.
+            for raw in positional:
+                _add(result, raw, cwd, "variable in install target")
+            return cwd
         if name == "ln" or (name == "cp" and _cp_links(rest)):
             _linked(positional, target_dir, result, cwd)
         if target_dir is None and len(positional) >= 2:
@@ -731,6 +741,10 @@ def _analyze(words: List[str], result: WriteTargets, cwd: Optional[str],
             positional = positional[1:]  # first positional is the mode/owner
         for target in positional:
             _add(result, target, cwd, "variable in %s target" % name)
+            if name == "mkdir":
+                resolved = _resolve(target, cwd)
+                if resolved:
+                    result.made_dirs.append(resolved)
             if name in ("rm", "rmdir", "unlink"):
                 resolved = _resolve(target, cwd)
                 if resolved:
@@ -970,6 +984,11 @@ def _copy_hit(root, sources: List[str], dest: str, raws: List[str]) -> Optional[
     dests = {_lower_abs(dest), _lower_abs(os.path.realpath(dest))}
     into_state = any(d.rsplit("/", 1)[-1] in _STATES for d in dests)
     into_parent = state.rsplit("/", 1)[0] in dests
+    if into_state and sources and not os.path.isdir(dest):
+        # ADR-0029 amendment: no such directory yet, so the copy, move or
+        # link *becomes* the state directory — whatever the source is called
+        # (`mv eval .gatebound` moves a directory the model filled).
+        return _STATE + "/"
     for source, raw in zip(sources, raws):
         base = _base(source)
         by_contents = raw.endswith("/") or raw.endswith("/.")
@@ -1015,6 +1034,38 @@ def protected_hit(root, command: str, found: WriteTargets) -> Optional[str]:
         return None
 
 
+def _state_dir_created(root, target: str, found: WriteTargets) -> Optional[str]:
+    """ADR-0029 amendment: *target* is named like a state directory and the
+    command would create, replace or link it — which only gatekit may do, or
+    a forged directory (a link, a renamed directory the model filled) could
+    become the one the hooks read. Left to the rules that already judge it:
+    a copy, move or link destination (:func:`_copy_hit`), and a plain
+    ``mkdir`` of the current name while its parent holds no other state
+    directory (what ``/gatekit:setup`` would make anyway)."""
+    name = write.state_dir_name(target)
+    if name is None:
+        return None
+    lowered = _lower_abs(target)
+    if any(_lower_abs(dest) == lowered for _, dest, _ in found.copies):
+        return None
+    if name == _STATE and any(_lower_abs(d) == lowered for d in found.made_dirs):
+        parent = os.path.dirname(write._canonical(target))
+        others = [s for s in _STATES if s != _STATE and _dir_holds_dir(parent, s)]
+        if not others:
+            return None
+    return name + "/"
+
+
+def _dir_holds_dir(parent: str, name: str) -> bool:
+    """True when *parent* has a directory (or a link) named *name*, any case."""
+    try:
+        return any(e.lower() == name and (os.path.isdir(os.path.join(parent, e))
+                                          or os.path.islink(os.path.join(parent, e)))
+                   for e in os.listdir(parent))
+    except OSError:
+        return False
+
+
 def _protected_hit(root, command: str, found: WriteTargets) -> Optional[str]:
     for target in found.targets:
         hit = write.protected_state(root, target)
@@ -1022,6 +1073,9 @@ def _protected_hit(root, command: str, found: WriteTargets) -> Optional[str]:
             return hit
         if _glob_state_hit(target):
             return _STATE + "/"
+        hit = _state_dir_created(root, target, found)
+        if hit:
+            return hit
     for removed in found.removed:
         hit = write.protected_state(root, removed)
         if hit:

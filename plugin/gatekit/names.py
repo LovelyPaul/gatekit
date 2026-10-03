@@ -88,17 +88,61 @@ def _state_rank(candidate: pathlib.Path) -> int:
     return 3
 
 
+#: Windows ``FILE_ATTRIBUTE_REPARSE_POINT``: junctions and symlinks both carry it.
+_REPARSE_POINT = 0x400
+
+
+def _is_link(path: pathlib.Path) -> bool:
+    """True for a symlink, a junction or any other reparse point."""
+    try:
+        info = os.lstat(str(path))
+    except OSError:
+        return False
+    if getattr(info, "st_file_attributes", 0) & _REPARSE_POINT:
+        return True
+    isjunction = getattr(os.path, "isjunction", None)  # Python 3.12+
+    return os.path.islink(str(path)) or bool(isjunction and isjunction(str(path)))
+
+
+def _usable_state_dir(root, candidate: pathlib.Path) -> bool:
+    """A candidate the hooks may read: a real directory (no link, junction or
+    reparse point) whose realpath lies directly in *root*'s realpath. A link
+    named ``.gatebound`` would otherwise let a session point the hooks at a
+    directory it filled itself (ADR-0029 amendment)."""
+    try:
+        if _is_link(candidate) or not candidate.is_dir():
+            return False
+        real = os.path.normcase(os.path.realpath(str(candidate)))
+        base = os.path.normcase(os.path.realpath(str(root)))
+        return os.path.dirname(real) == base
+    except (OSError, ValueError):
+        return False
+
+
 def resolve_state_dir(root) -> pathlib.Path:
     """``<root>/.gatebound`` if present, else ``.gatekit`` if present, else the
     current name. When several are present: the one holding
     ``approvals.json``, else one holding other gatekit-written state, else
-    the current name, else the newest (ADR-0029)."""
-    found = existing_state_dirs(root)
+    the current name — and on any tie the current name, then the newest.
+    A candidate that is a link, junction or reparse point, or whose realpath
+    is not directly in *root*, is ignored (ADR-0029 amendment)."""
+    found = [d for d in existing_state_dirs(root) if _usable_state_dir(root, d)]
     if not found:
         return pathlib.Path(root) / state_dirname()
     if len(found) > 1:
-        return min(found, key=_state_rank)  # stable: newest first among ties
+        current = state_dirname()
+        # stable: among equal ranks the current name, then newest first
+        return min(found, key=lambda d: (_state_rank(d), d.name != current))
     return found[0]
+
+
+def approvals_in_several(root) -> List[pathlib.Path]:
+    """Every state directory under *root* — link or not — that holds an
+    ``approvals.json``, when more than one does; else ``[]``. The Stop gate
+    then judges neither (ADR-0029 amendment)."""
+    base = pathlib.Path(root)
+    holding = [base / d for d in state_dirnames() if (base / d / "approvals.json").is_file()]
+    return holding if len(holding) > 1 else []
 
 
 # ----------------------------------------------------------------- argv

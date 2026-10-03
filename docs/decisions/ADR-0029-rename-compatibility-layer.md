@@ -119,6 +119,57 @@ before reading any file. ~/.claude is only ever read.
   1.0; `migrate --apply` moves it.
 - Out of scope here: the rename itself, any CHANGELOG or version change.
 
+## Amendment (2026-10-04): a forged state directory is never read
+
+Review finding, confirmed end to end: with restrictions off the PowerShell
+gate allowed `New-Item -ItemType SymbolicLink -Path .gatebound -Target X`,
+`New-Item -ItemType Junction -Path .gatebound -Value X` and
+`Rename-Item X -NewName .gatebound` (the Bash forms `ln -s`, `mv` were already
+denied by the copy rule). With a real `.gatekit/` and a `.gatebound` pointing
+at a directory the session filled with its own `approvals.json`, both ranked
+0 and the tie went to the newest name, so `paths.state_dir` returned the
+forged one. Four layers, each sufficient for the reported forms:
+
+1. **The PowerShell reader records renames and links as copies**
+   (ADR-0028): `Rename-Item`/`ren` is a move (source removed, copied to the
+   new name, like `Move-Item`), and `New-Item -ItemType
+   SymbolicLink|Junction|HardLink` is a copy of its target to the created
+   path, so `bash._copy_hit` judges both as it judges `mv` and `ln -s`.
+2. **A state directory name is gatekit's to create.** Any write, link,
+   rename or copy target whose final segment is a state directory name
+   (`write.state_dir_name`: case-insensitive, after the Windows
+   canonicalisation) is protected in the Bash, PowerShell and Write gates,
+   before and after approval. Two forms stay allowed: a plain `mkdir` /
+   `New-Item -ItemType Directory` of the **current** name while its parent
+   holds no other state directory (harmless — an empty directory — and what
+   `/gatekit:setup` creates anyway, in-process through `config.save`; no
+   command or doc asks the model to run it), and a copy into an **existing**
+   state directory, which the copy rule judges as before (`cp config.json
+   .gatekit/`). A copy, move or link whose destination is a state directory
+   name that does not exist yet becomes that directory, so it is denied
+   whatever the source is called (`mv eval .gatebound`). `install -d` is
+   read as creating its operands.
+3. **`resolve_state_dir` ignores links and prefers the current name.** A
+   candidate that is a symlink, junction or other reparse point
+   (`st_file_attributes & FILE_ATTRIBUTE_REPARSE_POINT` on Windows,
+   `os.path.isjunction` on 3.12+), or whose realpath is not directly in the
+   project root's realpath, is not a candidate: a project whose only state
+   directory is a link resolves to `.<CURRENT>/`. Among candidates of equal
+   rank the **current** name wins (`.gatekit/` today, `.gatebound/` after the
+   rename), then the newest. So with both holding `approvals.json`, the
+   hooks read `.<CURRENT>/`.
+4. **Two approvals files: the Stop gate judges neither.** When both state
+   directories (links included) hold `approvals.json`
+   (`names.approvals_in_several`), the Stop gate in `build`/`verify` records
+   `unverified` and blocks with a reason naming `/gatekit:doctor` and
+   `gatekit migrate`, under the usual `block_count` (at most `MAX_BLOCKS`)
+   and `stop_hook_active` limits, so it never traps the session. An archive
+   extracted at the root (`Expand-Archive x.zip .`, `tar -xf`, a documented
+   trust boundary of ADR-0027/0028) can still lay down a second state
+   directory; this is what makes that fail closed.
+
+Doctor axis 3 is unchanged: both names present is still `fail`.
+
 ### Checklist for the rename itself
 
 Values computed at import from `names.py` follow the flip without edits

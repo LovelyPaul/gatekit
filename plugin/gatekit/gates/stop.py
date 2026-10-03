@@ -104,6 +104,13 @@ _MESSAGES = {
         "stood_down_tier": "turn-tier",
         "stood_down_all": "contract",
         "stood_down_extra": ", {count} deferred to /gatekit:verify",
+        "two_states": (
+            "gatekit: both {dirs} hold approvals.json, so it is unclear which approval "
+            "and contract this project is under; the Stop gate judges neither and "
+            "records 'unverified' (not a pass). Run /gatekit:doctor, then "
+            "`gatekit migrate` (or remove the directory you did not create) so only "
+            "one state directory remains."
+        ),
         "no_turn_tier": (
             "  no turn-tier criteria: the Stop gate judges nothing at turn end "
             "during the build; /gatekit:verify runs them"
@@ -182,6 +189,13 @@ _MESSAGES = {
         "stood_down_tier": "turn 등급",
         "stood_down_all": "계약",
         "stood_down_extra": ", {count}개는 /gatekit:verify 로 미룸",
+        "two_states": (
+            "gatekit: {dirs} 모두에 approvals.json 이 있어 이 프로젝트가 어느 승인과 "
+            "계약 아래 있는지 알 수 없습니다. Stop 게이트는 어느 쪽도 판정하지 않고 "
+            "'unverified'(통과 아님)로 기록합니다. /gatekit:doctor 를 실행한 뒤 "
+            "`gatekit migrate` 로(또는 직접 만들지 않은 디렉터리를 지워) 상태 디렉터리를 "
+            "하나만 남기세요."
+        ),
         "no_turn_tier": (
             "  turn 등급 기준 없음: 빌드 중 Stop 게이트는 턴 끝에서 아무것도 "
             "판정하지 않음, /gatekit:verify 가 실행"
@@ -473,6 +487,28 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if not isinstance(led.data.get("stop"), dict):
         led.data["stop"] = ledger._blank_stop()
     stop_state = led.data["stop"]
+
+    # ADR-0029 amendment: two state directories both hold approvals.json —
+    # one may be forged (an archive, a link, a rename). Judge neither: block
+    # with `unverified` (at most MAX_BLOCKS times, never trapping the session).
+    several = names.approvals_in_several(root)
+    if several:
+        reason = _message(lang, "two_states", dirs=", ".join(d.name + "/" for d in several))
+        _finish(led, verdict.UNVERIFIED, [reason])
+        if bool(event.get("stop_hook_active")):
+            return hookio.allow()
+        try:
+            block_count = int(stop_state.get("block_count", 0))
+        except (TypeError, ValueError):
+            block_count = 0
+        if block_count >= MAX_BLOCKS:
+            return hookio.allow()
+        stop_state["block_count"] = block_count + 1
+        led.append_event("stop_blocked", {"verdict": verdict.UNVERIFIED,
+                                          "block_count": stop_state["block_count"],
+                                          "why": "two_states"})
+        led.save()
+        return hookio.block_stop(reason)
 
     # ADR-0024: the job this gate was armed for already has its verdict.
     # Judge nothing; `final_verdict` keeps what was recorded.

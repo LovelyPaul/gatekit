@@ -225,3 +225,17 @@ ADR-0029 landed on main while this gate was built; the two meet here.
 - `hooks.json` gains one PreToolUse entry; `doctor` requires `powershell.py`.
 - Tests are pure parsing and run on every OS; no `pwsh` is needed. The
   Windows CI job is the only run where `\`-paths resolve natively.
+
+## Amendment (2026-10-04): renames and links are copies
+
+Review finding (ADR-0029 amendment): `Rename-Item X -NewName .gatebound`,
+`New-Item -ItemType SymbolicLink -Path .gatebound -Target X` and the
+`Junction` form were allowed with restrictions off, so a session could put a
+forged state directory in place. The reader now records `Rename-Item` as a
+move — the source in `removed` and `([source], new path, [raw])` in
+`copies`, as `Move-Item` already did — and every `New-Item` link
+(`SymbolicLink`, `Junction`, `HardLink`) as a copy of its target to the
+created path, so the Bash gate's copy rule (`bash._copy_hit`) decides them
+exactly as it decides `mv` and `ln -s`. A plain `New-Item -ItemType
+Directory`/`mkdir`/`md` is recorded in `made_dirs`, the one creation of a
+state directory name left to the model (ADR-0029 amendment, layer 2).

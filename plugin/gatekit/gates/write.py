@@ -242,6 +242,19 @@ def _protected_tail(path: str) -> Optional[str]:
     return None
 
 
+def state_dir_name(raw_path: str) -> Optional[str]:
+    """The state directory name (``.gatekit``, ``.gatebound``; lowered) that
+    *raw_path*'s final segment spells — compared case-insensitively after the
+    Windows canonicalisation of :func:`_canonical` — else ``None``. Creating
+    or replacing a path so named is gatekit's alone (ADR-0029 amendment)."""
+    try:
+        text = _canonical(raw_path).rstrip("/")
+    except (TypeError, ValueError):
+        return None
+    base = os.path.normpath(text).replace("\\", "/").rsplit("/", 1)[-1].lower() if text else ""
+    return base if base in paths.STATE_DIRNAMES else None
+
+
 def protected_files(root: pathlib.Path) -> List[pathlib.Path]:
     """This project's key state files, as paths (they may not exist)."""
     return [paths.state_dir(root) / name for name in _KEY_FILES]
@@ -481,7 +494,8 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         targets = patch_targets(text if isinstance(text, str) else "")
         # ADR-0027: protected state is checked whether or not a rule is active.
         for target in targets:
-            found = protected_state(root, target)
+            found = protected_state(root, target) or (
+                state_dir_name(target) and state_dir_name(target) + "/")
             if found:
                 return deny_protected(found, session_lang(root, event))
         if not restrictions_active(root):
@@ -498,6 +512,10 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     raw_path = target_path(tool_input)
     if not raw_path:
         return hookio.allow()
+    named = state_dir_name(raw_path)
+    if named:
+        # ADR-0029 amendment: a file in place of a state directory.
+        return deny_protected(named + "/", session_lang(root, event))
     return decide_path(root, raw_path, session_lang(root, event))
 
 
