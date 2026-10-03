@@ -693,6 +693,12 @@ def classify_gate_result(gate: dict, argv=None, root=None, tasks=None) -> str:
         # only when it is a path some task writes (ADR-0022, as baseline).
         if scoped and runcheck.program_owner(first_arg, root, tasks)[1]:
             return "not_yet_runnable"
+        # A program under node_modules/.venv is missing until dependencies
+        # are installed: not yet runnable when a task writes the manifest,
+        # otherwise only suspicious — never a refusal.
+        dep = runcheck.dependency_program(first_arg, root, tasks if scoped else [])
+        if dep:
+            return "not_yet_runnable" if scoped and dep["owner"] else "suspicious"
         return "command_error"
     found = runcheck.missing_path_owner(gate, root, tasks, argv=argv) if scoped else None
     if isinstance(code, int) and code in COMMAND_ERROR_EXITS:
@@ -817,6 +823,12 @@ def preflight(root, jdir, tasks: list) -> dict:
                            if found and not found["owner"] else "")
                 broken.append("task %s gate `%s` (%s): %s%s" % (
                     task_id, gate.get("name"), gate.get("detail", ""), missing, tail.strip()))
+            elif kind == "suspicious" and could_not_run(gate):
+                dep = _missing_for_preflight(gate, gate_argv, root, tasks)
+                warnings.append(
+                    "%s: gate `%s` cannot run yet: needs %s, which no task in this job "
+                    "writes; starting anyway — install dependencies before the gate runs"
+                    % (task_id, gate.get("name"), dep["path"] if dep else gate.get("detail")))
             elif kind == "suspicious":
                 warnings.append(
                     "%s: gate `%s` failed at preflight (%s) in a way that may be the "
@@ -838,6 +850,11 @@ def _missing_for_preflight(gate: dict, argv, root, tasks):
     if could_not_run(gate):
         program = argv[0] if isinstance(argv, list) and argv else ""
         rel, owner = runcheck.program_owner(program, root, tasks)
+        dep = None if owner else runcheck.dependency_program(program, root, tasks)
+        if dep:
+            return {"path": "%s (installed into %s from %s)" % (dep["path"], dep["dir"],
+                                                                 dep["manifest"]),
+                    "owner": dep["owner"], "manifest": False, "argv_named": False}
         if rel is None:
             return None  # a bare name on PATH: the "could not run" tail says it
         return {"path": rel, "owner": owner, "manifest": False, "argv_named": True}

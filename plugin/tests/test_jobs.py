@@ -3002,6 +3002,42 @@ class TestNotYetRunnableReview(JobTestCase):
             gate, ["node", "x.js"], root=self.root,
             tasks=[{"id": "src", "write_scope": ["src/**"]}]), "not_yet_runnable")
 
+    def dep_gate_job(self, program: str, manifest_task: bool, manifest: str):
+        self.host_config()
+        tasks = [self.simple_task(task_id="user", target="src/u.txt",
+                                  gates=[{"name": "e2e", "argv": [program, "test"]}])]
+        if manifest_task:
+            tasks.insert(0, self.simple_task(task_id="shell", target=manifest))
+        self.write_tasks(*tasks)
+        return jobs.start(self.root)
+
+    def test_an_uninstalled_dependency_program_with_a_manifest_task_starts(self) -> None:
+        for program, manifest in (("./node_modules/.bin/playwright", "package.json"),
+                                  (".venv/bin/pytest", "pyproject.toml")):
+            with self.subTest(program=program):
+                job = self.dep_gate_job(program, True, manifest)
+                pre = json.loads((self.task_dir(job["job_id"], "user")
+                                  / "preflight.json").read_text())
+                self.assertEqual(pre["gates"][0]["preflight"], "not_yet_runnable")
+                self.assertIn("shell", pre["gates"][0]["preflight_detail"])
+                self.assertIn(manifest, pre["gates"][0]["preflight_detail"])
+                self.assertEqual(job["preflight_warnings"], [])
+
+    def test_an_uninstalled_dependency_program_without_one_warns_and_starts(self) -> None:
+        for program in ("./node_modules/.bin/playwright", ".venv/bin/pytest",
+                        "venv/bin/pytest"):
+            with self.subTest(program=program):
+                job = self.dep_gate_job(program, False, "")
+                self.assertEqual(len(job["preflight_warnings"]), 1)
+                self.assertIn(program[2:] if program.startswith("./") else program,
+                              job["preflight_warnings"][0])
+
+    def test_nonexistentprog_is_still_refused(self) -> None:
+        self.host_config()
+        self.write_tasks(self.simple_task(gates=[{"name": "g", "argv": ["nonexistentprog"]}]))
+        with self.assertRaises(jobs.GatePreflightError):
+            jobs.start(self.root)
+
     def test_a_manifest_refusal_names_package_json(self) -> None:
         self.host_config()
         text = ("npm error enoent Could not read package.json: Error: ENOENT: no such file or "

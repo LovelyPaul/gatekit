@@ -366,6 +366,26 @@ class TestScopeOwner(unittest.TestCase):
         self.assertFalse(runcheck.missing_path_owner(gate, "/work/app", tasks,
                                                      argv=["bash", "-c", "x"])["argv_named"])
 
+    def test_a_program_under_a_dependency_dir(self) -> None:
+        tasks = [{"id": "shell", "write_scope": ["package.json", "src/**"]},
+                 {"id": "py", "write_scope": ["pyproject.toml"]}]
+        dep = runcheck.dependency_program("./node_modules/.bin/playwright", "/work/app", tasks)
+        self.assertEqual((dep["dir"], dep["manifest"], dep["owner"]),
+                         ("node_modules", "package.json", "shell"))
+        dep = runcheck.dependency_program(".venv/bin/pytest", "/work/app", tasks)
+        self.assertEqual((dep["dir"], dep["manifest"], dep["owner"]),
+                         (".venv", "pyproject.toml", "py"))
+        dep = runcheck.dependency_program("web/node_modules/.bin/vite", "/work/app", tasks)
+        self.assertEqual((dep["manifest"], dep["owner"]), ("web/package.json", None))
+        dep = runcheck.dependency_program("venv/bin/pytest", "/work/app", [])
+        self.assertEqual((dep["dir"], dep["owner"]), ("venv", None))
+        self.assertIsNone(runcheck.dependency_program("bin/run-e2e", "/work/app", tasks))
+        self.assertIsNone(runcheck.dependency_program("playwright", "/work/app", tasks))
+
+    def test_dependency_dirs_are_ones_the_fingerprint_skips(self) -> None:
+        from gatekit import contract
+        self.assertTrue(set(runcheck.DEPENDENCY_MANIFESTS) <= contract.FINGERPRINT_SKIP_DIRS)
+
     def test_interpreters(self) -> None:
         for prog in ("bash", "/bin/sh", "zsh", "node", "python3", "/usr/bin/python3.12",
                      "python.exe", "ruby", "deno", "bun", "tsx", "ts-node"):

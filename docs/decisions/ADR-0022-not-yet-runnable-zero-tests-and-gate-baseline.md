@@ -93,8 +93,20 @@ tasks, using the write gate's own matcher (`gates/write.py: matches`), so
 - A program that could not be executed at all (`run_gates` gets an
   `OSError`) is recorded with `could not run: <error>` in `stderr_tail`, so
   the classifier sees it. It is `not_yet_runnable` when argv[0] is a path a
-  task writes, and `command_error` otherwise. This is the same rule
-  `contract baseline` applies, so both agree.
+  task writes. A program path inside a dependency directory
+  (`node_modules`, `.venv`, `venv`, all skipped by the tree fingerprint, such
+  as `./node_modules/.bin/playwright` or `.venv/bin/pytest`) is missing until
+  dependencies are installed. It is `not_yet_runnable` when a task writes a
+  manifest beside that directory: `package.json` for `node_modules`, and for
+  `.venv`/`venv` one of `pyproject.toml`, `requirements.txt`,
+  `requirements-dev.txt`, `setup.py`, `setup.cfg`, `Pipfile`, `poetry.lock`
+  or `uv.lock`. The detail names that task. Without such a task it is
+  `suspicious`: the job starts with a warning saying the dependencies are
+  not installed, as before 0.14.0. It is never `command_error`. Anything
+  else that cannot be executed is `command_error`. `contract baseline`
+  applies the same rule, so both agree, with one mapping: baseline has no
+  `suspicious` class, and an uninstalled dependency program no task
+  provides for is `unverified` there, since nothing was judged.
 - When the covered path is one of the gate's own arguments, `jobs start`
   prints one `note:` line per task naming the path and the task that writes
   it. It is a notice, not a warning, and is recorded as
@@ -219,10 +231,15 @@ approved. There is no "skip after a budget-only edit" shortcut.
 - `/gatekit:gate` costs one contract run, the one `gate-criteria.md` already
   asked for, or two when the measurement leads to a budget edit. Preflight's added cost is a few regexes over output it already
   holds, plus glob matching against the job's scopes.
-- New refusal surface: npm without a manifest that no task writes. That job
-  could not have passed anyway. A program given as a path that cannot be
-  executed and that no task writes is also refused now; before, preflight
-  recorded no output for it and started silently.
+- New refusal surface, in full:
+  - npm without a manifest that no task writes. That job could not have
+    passed anyway.
+  - A program that cannot be started at all and that no task writes, whether
+    a bare name (`nonexistentprog`) or a path (`bin/run-e2e`), is now
+    refused at preflight with exit 4. Before 0.14.0, `run_gates` recorded no
+    output for an `OSError`, so preflight started such a job silently. The
+    exception is a program inside `node_modules`, `.venv` or `venv`, which
+    warns and starts as before.
 - Trade-off: a typo'd path inside a broad scope (`python3 src/tset_app.py`
   with scope `src/**`) was refused before 0.14.0 and now starts, because a
   task could write that path. The gate fails after the task runs instead of

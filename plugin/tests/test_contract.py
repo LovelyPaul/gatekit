@@ -813,6 +813,21 @@ class TestBaseline(TempProject):
                                                 "unowned": "command_error",
                                                 "script": "not_yet_runnable"})
 
+    def test_uninstalled_dependency_programs(self) -> None:
+        self.write_tasks({**self.shell_task(), "write_scope": ["package.json"]})
+        self.write_gate(
+            {"id": "pw", "argv": ["./node_modules/.bin/playwright", "test"]},
+            {"id": "py", "argv": [".venv/bin/pytest"]},
+            {"id": "missing", "argv": ["nonexistentprog"]},
+        )
+        contract.derive(self.root)
+        result = contract.baseline(self.root)
+        by_id = {c["id"]: c for c in result["criteria"]}
+        self.assertEqual(self.classes(result), {"pw": "not_yet_runnable", "py": "unverified",
+                                                "missing": "command_error"})
+        self.assertIn("shell-login", by_id["pw"]["detail"])
+        self.assertIn("pyproject.toml", by_id["py"]["detail"])
+
     def test_baseline_json_is_written(self) -> None:
         self.write_gate({"id": "passes", "argv": emitting(stdout="ok\n")})
         data = contract.derive(self.root)

@@ -678,6 +678,15 @@ def _classify_baseline(root, item: Dict[str, Any], argv: List[str],
             rel, owner = runcheck.program_owner(program, root, tasks)
             if owner:
                 return "not_yet_runnable", "needs %s, which task %s writes" % (rel, owner)
+            dep = runcheck.dependency_program(program, root, tasks)
+            if dep and dep["owner"]:
+                return "not_yet_runnable", "needs %s, installed from %s, which task %s writes" % (
+                    dep["path"], dep["manifest"], dep["owner"])
+            if dep:
+                # As preflight's warn-and-start: dependencies not installed is
+                # not a broken command, and nothing was judged.
+                return "unverified", "cannot execute %s: dependencies not installed (%s, " \
+                    "which no task writes)" % (dep["path"], dep["manifest"])
             return "command_error", "cannot execute %s and no task writes it" % (program or "argv")
         return "unverified", item.get("detail") or _first_line(stderr) or "not verified"
     gate = {"verdict": verdict.FAIL, "exit": item.get("exit"),

@@ -26,9 +26,12 @@ approval (ADR-0022). Found on a real job where 7 of 10 tasks warned about a
   there now shows only after that task runs. npm missing a `package.json`
   that no task writes is refused with exit 4 and the message names
   `package.json`. A refusal for a missing script names the path and says no
-  task writes it. A program path that cannot be executed and that no task
-  writes is refused too; before, preflight saw no output for it and started
-  silently. `..` segments and symlinked prefixes (`/var` vs `/private/var`)
+  task writes it. A program that cannot be started at all and that no task
+  writes, bare name or path, is refused too; before, preflight saw no output
+  for it and started silently. A program inside `node_modules`, `.venv` or
+  `venv` (`./node_modules/.bin/playwright`, `.venv/bin/pytest`) is not
+  refused: it starts silently when a task writes `package.json` (or
+  `pyproject.toml`, `requirements.txt`, …) and with a warning otherwise. `..` segments and symlinked prefixes (`/var` vs `/private/var`)
   in a message no longer hide the owner.
 - **Zero tests is `unverified`.** A gate or criterion whose runner ran no
   tests is `unverified` with `ran no tests (<runner>)`, not `ok`. This

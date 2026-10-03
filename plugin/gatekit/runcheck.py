@@ -359,3 +359,48 @@ def program_owner(program: Any, root: Any,
         return None, None
     rel = relativize(text, root)
     return rel, (scope_owner(rel, tasks) if rel else None)
+
+
+#: Directories a package manager fills from a manifest, and the manifests
+#: that can fill each. A program under one is missing until dependencies are
+#: installed, which is not a broken command. Each name is also skipped by
+#: `contract.tree_fingerprint` (FINGERPRINT_SKIP_DIRS).
+DEPENDENCY_MANIFESTS = {
+    "node_modules": ("package.json",),
+    ".venv": ("pyproject.toml", "requirements.txt", "requirements-dev.txt", "setup.py",
+              "setup.cfg", "Pipfile", "poetry.lock", "uv.lock"),
+    "venv": ("pyproject.toml", "requirements.txt", "requirements-dev.txt", "setup.py",
+             "setup.cfg", "Pipfile", "poetry.lock", "uv.lock"),
+}
+
+
+def dependency_program(program: Any, root: Any,
+                       tasks: Optional[Iterable[Dict[str, Any]]]) -> Optional[Dict[str, Any]]:
+    """For a program path inside a dependency directory (``node_modules``,
+    ``.venv``, ``venv``): ``{"path", "dir", "manifest", "owner"}``.
+
+    ``manifest`` sits beside the directory (``web/node_modules/.bin/x`` →
+    ``web/package.json``); ``owner`` is the first task whose write_scope
+    covers one of that directory's manifests, and ``manifest`` is then that
+    one, else the first candidate. None for a bare name or any other path.
+    """
+    text = str(program or "")
+    if "/" not in text and "\\" not in text:
+        return None
+    rel = relativize(text, root)
+    if rel is None:
+        return None
+    parts = rel.split("/")
+    for index, part in enumerate(parts[:-1]):
+        names = DEPENDENCY_MANIFESTS.get(part)
+        if not names:
+            continue
+        base = "/".join(parts[:index])
+        candidates = ["%s/%s" % (base, n) if base else n for n in names]
+        tasks = list(tasks or [])
+        for candidate in candidates:
+            owner = scope_owner(candidate, tasks)
+            if owner:
+                return {"path": rel, "dir": part, "manifest": candidate, "owner": owner}
+        return {"path": rel, "dir": part, "manifest": candidates[0], "owner": None}
+    return None
