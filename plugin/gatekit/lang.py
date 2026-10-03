@@ -14,6 +14,7 @@ English on ``src/hello.ts 만들어줘`` before this rule existed.
 """
 from __future__ import annotations
 
+import itertools
 import re
 import sys
 import unicodedata
@@ -125,6 +126,9 @@ SPEC_LANG_LINES = 40
 #: Raw lines scanned at most while collecting the head, so a file that is
 #: nearly all code or tables is never read to the end.
 SPEC_LANG_SCAN_LINES = 1000
+#: A leading `---` opens YAML frontmatter only when a closing `---` (or
+#: `...`) follows within this many lines; a UTF-8 BOM before it is ignored.
+SPEC_FRONTMATTER_LINES = 60
 _INLINE_CODE_RE = re.compile(r"`+[^`\n]*`+")
 _FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
@@ -132,22 +136,27 @@ _FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 def prose_head(lines, limit: int = SPEC_LANG_LINES) -> str:
     """The first *limit* prose lines of a Markdown file's *lines*.
 
-    Skips a leading YAML frontmatter block, fenced code blocks, table rows
-    (lines starting with ``|``) and blank lines, and drops inline code spans
-    from what is kept.
+    Skips a leading YAML frontmatter block (closed within
+    :data:`SPEC_FRONTMATTER_LINES` lines; a BOM before it is ignored), fenced
+    code blocks, table rows (lines starting with ``|``) and blank lines, and
+    drops inline code spans from what is kept.
     """
+    lines = iter(lines)
+    head = list(itertools.islice(lines, SPEC_FRONTMATTER_LINES + 1))
+    if head and head[0].startswith("\ufeff"):
+        head[0] = head[0][1:]
+    start = 0
+    if head and head[0].strip() == "---":
+        # Frontmatter only when it closes in time; otherwise the `---` is a
+        # thematic break and the lines after it are read as usual.
+        for index in range(1, len(head)):
+            if head[index].strip() in ("---", "..."):
+                start = index + 1
+                break
     kept = []
     fence = None
-    in_frontmatter = False
-    for index, line in enumerate(lines):
+    for line in itertools.chain(head[start:], lines):
         stripped = line.strip()
-        if index == 0 and stripped == "---":
-            in_frontmatter = True
-            continue
-        if in_frontmatter:
-            if stripped in ("---", "..."):
-                in_frontmatter = False
-            continue
         match = _FENCE_RE.match(line)
         if fence is not None:
             if match and match.group(1)[0] == fence[0] and len(match.group(1)) >= len(fence):

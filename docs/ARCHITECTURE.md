@@ -563,7 +563,8 @@ must say so once.
 
 `from_spec(root) -> "ko" | "en" | None` (ADR-0026): `detect` over the first
 40 prose lines (`prose_head`: headings, paragraphs and list items; YAML
-frontmatter, fenced code, table rows and inline code are skipped; at most
+frontmatter (after a UTF-8 BOM too, and only when it closes within 60
+lines — otherwise the `---` is a thematic break), fenced code, table rows and inline code are skipped; at most
 1000 raw lines scanned) of `spec/01-prd.md`, else `spec/00-discovery.md` —
 the first that carries a signal; `None` when neither does. The prompt gate uses it only while
 no prompt in the session has carried a signal (ledger `lang_source` is `null`

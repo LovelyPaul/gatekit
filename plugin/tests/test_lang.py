@@ -155,6 +155,30 @@ class TestFromSpec(unittest.TestCase):
         self.write("01-prd.md", "```ts\nconst a = 1\n```\n| a | b |\n|---|---|\n")
         self.assertIsNone(lang.from_spec(self.root))
 
+    def test_frontmatter_after_a_bom_is_skipped(self) -> None:
+        # Review of 0.16.2: a BOM hid the opening `---`, so the English
+        # frontmatter was read as prose.
+        self.write("01-prd.md", (
+            "\ufeff---\ntitle: Checkout API product requirements\n"
+            "owner: platform team payments squad\nstatus: draft\n---\n"
+            "# 결제 개선\n결제 실패를 줄인다.\n"))
+        self.assertEqual(lang.from_spec(self.root), "ko")
+
+    def test_unclosed_frontmatter_is_not_swallowed(self) -> None:
+        # Review of 0.16.2: a leading `---` with no close hid the whole file.
+        self.write("01-prd.md", "---\n# 제목\n결제 실패를 줄인다.\n")
+        self.assertEqual(lang.from_spec(self.root), "ko")
+
+    def test_frontmatter_closed_too_late_is_a_thematic_break(self) -> None:
+        text = "---\n" + "결제 실패를 줄인다.\n" * 70 + "---\n"
+        self.assertTrue(lang.prose_head(text.splitlines(True)).startswith("---\n결제"))
+
+    def test_frontmatter_closed_within_the_limit_is_skipped(self) -> None:
+        text = "---\n" + "key: value\n" * 58 + "---\n# 제목\n"
+        self.assertEqual(lang.prose_head(text.splitlines(True)), "# 제목")
+        # From a generator, as from_spec passes it.
+        self.assertEqual(lang.prose_head(iter(text.splitlines(True))), "# 제목")
+
     def test_spec_without_letters_is_none(self) -> None:
         self.write("01-prd.md", "---\n1. 2. 3.\n")
         self.assertIsNone(lang.from_spec(self.root))

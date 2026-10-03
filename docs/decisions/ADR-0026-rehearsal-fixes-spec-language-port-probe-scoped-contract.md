@@ -234,3 +234,13 @@ A1 made `.gatekit/eval/**` writable for the CLI evaluator, but the brief
 still said any attempt to write is a finding. It now names `.gatekit/eval/`
 in the project root as the one exception for scratch files and says nothing
 is written outside the project, as `spec-kit/evaluator-brief.md` does.
+
+### B4. Frontmatter is recognised after a BOM and only when it closes
+
+A2 skipped frontmatter only when line 0 was exactly `---`, and once opened
+skipped everything up to a closing `---`. A file saved with a UTF-8 BOM had
+its English frontmatter read as prose, and a file starting with a thematic
+break and no closing `---` was skipped whole. `lang.prose_head` now strips a
+BOM from line 0 before the check, and treats the block as frontmatter only
+when a closing `---` (or `...`) appears within the next 60 lines; otherwise
+line 0 is read as a thematic break and the lines after it as usual.
