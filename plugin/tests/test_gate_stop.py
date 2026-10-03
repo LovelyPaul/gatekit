@@ -11,7 +11,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gatekit import contract, ledger  # noqa: E402
+from gatekit import approval, contract, ledger  # noqa: E402
 from gatekit.gates import stop as stop_gate  # noqa: E402
 
 GATE_SCRIPT = pathlib.Path(__file__).resolve().parents[1] / "gatekit" / "gates" / "stop.py"
@@ -36,6 +36,8 @@ class StopProject(unittest.TestCase):
         )
         self.gate_md.write_text(body, encoding="utf-8")
         contract.derive(self.root)
+        # ADR-0027: the Stop gate judges only an approved gate.
+        approval.approve(self.root, "spec/05-gate.md")
 
     def passing(self) -> None:
         self.write_contract({"id": "ok-crit", "argv": [PY, "-c", "pass"], "timeout_s": 20})
@@ -297,6 +299,7 @@ class TestStopGateCapsDeclaredBudget(StopProject):
         )
         self.gate_md.write_text(body, encoding="utf-8")
         contract.derive(self.root)
+        approval.approve(self.root, "spec/05-gate.md")
         self.set_pipeline("build")
         seen = {}
         original = contract.execute

@@ -88,7 +88,11 @@ Report in `output_lang`, in this order:
    (ADR-0023): "<task> passed only after its own test changed — review the
    diff of <paths>". Its verdict stays `passed`; this is for the reviewer.
    A contract run that comes back `grading_unapproved` means a test the user
-   approved changed and was re-derived: route to `/gatekit:gate`.
+   approved changed and was re-derived: route to `/gatekit:gate`. One that
+   comes back `gate_not_approved` (the approval no longer fits `05-gate.md`)
+   or `contract_mismatch` (`contract.json` is not what `05-gate.md` derives)
+   judged nothing (ADR-0027): report it as `unverified` and route to
+   `/gatekit:gate`; never edit `.gatekit/` files to clear it.
 
 Rules for the report:
 

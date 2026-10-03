@@ -400,6 +400,97 @@ def unapproved_grading(root: pathlib.Path) -> List[str]:
     return sorted(changed)
 
 
+#: ADR-0027: reasons :func:`integrity` gives before any criterion runs.
+#: ``gate_not_approved``: ``approve check spec/05-gate.md`` is not ``ok``
+#: (no approval, a stale one, or — with :data:`GRADING_UNAPPROVED_REASON` as
+#: the second reason — a pinned grading file the contract no longer records).
+GATE_NOT_APPROVED_REASON = "gate_not_approved"
+#: ``contract_mismatch``: ``contract.json`` is not what ``05-gate.md`` derives.
+CONTRACT_MISMATCH_REASON = "contract_mismatch"
+
+_ABSENT = object()
+
+
+def mismatch(root: pathlib.Path) -> List[str]:
+    """What differs between ``contract.json`` and ``05-gate.md`` parsed again
+    in memory (ADR-0027), as short strings; empty when they agree or there is
+    no contract.
+
+    Compared: ``total_budget_s`` and the ordered criteria with every field but
+    ``grading`` (extra keys included). ``grading`` is compared by its keys —
+    each recorded path must be a grading file of the criterion's argv now, or
+    be absent — not by hash: a grading file changing after derive is ADR-0023's
+    per-criterion ``unverified``, and the approved hashes are the approval's
+    pins, which :func:`integrity` checks first.
+    """
+    data = load(root)
+    if data is None:
+        return []
+    try:
+        budget, criteria = _parse_gate(root)
+    except (OSError, ValueError, TypeError) as err:
+        return ["spec/05-gate.md does not parse: %s" % str(err)[:80]]
+    out: List[str] = []
+    if data.get("total_budget_s") != budget:
+        out.append("total_budget_s")
+    recorded = data.get("criteria")
+    if not isinstance(recorded, list) or not all(isinstance(c, dict) for c in recorded):
+        return out + ["criteria"]
+    want_ids = [c["id"] for c in criteria]
+    have_ids = [c.get("id") for c in recorded]
+    if want_ids != have_ids:
+        return out + ["criterion ids: %s, gate declares %s" % (
+            ", ".join(str(i) for i in have_ids) or "none", ", ".join(want_ids) or "none")]
+    for want, have in zip(criteria, recorded):
+        ident = want["id"]
+        keys = sorted((set(want) | set(have)) - {"grading"})
+        for key in keys:
+            if want.get(key, _ABSENT) != have.get(key, _ABSENT):
+                out.append("%s: %s" % (ident, key))
+        grading = have.get("grading", {})
+        if not isinstance(grading, dict):
+            out.append("%s: grading" % ident)
+            continue
+        allowed = set(runcheck.grading_files(want["argv"], root))
+        for rel in sorted(str(r) for r in grading):
+            if rel not in allowed and os.path.lexists(os.path.join(str(root), *rel.split("/"))):
+                out.append("%s: grading %s" % (ident, rel))
+    return out
+
+
+def _refusal(reasons: List[str], **extra: Any) -> Dict[str, Any]:
+    result: Dict[str, Any] = {"verdict": verdict.UNVERIFIED, "criteria": [],
+                              "reasons": list(reasons)}
+    result.update(extra)
+    return result
+
+
+def integrity(root: pathlib.Path, require_approval: bool = True) -> Optional[Dict[str, Any]]:
+    """``None`` when the contract may be judged, else the ``unverified``
+    result to report instead (ADR-0027), checked in order: ``contract_stale``,
+    ``gate_not_approved`` (only with *require_approval*), ``contract_mismatch``.
+    ``None`` also when there is no contract: :func:`execute` reports that.
+
+    The Stop gate and ``contract run`` require the approval; ``contract
+    baseline`` does not, because ``/gatekit:gate`` runs it before approval.
+    """
+    if load(root) is None:
+        return None
+    if status(root) != verdict.OK:
+        return _refusal([STALE_REASON])
+    if require_approval:
+        found, changed = approval.check_gate(root)
+        if found != verdict.OK:
+            if changed:
+                return _refusal([GATE_NOT_APPROVED_REASON, GRADING_UNAPPROVED_REASON],
+                                approval=found, unapproved_grading=list(changed))
+            return _refusal([GATE_NOT_APPROVED_REASON], approval=found)
+    diff = mismatch(root)
+    if diff:
+        return _refusal([CONTRACT_MISMATCH_REASON], mismatch=diff)
+    return None
+
+
 def load(root: pathlib.Path) -> Optional[Dict[str, Any]]:
     """Read ``.gatekit/contract.json``, or ``None`` when absent/corrupt."""
     try:
@@ -841,6 +932,9 @@ def save_last(root: pathlib.Path, result: Dict[str, Any]) -> None:
     data = load(root) or {}
     record = {
         "source_sha256": data.get("source_sha256"),
+        # ADR-0027: the exact contract file judged; `.gatekit` is outside the
+        # tree fingerprint, so an edited contract.json must not reuse this.
+        "contract_sha256": approval.sha256_file(paths.contract_file(root)),
         "fingerprint": tree_fingerprint(root),
         # ADR-0022: a result judged under other no-tests signatures (or before
         # there were any) must not be reused.
@@ -862,6 +956,9 @@ def same_tree_record(root: pathlib.Path) -> Optional[Dict[str, Any]]:
     if not last or not data or status(root) != verdict.OK:
         return None
     if last.get("source_sha256") != data.get("source_sha256"):
+        return None
+    if not last.get("contract_sha256") or (
+            last.get("contract_sha256") != approval.sha256_file(paths.contract_file(root))):
         return None
     if "signatures_sha256" not in last or (
             last.get("signatures_sha256") != runcheck.signatures_digest()):
@@ -975,6 +1072,11 @@ def baseline(root: pathlib.Path, total_budget_s: Optional[float] = None) -> Dict
         raise ValueError("no contract: run `gatekit contract derive` first")
     if status(root) != verdict.OK:
         raise ValueError(STALE_REASON)
+    # ADR-0027: run before approval by /gatekit:gate, so the approval is not
+    # required here; the contract must still be what 05-gate.md derives.
+    refused = integrity(root, require_approval=False)
+    if refused is not None:
+        raise ValueError("%s: %s" % (refused["reasons"][0], "; ".join(refused.get("mismatch") or [])))
     started = time.monotonic()
     result = execute(root, total_budget_s=total_budget_s)
     elapsed = round(time.monotonic() - started, 3)
@@ -1052,7 +1154,8 @@ def run(argv: List[str]) -> int:
         broken = any(r["class"] == "command_error" for r in record["criteria"])
         return 4 if broken else 0
 
-    result = execute(root, total_budget_s=args.budget)
+    # ADR-0027: the approval and the contract are checked before any criterion.
+    result = integrity(root) or execute(root, total_budget_s=args.budget)
     if result.get("criteria"):
         # Recorded so the Stop gate ending this turn can reuse it (ADR-0020);
         # this command itself never reuses anything.
@@ -1066,6 +1169,10 @@ def run(argv: List[str]) -> int:
         print(result["verdict"])
         for reason in result["reasons"]:
             print(f"  - {reason}")
+        for line in result.get("mismatch") or []:
+            print(f"    {line}")
+        if result.get("unapproved_grading"):
+            print("    " + ", ".join(result["unapproved_grading"]))
     return 0 if result["verdict"] == verdict.OK else 1
 
 

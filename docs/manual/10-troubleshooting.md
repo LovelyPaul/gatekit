@@ -28,6 +28,9 @@ gatekit을 쓰다 보면 **막히는 일이 자주 생긴다.** 그게 이 도�
 | 계약이 stale | `05-gate.md`가 파생 이후 변경됨, 또는 디자인 입력(`02-screens.md`, `02-design.md`, `tokens.json`)이 바뀜 — `contract status`가 바뀐 파일명을 알려준다 | `/gatekit:tasks` 후 `/gatekit:gate` 재실행 (디자인이 바뀐 경우), 또는 `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract derive` 재실행 (05만 바뀐 경우). 승인도 만료됐으면 다시 승인 |
 | `approve check`가 `fail` | 승인 후 파일이 바뀜 | 사용자가 다시 읽고 다시 승인. 해시를 맞추려고 파일을 되돌리면 안 된다 |
 | `approve check`가 `unverified` | 승인 기록 자체가 없음 | `/gatekit:gate`를 처음부터 실행 |
+| Stop 게이트·`contract run`이 `gate_not_approved` | `05-gate.md` 승인이 없거나 맞지 않음(파일 또는 `approvals.json`이 바뀜) | 바뀐 것을 되돌리고 승인된 기준대로 코드를 고친다. 게이트를 바꿔야 하면 `/gatekit:gate`로 새로 승인 (ADR-0027) |
+| Stop 게이트·`contract run`이 `contract_mismatch` | `contract.json`이 `05-gate.md`에서 파생한 내용과 다름(직접 수정됨) | `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract derive`로 복원 후 코드를 고친다. 기준을 바꿔야 하면 `/gatekit:gate` (ADR-0027) |
+| `.gatekit/approvals.json`·`contract.json` 쓰기가 거부됨 | 두 파일은 gatekit CLI(`approve`, `contract derive`)만 쓴다 | 직접 고치지 말고 `/gatekit:gate`를 다시 실행 (ADR-0027) |
 | `approve check`가 `fail`이고 stderr에 `grading files changed` | 승인한 기준의 테스트 파일이 바뀐 채 다시 derive됨 (`grading_unapproved`) | 의도한 변경이면 `/gatekit:gate`로 재승인, 아니면 테스트 변경을 되돌린다 (ADR-0023) |
 | 워커 없음 (`workers check`가 `fail`) | 기본 백엔드 바이너리가 PATH에 없음 | 해당 CLI 설치, 또는 `workers set-default <name>`으로 다른 백엔드 지정 |
 | codex가 비활성 | 기본값이 `"enabled": false` | `/gatekit:setup codex` 실행. 설명을 읽고 확인해야 켜진다 |

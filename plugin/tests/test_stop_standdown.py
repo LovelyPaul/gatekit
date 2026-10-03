@@ -14,7 +14,7 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from gatekit import config, contract, doctor, hookio, jobs, ledger, spec, verdict  # noqa: E402
+from gatekit import approval, config, contract, doctor, hookio, jobs, ledger, spec, verdict  # noqa: E402
 from gatekit.gates import prompt as prompt_gate  # noqa: E402
 from gatekit.gates import stop as stop_gate  # noqa: E402
 
@@ -78,6 +78,8 @@ class Project(unittest.TestCase):
         body += "".join("```gatekit-criterion\n" + json.dumps(c) + "\n```\n" for c in criteria)
         self.gate_md.write_text(body, encoding="utf-8")
         contract.derive(self.root)
+        # ADR-0027: the Stop gate judges only an approved gate.
+        approval.approve(self.root, "spec/05-gate.md")
 
     def write_config(self, obj: dict) -> None:
         (self.root / ".gatekit" / "config.json").write_text(json.dumps(obj), encoding="utf-8")

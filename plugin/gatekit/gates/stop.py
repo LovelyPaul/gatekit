@@ -33,6 +33,13 @@ ADR-0024 bounds what the gate judges:
   allowed (no block spent), ``unverified`` is recorded and the gate does not
   stand down. The next Stop runs the deferred ones first and keeps what the
   same tree already judged, so it converges.
+
+ADR-0027: before judging, the gate checks the approval and the contract
+themselves (:func:`gatekit.contract.integrity`): an approval of
+``spec/05-gate.md`` that is not ``ok`` is ``gate_not_approved``, and a
+``contract.json`` that is not what ``05-gate.md`` derives is
+``contract_mismatch``. Both are ``unverified`` and block like any other
+``unverified``; neither is recorded or reused.
 """
 from __future__ import annotations
 
@@ -127,6 +134,21 @@ _MESSAGES = {
             "  If the change is intended, re-run /gatekit:gate to re-approve; "
             "otherwise revert it."
         ),
+        "not_approved": (
+            "gatekit: spec/05-gate.md is not approved as it stands (approval: "
+            "{status}), so completion cannot be judged (gate_not_approved). "
+            "If the gate or its approval was changed, restore it and fix the code "
+            "against the approved criteria; if the gate must change, re-run "
+            "/gatekit:gate for a new approval."
+        ),
+        "mismatch": (
+            "gatekit: .gatekit/contract.json is not what spec/05-gate.md declares "
+            "({diff}), so completion cannot be judged (contract_mismatch). Only "
+            "`contract derive` writes it: run `" + paths.cli_invocation() +
+            " contract derive` to restore it from the approved gate and fix the "
+            "code; if the criteria must change, re-run /gatekit:gate for a new "
+            "approval."
+        ),
         "unapproved": (
             "gatekit: grading files changed after spec/05-gate.md was approved and "
             "the contract was re-derived, so completion cannot be judged "
@@ -188,6 +210,19 @@ _MESSAGES = {
             "  승인 이후 작업을 채점하는 파일이 바뀌었습니다: {paths}\n"
             "  의도한 변경이면 /gatekit:gate 를 다시 실행해 재승인하고, 아니면 "
             "변경을 되돌리세요."
+        ),
+        "not_approved": (
+            "gatekit: spec/05-gate.md 가 현재 상태로 승인되어 있지 않아(승인: "
+            "{status}) 완료 여부를 판정할 수 없습니다 (gate_not_approved). "
+            "게이트나 승인이 바뀌었다면 되돌린 뒤 승인된 기준에 맞게 코드를 고치고, "
+            "게이트를 바꿔야 한다면 /gatekit:gate 를 다시 실행해 새로 승인받으세요."
+        ),
+        "mismatch": (
+            "gatekit: .gatekit/contract.json 이 spec/05-gate.md 가 선언한 내용과 "
+            "다르므로({diff}) 완료 여부를 판정할 수 없습니다 (contract_mismatch). "
+            "이 파일은 `contract derive` 만 씁니다: `" + paths.cli_invocation() +
+            " contract derive` 로 승인된 게이트에서 다시 만든 뒤 코드를 고치고, "
+            "기준을 바꿔야 한다면 /gatekit:gate 를 다시 실행해 새로 승인받으세요."
         ),
         "unapproved": (
             "gatekit: spec/05-gate.md 승인 이후 채점 파일이 바뀐 채 계약이 다시 "
@@ -374,6 +409,10 @@ def _judge(root, led: "ledger.Ledger", pipeline: Optional[str] = None) -> Dict[s
 
 
 def _judge_raw(root, led: "ledger.Ledger", tiers, start_budget_s) -> Dict[str, Any]:
+    # ADR-0027: the approval and the contract first, before any reuse.
+    refused = contract.integrity(root)
+    if refused is not None:
+        return refused
     same_tree = contract.same_tree_record(root)
     if contract.covers(root, same_tree, tiers):
         result = dict(same_tree["result"])
@@ -527,6 +566,14 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if contract.GRADING_UNAPPROVED_REASON in result["reasons"]:
         return hookio.block_stop(_message(
             lang, "unapproved", paths=", ".join(result.get("unapproved_grading") or [])))
+    if contract.GATE_NOT_APPROVED_REASON in result["reasons"]:
+        return hookio.block_stop(_message(
+            lang, "not_approved", status=result.get("approval") or verdict.UNVERIFIED))
+    if contract.CONTRACT_MISMATCH_REASON in result["reasons"]:
+        diff = "; ".join(result.get("mismatch") or []) or "?"
+        if len(diff) > 160:
+            diff = diff[:159] + "…"
+        return hookio.block_stop(_message(lang, "mismatch", diff=diff))
     if gaps and contract_clear:
         lines = [f"  - {line}" for line in result["reasons"]]
         lines += _deferred_lines(lang, result, result.get("start_budget_s"))

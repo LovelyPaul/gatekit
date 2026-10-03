@@ -394,6 +394,7 @@ class TestRun(TempProject):
     def test_run_json_output(self) -> None:
         self.write_gate({"id": "a", "argv": [PY, "-c", "pass"], "timeout_s": 20})
         self._run(["derive", "--root", str(self.root)])
+        approval.approve(self.root, "spec/05-gate.md")  # ADR-0027
         rc, out = self._run(["run", "--json", "--root", str(self.root)])
         payload = json.loads(out)
         self.assertEqual(payload["verdict"], "ok")
