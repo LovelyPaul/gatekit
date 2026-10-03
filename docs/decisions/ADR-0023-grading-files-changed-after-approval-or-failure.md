@@ -151,6 +151,19 @@ blocks a write — the owner's choice of option 3.
 **A worker never approves.** `approve` refuses (exit 1) when
 `GATEKIT_TASK_ID` is set, which every worker and the evaluator have.
 `contract derive` stays allowed there; its result is stale until approved.
+*Amended after review:* `env -u GATEKIT_TASK_ID python3 …/gatekit.py approve
+spec/05-gate.md` hid the worker from that refusal, and the Bash gate does not
+read what programs invoked by name do. So the Bash gate now denies, whenever
+`GATEKIT_TASK_ID` is set in the hook's own environment (a worker session), any
+command whose text runs gatekit's `approve` subcommand — `gatekit.py` or
+`gatekit` (as a path, a bare name or `-m gatekit`) followed by `approve`, in
+any simple command, behind `env`/`VAR=` prefixes, in `sh -c`/`eval` strings,
+with quoted paths or `${CLAUDE_PLUGIN_ROOT}`, and by pattern when the text
+cannot be lexed. `approve check` and `approve list` stay allowed; `approve`
+with no action is denied, never rounded to allowed. A worker that reaches
+`approval.approve` some other way (a script file it wrote) still meets the
+in-process refusal only while the variable is set; that residue is the same
+"programs invoked by name" limit the Bash gate already states.
 What remains: the host session itself can still run `approve`. That is the
 same trust boundary as approving `05-gate.md` at all, which `gate.md` puts
 behind an `AskUserQuestion`; prose is not enforcement, and nothing here

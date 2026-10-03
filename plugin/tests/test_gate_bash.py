@@ -378,6 +378,91 @@ class TestTaskScope(BashGateProject):
         self.assertIsNotNone(bash_gate.handle(self.event("cat > /tmp/escape.ts")))
 
 
+class TestWorkerNeverApproves(BashGateProject):
+    """ADR-0023: inside a worker session no command may run ``gatekit approve``."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.approve()
+        os.environ["GATEKIT_TASK_ID"] = "auth"
+        os.environ["GATEKIT_JOB_ID"] = "job-1"
+
+    def assert_denied(self, command: str) -> None:
+        result = bash_gate.handle(self.event(command))
+        self.assertIsNotNone(result, command)
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny", command)
+        self.assertIn("approve", self.reason(result))
+
+    def assert_not_approval_denied(self, command: str) -> None:
+        result = bash_gate.handle(self.event(command))
+        if result is not None:
+            self.assertNotIn("never approves", self.reason(result), command)
+
+    def test_env_unset_bypass_is_denied(self) -> None:
+        self.assert_denied(
+            "env -u GATEKIT_TASK_ID python3 /opt/gk/plugin/bin/gatekit.py approve spec/05-gate.md")
+
+    def test_plain_and_plugin_root_forms_are_denied(self) -> None:
+        self.assert_denied("python3 ${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py approve spec/05-gate.md")
+        self.assert_denied('python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" approve spec/05-gate.md')
+        self.assert_denied("'/path with space/bin/gatekit.py' approve spec/05-gate.md")
+        self.assert_denied("GATEKIT_TASK_ID= ./bin/gatekit.py approve --note x spec/05-gate.md")
+        self.assert_denied("python3 -m gatekit approve spec/05-gate.md")
+        self.assert_denied("env -u GATEKIT_TASK_ID gatekit approve spec/05-gate.md")
+
+    def test_hidden_in_chains_and_nested_shells_is_denied(self) -> None:
+        self.assert_denied("ls && python3 bin/gatekit.py approve spec/05-gate.md")
+        self.assert_denied("bash -c 'python3 bin/gatekit.py approve spec/05-gate.md'")
+        self.assert_denied("eval \"python3 bin/gatekit.py approve spec/05-gate.md\"")
+        self.assert_denied("python3 bin/gatekit.py approve --root . spec/05-gate.md")
+        self.assert_denied("echo spec/05-gate.md | xargs python3 bin/gatekit.py approve")
+        self.assertTrue(bash_gate.invokes_gatekit_approve(
+            "python3 bin/gatekit.py approve 'spec/05-gate.md"))  # unlexable: pattern fallback
+
+    def test_check_and_list_are_allowed(self) -> None:
+        self.assertIsNone(bash_gate.handle(self.event(
+            "python3 ${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py approve check spec/05-gate.md")))
+        self.assertIsNone(bash_gate.handle(self.event(
+            "env -u GATEKIT_TASK_ID python3 bin/gatekit.py approve list")))
+        self.assertIsNone(bash_gate.handle(self.event(
+            "python3 bin/gatekit.py approve --root . check spec/05-gate.md")))
+
+    def test_other_gatekit_commands_are_not_approval(self) -> None:
+        self.assert_not_approval_denied("python3 bin/gatekit.py jobs status")
+        self.assert_not_approval_denied("grep -n approve src/auth/a.ts")
+        self.assert_not_approval_denied("python3 bin/gatekit.py contract run")
+
+    def test_host_session_may_approve(self) -> None:
+        del os.environ["GATEKIT_TASK_ID"]
+        self.assertIsNone(bash_gate.handle(self.event(
+            "python3 bin/gatekit.py approve spec/05-gate.md")))
+
+    def test_reason_in_korean_when_session_is_ko(self) -> None:
+        led = ledger.Ledger.load(self.root, "sess-bash")
+        led.set_output_lang("ko")
+        led.save()
+        result = bash_gate.handle(self.event("python3 bin/gatekit.py approve spec/05-gate.md"))
+        self.assertIsNotNone(result)
+        self.assertRegex(self.reason(result), "[가-힣]")
+
+    def test_subprocess_denies_and_exits_zero(self) -> None:
+        code, out, _ = run_gate_subprocess(
+            self.event("env -u GATEKIT_TASK_ID python3 bin/gatekit.py approve spec/05-gate.md"),
+            env_extra={"GATEKIT_TASK_ID": "auth", "GATEKIT_JOB_ID": "job-1"})
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["hookSpecificOutput"]["permissionDecision"], "deny")
+
+    def test_internal_error_in_worker_exits_zero(self) -> None:
+        code, out, _ = run_gate_subprocess({}, raw="not json",
+                                           env_extra={"GATEKIT_TASK_ID": "auth"})
+        self.assertEqual(code, 0)
+        self.assertEqual(out.strip(), "")
+        event = self.event("x")
+        event["tool_input"] = {"command": ["not", "a", "string"]}
+        code, _, _ = run_gate_subprocess(event, env_extra={"GATEKIT_TASK_ID": "auth"})
+        self.assertEqual(code, 0)
+
+
 class TestSubprocessContract(BashGateProject):
     def test_deny_is_json_on_stdout_exit_zero(self) -> None:
         code, out, _ = run_gate_subprocess(self.event("cat > src/x.ts"))

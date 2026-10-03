@@ -94,7 +94,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" approve check <path> [--root PATH
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" approve list [--root PATH]
 ```
 
-`approve <path>`는 아무것도 묻지 않고 현재 해시를 기록한다. 사용자에게 `AskUserQuestion`으로 묻는 것은 커맨드 파일의 책임이다. `spec/05-gate.md`를 승인하면 각 기준의 채점 파일 해시도 함께 기록하고, `approve check spec/05-gate.md`는 그 파일이 바뀐 채 다시 derive된 계약이면 `fail`을 출력하고 stderr에 경로를 적는다(ADR-0023). 쓰기 게이트는 파일 해시만 보므로 이것 때문에 쓰기가 막히지는 않는다. 워커 안(`GATEKIT_TASK_ID`가 설정됨)에서는 `approve`가 종료 코드 1로 거부된다. `check`·`list`는 그대로 동작한다.
+`approve <path>`는 아무것도 묻지 않고 현재 해시를 기록한다. 사용자에게 `AskUserQuestion`으로 묻는 것은 커맨드 파일의 책임이다. `spec/05-gate.md`를 승인하면 각 기준의 채점 파일 해시도 함께 기록하고, `approve check spec/05-gate.md`는 그 파일이 바뀐 채 다시 derive된 계약이면 `fail`을 출력하고 stderr에 경로를 적는다(ADR-0023). 쓰기 게이트는 파일 해시만 보므로 이것 때문에 쓰기가 막히지는 않는다. 워커 안(`GATEKIT_TASK_ID`가 설정됨)에서는 `approve`가 종료 코드 1로 거부된다. `check`·`list`는 그대로 동작한다. 워커가 `env -u GATEKIT_TASK_ID`로 변수를 지우고 실행하려 하면 bash 게이트가 그 명령을 먼저 거부한다.
 
 | 종료 코드 | 뜻 |
 |---|---|

@@ -19,6 +19,11 @@ no execution — and it is deliberately conservative:
   ``unverified`` from being rounded to ``ok``.
 * Programs invoked by name (``npm run build``, ``python3 script.py``) are
   outside its reach: it reads shell syntax, not what every binary does.
+  One program is the exception: inside a worker session (``GATEKIT_TASK_ID``
+  set) a command that runs gatekit's own ``approve`` subcommand is denied
+  (ADR-0023), because ``env -u GATEKIT_TASK_ID`` would otherwise hide the
+  worker from the refusal in :func:`gatekit.approval.approve`. ``approve
+  check`` and ``approve list`` stay allowed; they record nothing.
 
 Denial reasons are written in the session's ``output_lang``.
 """
@@ -84,12 +89,24 @@ _MESSAGES = {
             "({why}), and writes are currently restricted. Use the Write/Edit "
             "tool, or a plain command whose target paths are literal. Command: {cmd}"
         ),
+        "approve": (
+            "gatekit: a worker never approves. This command runs gatekit's "
+            "'approve' subcommand inside a worker session (GATEKIT_TASK_ID={task}); "
+            "approval is the user's decision, taken in the host session through "
+            "/gatekit:gate. 'approve check' and 'approve list' are allowed. Command: {cmd}"
+        ),
     },
     "ko": {
         "opaque": (
             "gatekit: 이 셸 명령이 어떤 파일을 쓰는지 판별할 수 없고({why}) "
             "현재 쓰기가 제한된 상태입니다. Write/Edit 도구를 쓰거나 대상 경로가 "
             "리터럴인 명령을 사용하세요. 명령: {cmd}"
+        ),
+        "approve": (
+            "gatekit: 워커는 승인하지 않습니다. 이 명령은 워커 세션"
+            "(GATEKIT_TASK_ID={task}) 안에서 gatekit의 'approve' 하위 명령을 "
+            "실행합니다. 승인은 사용자의 결정이며 호스트 세션에서 /gatekit:gate로 "
+            "합니다. 'approve check'와 'approve list'는 허용됩니다. 명령: {cmd}"
         ),
     },
 }
@@ -505,6 +522,76 @@ def extract_write_targets(command: str, cwd: Optional[str]) -> WriteTargets:
 
 
 # --------------------------------------------------------------------------
+# a worker never approves (ADR-0023)
+# --------------------------------------------------------------------------
+#: ``gatekit approve`` options that take an operand.
+_APPROVE_OPERAND_OPTIONS = ("--root", "--note", "--by")
+
+#: Fallback for text the lexer cannot split: ``gatekit… approve`` not followed
+#: by ``check`` or ``list``.
+_APPROVE_RE = re.compile(
+    r"gatekit(?:\.py)?['\"]?\s+approve\b(?!\s+(?:check|list)\b)")
+
+
+def _is_gatekit_entry(words: List[str], index: int) -> bool:
+    """True when ``words[index]`` names the gatekit CLI (script, binary or module)."""
+    word = words[index]
+    base = posixpath.basename(word.replace("\\", "/"))
+    return base in ("gatekit.py", "gatekit")
+
+
+def _approve_records(args: List[str]) -> bool:
+    """Arguments after ``approve``: True unless the action is ``check``/``list``."""
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in _APPROVE_OPERAND_OPTIONS:
+            index += 2
+            continue
+        if arg.startswith("-"):
+            index += 1
+            continue
+        return arg not in ("check", "list")
+    return True  # no action: treat as an approval attempt, never round it down
+
+
+def _words_invoke_approve(words: List[str], depth: int) -> bool:
+    for index, word in enumerate(words):
+        # Strings handed to ``bash -c``, ``eval`` and the like are commands too.
+        if depth < 4 and "approve" in word and (" " in word or "\t" in word):
+            if invokes_gatekit_approve(word, depth + 1):
+                return True
+        if not _is_gatekit_entry(words, index):
+            continue
+        rest = [w for w in words[index + 1:] if not _is_operator(w)]
+        if rest and rest[0] == "approve" and _approve_records(rest[1:]):
+            return True
+    return False
+
+
+def invokes_gatekit_approve(command: str, depth: int = 0) -> bool:
+    """True when *command* runs ``gatekit approve <path>`` anywhere in it.
+
+    Reads every simple command (wrappers such as ``env -u VAR`` included, since
+    the gatekit entry is searched for, not assumed at position 0), nested
+    shell and ``eval`` strings, and falls back to a pattern match when the text
+    cannot be lexed.
+    """
+    if "approve" not in command or "gatekit" not in command:
+        return False
+    tokens = _tokens(command)
+    if tokens is None:
+        return bool(_APPROVE_RE.search(command))
+    for simple in _split_simple(tokens):
+        if _words_invoke_approve(simple, depth):
+            return True
+        if simple and posixpath.basename(simple[0]) == "eval":
+            if invokes_gatekit_approve(" ".join(simple[1:]), depth + 1):
+                return True
+    return False
+
+
+# --------------------------------------------------------------------------
 # the gate
 # --------------------------------------------------------------------------
 def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -517,6 +604,11 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return hookio.allow()
 
     root = hookio.event_root(event)
+    task_id = os.environ.get("GATEKIT_TASK_ID")
+    if task_id and invokes_gatekit_approve(command):
+        return hookio.deny(_message(
+            write.session_lang(root, event), "approve", task=task_id, cmd=_shown(command)))
+
     if not write.restrictions_active(root):
         return hookio.allow()
 
@@ -530,11 +622,15 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             return decision
 
     if found.opaque:
-        shown = command.strip().replace("\n", " ")
-        if len(shown) > 120:
-            shown = shown[:119] + "…"
-        return hookio.deny(_message(lang, "opaque", why=found.why, cmd=shown))
+        return hookio.deny(_message(lang, "opaque", why=found.why, cmd=_shown(command)))
     return hookio.allow()
+
+
+def _shown(command: str) -> str:
+    shown = command.strip().replace("\n", " ")
+    if len(shown) > 120:
+        shown = shown[:119] + "…"
+    return shown
 
 
 def main() -> None:  # pragma: no cover - exercised via subprocess tests

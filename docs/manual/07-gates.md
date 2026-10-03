@@ -75,6 +75,8 @@ README*
 
 **한계**: 이름으로 호출되는 프로그램(`npm run build`, `python3 script.py`)이 무엇을 쓰는지는 보지 않는다. 셸 문법을 읽는 게이트이지 모든 바이너리의 동작을 아는 게이트가 아니다. 근거는 `docs/decisions/ADR-0004-bash-write-gate.md`.
 
+**예외 하나 — 워커는 승인하지 않는다**: 훅 환경에 `GATEKIT_TASK_ID`가 있으면(워커 세션) gatekit 자신의 `approve` 하위 명령을 실행하는 명령은 다른 규칙보다 먼저 거부한다. `env -u GATEKIT_TASK_ID python3 …/gatekit.py approve spec/05-gate.md`처럼 환경변수를 지워 `approve`의 거부를 피하는 길을 막기 위해서다. `gatekit.py`·`gatekit`·`-m gatekit` 뒤의 `approve`를 단순 명령마다, `env`/`VAR=` 접두 뒤에서도, `sh -c`·`eval` 문자열 안에서도, 따옴표 경로나 `${CLAUDE_PLUGIN_ROOT}`가 있어도 찾고, 렉싱이 안 되면 패턴으로 찾는다. `approve check`와 `approve list`는 허용한다. 근거는 ADR-0023.
+
 ## spawn 게이트
 
 **언제**: `Agent`나 `Task`로 서브에이전트를 띄우기 직전.
