@@ -25,7 +25,7 @@ import threading
 import time
 from typing import Optional
 
-from gatekit import config, paths, runcheck, spec, verdict, workers
+from gatekit import config, names, paths, runcheck, spec, verdict, workers
 
 STATES = (
     "queued",
@@ -944,11 +944,11 @@ def _missing_for_preflight(gate: dict, argv, root, tasks):
 def _spawn_worker(root, backend: dict, task: dict, job_id: str, tdir, timeout_s: float,
                   on_spawn=None) -> dict:
     """Run the worker for one task; returns {"exit", "timed_out"}."""
-    # A worker gets exactly the two gatekit variables it needs; nothing a
-    # parent worker or evaluator session exported leaks into it.
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GATEKIT_")}
-    env["GATEKIT_TASK_ID"] = str(task.get("id", ""))
-    env["GATEKIT_JOB_ID"] = job_id
+    # A worker gets exactly the two gatekit variables it needs, under every
+    # name (ADR-0029); nothing a parent worker or evaluator session exported
+    # leaks into it.
+    env = {k: v for k, v in os.environ.items() if not k.startswith(names.env_prefixes())}
+    env.update(names.worker_env(str(task.get("id", "")), job_id))
     prompt = (tdir / "prompt.md").read_text(encoding="utf-8")
 
     out_path, err_path = tdir / "output.txt", tdir / "stderr.txt"

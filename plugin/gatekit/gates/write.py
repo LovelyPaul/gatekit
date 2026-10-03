@@ -52,12 +52,12 @@ else:
 
     ensure_package_path()
 
-from gatekit import approval, config, hookio, ledger, paths  # noqa: E402
+from gatekit import approval, config, hookio, ledger, names, paths  # noqa: E402
 
 #: Paths that stay writable under rule (a) so the spec can be authored at all.
 SPEC_ALLOWLIST = (
     "spec/**",
-    ".gatekit/**",
+    *(d + "/**" for d in paths.STATE_DIRNAMES),  # .gatebound/, .gatekit/ (ADR-0029)
     "docs/**",
     "README*",
     "*.md",  # root-level markdown only; the pattern is matched without '/'
@@ -237,8 +237,8 @@ def _protected_tail(path: str) -> Optional[str]:
     case-insensitively."""
     parts = [p for p in os.path.normpath(path).replace("\\", "/").lower().split("/") if p]
     for index, part in enumerate(parts[:-1]):
-        if part == paths.STATE_DIRNAME and not user_owned(parts[index + 1:]):
-            return "%s/%s" % (paths.STATE_DIRNAME, "/".join(parts[index + 1:]))
+        if part in paths.STATE_DIRNAMES and not user_owned(parts[index + 1:]):
+            return "%s/%s" % (part, "/".join(parts[index + 1:]))
     return None
 
 
@@ -272,7 +272,7 @@ def protected_state(root: pathlib.Path, raw_path: str) -> Optional[str]:
         if os.path.exists(candidate):
             for own in protected_files(root):
                 if own.exists() and os.path.samefile(candidate, str(own)):
-                    return "%s/%s" % (paths.STATE_DIRNAME,
+                    return "%s/%s" % (paths.state_dir(root).name,
                                       own.relative_to(paths.state_dir(root)).as_posix())
     except (OSError, ValueError, TypeError):
         return None
@@ -370,6 +370,8 @@ def load_task_scope(root: pathlib.Path, job_id: str, task_id: str):
 #: script, a server log, its own screenshots. Inside the project root only.
 EVAL_TASK_ID = "evaluate"
 EVAL_SCRATCH = ".gatekit/eval/**"
+#: ADR-0029: the scratch directory under either state directory name.
+EVAL_SCRATCHES = tuple(d + "/eval/**" for d in paths.STATE_DIRNAMES)
 
 
 def is_evaluator(root: pathlib.Path, job_id: str, task_id: str) -> bool:
@@ -392,7 +394,7 @@ def restrictions_active(root: pathlib.Path) -> bool:
     Lets a caller that must parse its input (the Bash gate) skip the parse
     entirely when nothing could be denied anyway.
     """
-    if os.environ.get("GATEKIT_TASK_ID"):
+    if names.task_id():
         return True
     cfg = config.load(root)
     if not cfg.get("enforce_spec_before_code", True):
@@ -415,14 +417,14 @@ def decide_path(root: pathlib.Path, raw_path: str, lang: str) -> Optional[Dict[s
     relpath = relative_target(root, raw_path)
 
     # -- rule (b): task write scope, checked first because it is stricter ----
-    task_id = os.environ.get("GATEKIT_TASK_ID")
+    task_id = names.task_id()
     if task_id:
-        job_id = os.environ.get("GATEKIT_JOB_ID", "")
+        job_id = names.job_id() or ""
         if relpath is None:
             return hookio.deny(
                 _message(lang, "outside_root", task=task_id, path=raw_path)
             )
-        if is_evaluator(root, job_id, task_id) and matches(relpath, EVAL_SCRATCH):
+        if is_evaluator(root, job_id, task_id) and any(matches(relpath, s) for s in EVAL_SCRATCHES):
             return hookio.allow()
         scope = load_task_scope(root, job_id, task_id)
         if scope is None:

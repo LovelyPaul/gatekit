@@ -31,7 +31,7 @@ import sys
 from typing import Any, Dict, Iterable, List, Optional
 
 from gatekit import lang as lang_mod
-from gatekit import paths
+from gatekit import names, paths
 from gatekit import verdict as V
 
 # --------------------------------------------------------------------------
@@ -80,10 +80,11 @@ def _iter_fences(text: str, name: str):
     messages can name the exact place a malformed block starts.
     """
     lines = text.splitlines()
+    accepted = names.fence_names(name)  # either prefix (ADR-0029)
     i = 0
     while i < len(lines):
         match = _FENCE_RE.match(lines[i])
-        if not match or match.group("name") != name:
+        if not match or match.group("name") not in accepted:
             i += 1
             continue
         ticks = match.group("ticks")

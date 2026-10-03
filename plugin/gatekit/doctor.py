@@ -15,7 +15,7 @@ import socket
 import subprocess
 import sys
 
-from gatekit import paths, verdict
+from gatekit import names, paths, verdict
 
 #: Gate scripts that must exist and be non-empty for axis 1.
 GATE_SCRIPTS = ("prompt.py", "write.py", "bash.py", "spawn.py", "question.py", "stop.py")
@@ -91,6 +91,11 @@ def _installed_keys(data) -> list:
     read structurally — never by searching the serialized text — so a plugin
     whose description merely mentions gatekit does not count as installed.
     """
+    return _installed_name_keys(data, (names.CURRENT,))
+
+
+def _installed_name_keys(data, wanted) -> list:
+    """Plugin keys in *data* whose name is one of *wanted*."""
     if not isinstance(data, dict):
         return []
     table = data.get("plugins") if isinstance(data.get("plugins"), dict) else data
@@ -99,9 +104,37 @@ def _installed_keys(data) -> list:
         if not isinstance(key, str):
             continue
         name = key.split("@", 1)[0]
-        if name == "gatekit":
+        if name in wanted:
             keys.append(key)
     return keys
+
+
+def _dual_plugin(root, installed):
+    """ADR-0029: ``(detail, fix)`` when plugins of more than one of this
+    plugin's names are active at once, else ``None``. Claude Code: enabled in
+    the user's or the project's settings (and, when ``installed_plugins.json``
+    was readable, listed there). Codex: cached under more than one name. Only
+    reads."""
+    enabled = names.enabled_plugins(root)
+    if installed is not None:
+        listed = set(_installed_name_keys(installed, names.all_names()))
+        enabled = {n: [k for k in ks if k in listed] for n, ks in enabled.items()}
+        enabled = {n: ks for n, ks in enabled.items() if ks}
+    if len(enabled) > 1:
+        keys = sorted(k for ks in enabled.values() for k in ks)
+        others = [k for k in keys if k.split("@", 1)[0] != names.CURRENT] or keys[1:]
+        return ("more than one plugin of this name family is enabled in Claude Code "
+                "(%s); both would gate every session" % ", ".join(keys),
+                "; ".join("/plugin disable %s" % k for k in others))
+    from gatekit import hosts
+    cached = hosts.codex_cached_names()
+    if len(cached) > 1:
+        others = [n for n in cached if n != names.CURRENT] or cached[1:]
+        return ("Codex has more than one of this plugin's names cached (%s); "
+                "both would gate every session" % ", ".join(cached),
+                "uninstall %s from Codex (its cache: %s)"
+                % (", ".join(others), ", ".join(str(hosts.codex_plugin_cache(n)) for n in others)))
+    return None
 
 
 def axis_hooks_registered(root) -> dict:
@@ -119,6 +152,9 @@ def axis_hooks_registered(root) -> dict:
     except (OSError, ValueError) as exc:
         return _axis("hooks registered", verdict.UNVERIFIED,
                      "installed_plugins.json unreadable: %s" % exc, "")
+    dual = _dual_plugin(root, data)
+    if dual:
+        return _axis("hooks registered", verdict.FAIL, dual[0], dual[1])
     keys = _installed_keys(data)
     if not keys:
         return _axis("hooks registered", verdict.FAIL,
@@ -157,6 +193,16 @@ def axis_hooks_registered(root) -> dict:
 
 def axis_project_state(root) -> dict:
     state = paths.state_dir(root)
+    found = names.existing_state_dirs(root)
+    if len(found) > 1:
+        # ADR-0029: hooks use the one holding approvals.json.
+        unused = [p.name + "/" for p in found if p != state]
+        return _axis("project state", verdict.FAIL,
+                     "both %s exist; hooks use %s/ and ignore %s"
+                     % (" and ".join(p.name + "/" for p in found), state.name, ", ".join(unused)),
+                     "copy anything you still need from %s into %s/, then delete %s "
+                     "(`migrate` refuses while both exist)"
+                     % (", ".join(unused), state.name, ", ".join(unused)))
     if not state.is_dir():
         return _axis("project state", verdict.UNVERIFIED,
                      "no .gatekit/ in this project yet",
@@ -195,7 +241,7 @@ def axis_project_state(root) -> dict:
     for message, fix in _port_clashes(root):
         warnings.append(message)
         fixes.append(fix)
-    detail = ".gatekit/ present and parseable"
+    detail = "%s/ present and parseable" % state.name
     note = _stand_down_note(state)
     if note:
         detail += "; " + note

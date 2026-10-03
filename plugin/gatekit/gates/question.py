@@ -44,7 +44,7 @@ else:
 
     ensure_package_path()
 
-from gatekit import config, hookio, ledger, paths  # noqa: E402
+from gatekit import config, hookio, ledger, names, paths  # noqa: E402
 
 #: The only pipeline with a question ceiling.
 BUDGETED_PIPELINE = "interview"
@@ -203,6 +203,9 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     # user opens. A project with no `.gatekit/` never asked gatekit to govern
     # it: stand down without creating state there.
     if not paths.state_dir(root).is_dir():
+        return hookio.allow()
+    # ADR-0029: an older plugin of another name counts these questions.
+    if names.legacy_plugin_enabled(root):
         return hookio.allow()
 
     if event.get("tool_name") in WRITE_TOOLS:

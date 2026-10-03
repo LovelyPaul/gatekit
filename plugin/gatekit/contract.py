@@ -33,7 +33,7 @@ import sys
 import time
 from typing import Any, Dict, List, Optional, Sequence
 
-from . import approval, config, paths, runcheck, verdict
+from . import approval, config, names, paths, runcheck, verdict
 
 VERSION = 1
 
@@ -177,8 +177,9 @@ def parse_fences(text: str, name: str) -> List[Dict[str, Any]]:
     """
     results: List[Dict[str, Any]] = []
     index = 0
+    accepted = names.fence_names(name)  # either prefix (ADR-0029)
     for match in _FENCE_RE.finditer(text or ""):
-        if match.group("name") != name:
+        if match.group("name") not in accepted:
             continue
         index += 1
         body = match.group("body")
@@ -866,7 +867,7 @@ def tier_scope(root: pathlib.Path, tiers: Optional[Sequence[str]] = None) -> Lis
 #: Directories whose contents are state or build output that criteria
 #: themselves rewrite; they never decide whether the code changed.
 FINGERPRINT_SKIP_DIRS = frozenset({
-    ".git", ".gatekit", "node_modules", ".next", ".nuxt", ".svelte-kit", ".turbo",
+    ".git", *paths.STATE_DIRNAMES, "node_modules", ".next", ".nuxt", ".svelte-kit", ".turbo",
     ".cache", "dist", "build", "out", "coverage", "test-results",
     "playwright-report", "__pycache__", ".venv", "venv",
 })

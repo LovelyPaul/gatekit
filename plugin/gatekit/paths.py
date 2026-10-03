@@ -18,12 +18,19 @@ import re
 import shutil
 from typing import List, Optional
 
-#: Directory names that mark a project root, in priority order. ``.gatekit``
-#: comes first so a gatekit-managed subproject inside a larger git repository
-#: wins over the outer repository.
-ROOT_MARKERS = (".gatekit", ".git")
+from gatekit import names
 
-STATE_DIRNAME = ".gatekit"
+#: Every state directory name, newest first (ADR-0029): ``.gatebound``,
+#: ``.gatekit``. Protected-state rules apply to each.
+STATE_DIRNAMES = names.state_dirnames()
+
+#: Directory names that mark a project root, in priority order. The state
+#: directories come first so a gatekit-managed subproject inside a larger git
+#: repository wins over the outer repository.
+ROOT_MARKERS = STATE_DIRNAMES + (".git",)
+
+#: The state directory a project with none yet gets.
+STATE_DIRNAME = names.state_dirname()
 SPEC_DIRNAME = "spec"
 
 
@@ -47,8 +54,12 @@ def project_root(cwd: Optional[str] = None) -> pathlib.Path:
 
 
 def state_dir(root: pathlib.Path) -> pathlib.Path:
-    """``<root>/.gatekit`` — machine state, mostly git-ignored."""
-    return pathlib.Path(root) / STATE_DIRNAME
+    """``<root>/.gatekit`` — machine state, mostly git-ignored.
+
+    ADR-0029: ``.gatebound/`` if present, else ``.gatekit/`` if present, else
+    the current name; with both present, the one holding ``approvals.json``.
+    """
+    return names.resolve_state_dir(root)
 
 
 def spec_dir(root: pathlib.Path) -> pathlib.Path:
@@ -118,7 +129,7 @@ def expand_argv(argv: List[str]) -> List[str]:
     globs — the fence stays portable and the argv stays shell-free.
     """
     root = str(plugin_root())
-    out = [str(a).replace(PLUGIN_ROOT_TOKEN, root) for a in argv]
+    out = [alias_path(str(a).replace(PLUGIN_ROOT_TOKEN, root)) for a in argv]
     # ADR-0019: without a shell, Windows cannot find `npm` as `npm.cmd`;
     # shutil.which applies PATHEXT. Only a bare name is looked up, and an
     # unresolvable one is left as written for the caller to report.
@@ -127,6 +138,42 @@ def expand_argv(argv: List[str]) -> List[str]:
         if found:
             out[0] = found
     return out
+
+
+_ABS_DRIVE_RE = re.compile(r"^[A-Za-z]:[\\/]")
+
+
+def _alias_re():
+    pattern = names.names_pattern()
+    return re.compile(r"(?:^|/)(?:%s/gates/(?P<gate>[A-Za-z0-9][A-Za-z0-9_]*\.py)"
+                      r"|bin/%s\.py)$" % (pattern, pattern))
+
+
+def alias_path(token: str) -> str:
+    """*token* mapped to this plugin's own file when it is an absolute path
+    that does not exist and ends in ``<name>/gates/<gate>.py`` (a gate this
+    plugin has) or ``bin/<name>.py``, for any of the plugin's names.
+
+    ADR-0029: argv written against an older name, an old checkout or a
+    deleted plugin cache keeps running. Run time only — what is pinned and
+    hashed is the argv as written. Anything else is returned as is.
+    """
+    try:
+        if not token or not (os.path.isabs(token) or _ABS_DRIVE_RE.match(token)):
+            return token
+        if os.path.exists(token):
+            return token
+        match = _alias_re().search(token.replace("\\", "/"))
+        if not match:
+            return token
+        proot = plugin_root()
+        if match.group("gate"):
+            target = proot / names.CURRENT / "gates" / match.group("gate")
+        else:
+            target = proot / "bin" / (names.CURRENT + ".py")
+        return str(target) if target.is_file() else token
+    except (OSError, ValueError):
+        return token
 
 
 _MSYS_DRIVE_RE = re.compile(r"^/([A-Za-z])(/.*)?$")

@@ -54,7 +54,7 @@ else:
 
     ensure_package_path()
 
-from gatekit import config, contract, hookio, jobs, ledger, paths, verdict  # noqa: E402
+from gatekit import config, contract, hookio, jobs, ledger, names, paths, verdict  # noqa: E402
 
 #: Pipelines whose completion is contract-enforced.
 ENFORCED_PIPELINES = ("build", "verify")
@@ -453,6 +453,10 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     # user opens. A project with no `.gatekit/` never asked gatekit to govern
     # it: stand down without creating state there.
     if not paths.state_dir(root).is_dir():
+        return hookio.allow()
+    # ADR-0029: an older plugin of another name is enabled and runs its own
+    # Stop gate on the same contract; this one yields.
+    if names.legacy_plugin_enabled(root):
         return hookio.allow()
 
     led = ledger.Ledger.load(root, hookio.session_id(event))

@@ -20,6 +20,7 @@ SUBCOMMANDS = {
     "ledger":   ("gatekit.ledger",   "Session ledger: show / init / set-pipeline."),
     "lang":     ("gatekit.lang",     "Detect output language for a text (ko/en)."),
     "install":  ("gatekit.hosts",    "Generate a host layer (--host codex): hooks, skills, AGENTS.md block."),
+    "migrate":  ("gatekit.migrate",  "Move the state directory to another name (dry run unless --apply)."),
 }
 
 

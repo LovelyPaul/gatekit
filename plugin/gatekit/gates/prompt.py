@@ -33,7 +33,7 @@ else:
 
     ensure_package_path()
 
-from gatekit import approval, contract, hookio, lang, ledger, paths  # noqa: E402
+from gatekit import approval, contract, hookio, lang, ledger, names, paths  # noqa: E402
 
 
 #: Pipelines whose invocation re-arms the Stop gate (ADR-0024).
@@ -50,11 +50,13 @@ NON_PIPELINE_COMMANDS = ("doctor", "setup")
 #: start of a prompt, the ``# /gatekit:<name>`` title line of an expanded
 #: command body, and Codex's ``$gatekit-<name>`` skill invocation are
 #: accepted too. A mention mid-sentence is conversation, not
-#: an invocation.
+#: an invocation. Every name is recognised, permanently (ADR-0029): a renamed
+#: command that is not would leave the Stop gate silently unarmed.
+_NAMES = names.names_pattern()
 _INVOCATION_RE = re.compile(
-    r"(?:<command-name>\s*/gatekit:([a-z-]+)\s*</command-name>)"
-    r"|(?:^\s*(?:#\s+)?/gatekit:([a-z-]+)\b)"
-    r"|(?:^\s*(?:#\s+)?\$gatekit-([a-z-]+)\b)",
+    r"(?:<command-name>\s*/%s:([a-z-]+)\s*</command-name>)"
+    r"|(?:^\s*(?:#\s+)?/%s:([a-z-]+)\b)"
+    r"|(?:^\s*(?:#\s+)?\$%s-([a-z-]+)\b)" % (_NAMES, _NAMES, _NAMES),
     re.MULTILINE,
 )
 #: Only the leading lines of the prompt are inspected.
@@ -62,7 +64,7 @@ _HEAD_LINES = 12
 
 
 _ARGS_RE = re.compile(r"<command-args>(.*?)</command-args>", re.DOTALL)
-_SKILL_PREFIX_RE = re.compile(r"^\s*\$gatekit-[a-z-]+\b")
+_SKILL_PREFIX_RE = re.compile(r"^\s*\$%s-[a-z-]+\b" % _NAMES)
 
 
 def language_signal(text: str) -> str:
@@ -322,9 +324,32 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     apply_command(led, text)
 
     led.append_event("prompt", {"chars": len(text)})
+    warning = _coexistence_warning(root, led)
     led.save()
 
-    return hookio.add_context(build_context(root, led))
+    context = build_context(root, led)
+    return hookio.add_context(warning + "\n" + context if warning else context)
+
+
+#: ADR-0029: shown once per session when an older plugin is enabled too.
+_COEXIST = {
+    "en": ("%s: %s is enabled too; this plugin's Stop and question gates stand "
+           "down while it is. Disable one: /plugin disable %s"),
+    "ko": ("%s: %s 도 활성화되어 있어 이 플러그인의 Stop·질문 게이트는 쉽니다. "
+           "하나를 끄세요: /plugin disable %s"),
+}
+
+
+def _coexistence_warning(root, led: "ledger.Ledger") -> str:
+    """One line, the first time in a session, when a legacy-named plugin is
+    enabled alongside this one; ``""`` otherwise (and always before the
+    rename, when there is no legacy name)."""
+    keys = names.legacy_plugin_enabled(root)
+    if not keys or led.data.get("coexistence_warned"):
+        return ""
+    led.data["coexistence_warned"] = True
+    table = _COEXIST.get(led.output_lang, _COEXIST["en"])
+    return table % (names.CURRENT, ", ".join(keys), keys[0])
 
 
 def main() -> None:  # pragma: no cover - exercised via subprocess tests

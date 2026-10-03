@@ -30,7 +30,7 @@ import re
 import sys
 from typing import Any, Dict, List, Optional
 
-from gatekit import config, paths, verdict
+from gatekit import config, names, paths, verdict
 
 try:  # Python 3.11+
     import tomllib  # type: ignore[import-not-found]
@@ -40,8 +40,7 @@ except ImportError:  # pragma: no cover - exercised only on 3.9/3.10 in CI
 #: Hosts that need a generated layer. Claude Code is served by the plugin.
 INSTALLABLE_HOSTS = ("codex",)
 
-BLOCK_BEGIN = "<!-- gatekit:begin (managed; edit plugin/ and re-run install) -->"
-BLOCK_END = "<!-- gatekit:end -->"
+BLOCK_BEGIN, BLOCK_END = names.agents_markers()
 
 #: Gate registrations, mirroring plugin/hooks/hooks.json with the Codex
 #: differences: file edits arrive as apply_patch, and unified exec matches
@@ -194,11 +193,14 @@ def merged_agents_md(existing: Optional[str], plugin_root: pathlib.Path) -> str:
     block = _agents_block(plugin_root).rstrip("\n") + "\n"
     if not existing:
         return block
-    if BLOCK_BEGIN in existing and BLOCK_END in existing:
-        start = existing.index(BLOCK_BEGIN)
-        end = existing.index(BLOCK_END, start) if BLOCK_END in existing[start:] else -1
-        if end > start:
-            return existing[:start] + block.rstrip("\n") + existing[end + len(BLOCK_END):]
+    # ADR-0029: a block written under any of the plugin's names is replaced.
+    for name in names.all_names():
+        begin, end_marker = names.agents_markers(name)
+        if begin in existing and end_marker in existing:
+            start = existing.index(begin)
+            end = existing.index(end_marker, start) if end_marker in existing[start:] else -1
+            if end > start:
+                return existing[:start] + block.rstrip("\n") + existing[end + len(end_marker):]
         # markers out of order: leave the user's text alone and append a fresh block
     joiner = "" if existing.endswith("\n\n") else ("\n" if existing.endswith("\n") else "\n\n")
     return existing + joiner + block
@@ -272,6 +274,24 @@ def codex_hooks_trusted(root: pathlib.Path) -> bool:
     return any(key.startswith(prefix) for key in _trusted_hook_keys(text))
 
 
+def codex_plugin_cache(name: str) -> pathlib.Path:
+    """Where Codex caches the plugin called *name* (one directory per version)."""
+    return _codex_home() / "plugins" / "cache" / name / name
+
+
+def codex_cached_names() -> List[str]:
+    """The plugin's names that have at least one version in Codex's cache."""
+    out = []
+    for name in names.all_names():
+        cache = codex_plugin_cache(name)
+        try:
+            if cache.is_dir() and any(p.is_dir() for p in cache.iterdir()):
+                out.append(name)
+        except OSError:
+            continue
+    return out
+
+
 def codex_plugin_trust() -> Optional[bool]:
     """Whether Codex has recorded trust for an installed gatekit *plugin*.
 
@@ -280,7 +300,7 @@ def codex_plugin_trust() -> Optional[bool]:
     key names a ``hooks.json`` inside that cache, ``False`` when none does or
     the config cannot be read — "could not tell" is not "trusted".
     """
-    cache = _codex_home() / "plugins" / "cache" / "gatekit" / "gatekit"
+    cache = codex_plugin_cache(names.CURRENT)
     hook_files = sorted(cache.glob("*/hooks/hooks.json")) if cache.is_dir() else []
     if not hook_files:
         return None

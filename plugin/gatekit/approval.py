@@ -27,7 +27,7 @@ import pathlib
 import sys
 from typing import Any, Dict, List, Optional
 
-from . import config, paths, verdict
+from . import config, names, paths, verdict
 
 VERSION = 1
 
@@ -126,11 +126,11 @@ def approve(
     :class:`FileNotFoundError` when the target does not exist, because
     approving a file that is not there records a meaningless hash.
     """
-    if os.environ.get(WORKER_ENV):
+    if names.task_id():  # either name (ADR-0029)
         raise PermissionError(
             "a worker never approves (%s=%s is set); approval is the user's "
             "decision, taken in the host session through /gatekit:gate"
-            % (WORKER_ENV, os.environ.get(WORKER_ENV)))
+            % (WORKER_ENV, names.task_id()))
     key = _normalize(relpath)
     target = pathlib.Path(root) / key
     digest = sha256_file(target)

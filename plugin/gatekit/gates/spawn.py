@@ -30,7 +30,7 @@ else:
 
     ensure_package_path()
 
-from gatekit import hookio, ledger, paths  # noqa: E402
+from gatekit import hookio, ledger, names, paths  # noqa: E402
 
 FENCE_NAME = "gatekit-scope"
 
@@ -82,7 +82,7 @@ def _message(lang: str, key: str, **fields: Any) -> str:
 def extract_fence(text: str) -> Optional[str]:
     """Return the body of the first ``gatekit-scope`` fence, or ``None``."""
     for match in _FENCE_RE.finditer(text or ""):
-        if match.group("name") == FENCE_NAME:
+        if match.group("name") in names.fence_names(FENCE_NAME):  # ADR-0029
             return match.group("body")
     return None
 

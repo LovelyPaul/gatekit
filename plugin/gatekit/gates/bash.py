@@ -59,7 +59,7 @@ else:
 
     ensure_package_path()
 
-from gatekit import hookio, paths  # noqa: E402
+from gatekit import hookio, names, paths  # noqa: E402
 from gatekit.gates import write  # noqa: E402
 
 #: Tokens that end one simple command and start the next.
@@ -775,14 +775,14 @@ _APPROVE_OPERAND_OPTIONS = ("--root", "--note", "--by")
 #: Fallback for text the lexer cannot split: ``gatekit… approve`` not followed
 #: by ``check`` or ``list``.
 _APPROVE_RE = re.compile(
-    r"gatekit(?:\.py)?['\"]?\s+approve\b(?!\s+(?:check|list)\b)")
+    names.names_pattern() + r"(?:\.py)?['\"]?\s+approve\b(?!\s+(?:check|list)\b)")
 
 
 def _is_gatekit_entry(words: List[str], index: int) -> bool:
     """True when ``words[index]`` names the gatekit CLI (script, binary or module)."""
     word = words[index]
     base = posixpath.basename(word.replace("\\", "/"))
-    return base in ("gatekit.py", "gatekit")
+    return base in names.launcher_names()  # either name, permanently (ADR-0029)
 
 
 def _approve_records(args: List[str]) -> bool:
@@ -822,7 +822,7 @@ def invokes_gatekit_approve(command: str, depth: int = 0) -> bool:
     shell and ``eval`` strings, and falls back to a pattern match when the text
     cannot be lexed.
     """
-    if "approve" not in command or "gatekit" not in command:
+    if "approve" not in command or not any(n in command for n in names.all_names()):
         return False
     tokens = _tokens(command)
     if tokens is None:
@@ -842,7 +842,8 @@ def invokes_gatekit_approve(command: str, depth: int = 0) -> bool:
 #: A path that names ``.gatekit``: what follows decides whether it is the
 #: user's (``config.json``, ``eval/``) or gatekit's.
 _STATE_MENTION_RE = re.compile(
-    r"(?<![A-Za-z0-9_.-])\.gatekit(?![A-Za-z0-9_-])((?:[\\/]+[^\s'\"\\/;|&)<>]*)*)",
+    r"(?<![A-Za-z0-9_.-])(\.%s)(?![A-Za-z0-9_-])((?:[\\/]+[^\s'\"\\/;|&)<>]*)*)"
+    % names.names_pattern(),
     re.IGNORECASE)
 
 
@@ -850,9 +851,9 @@ def _mentions_state(command: str) -> Optional[str]:
     """The first gatekit-owned path an (opaque) command's text spells — a
     ``.gatekit`` directory itself or anything below it but the user's."""
     for match in _STATE_MENTION_RE.finditer(command):
-        rest = [p for p in re.split(r"[\\/]+", match.group(1).lower()) if p and p != "."]
+        rest = [p for p in re.split(r"[\\/]+", match.group(2).lower()) if p and p != "."]
         if not write.user_owned(rest):
-            return _STATE + ("/" + "/".join(rest) if rest else "")
+            return match.group(1).lower() + ("/" + "/".join(rest) if rest else "")
     return None
 
 
@@ -862,6 +863,8 @@ def _lower_abs(path: str) -> str:
 
 _GLOB_CHARS = frozenset("*?[{")
 _STATE = paths.STATE_DIRNAME
+#: ADR-0029: every state directory name is gatekit's state.
+_STATES = tuple(paths.STATE_DIRNAMES)
 
 
 def _base(path: str) -> str:
@@ -909,7 +912,7 @@ def _glob_state_hit(path: str, whole: bool = False) -> bool:
         return False
     segs = _glob_segments(path)
     for index, seg in enumerate(segs):
-        if not _segment_match(_STATE, seg):
+        if not any(_segment_match(s, seg) for s in _STATES):
             continue
         rest = segs[index + 1:]
         if not rest:
@@ -931,7 +934,7 @@ def _contains_protected(root, removed: str) -> bool:
     if _glob_hits(removed, ancestors) or _glob_state_hit(removed, whole=True):
         return True
     for candidate in {_lower_abs(removed), _lower_abs(os.path.realpath(removed))}:
-        if candidate.rsplit("/", 1)[-1] == _STATE:
+        if candidate.rsplit("/", 1)[-1] in _STATES:
             return True
         if state.startswith(candidate + "/") or candidate in ("", "/"):
             return True
@@ -942,7 +945,7 @@ def _is_state_dir(path: str) -> bool:
     """True when *path* (absolute) is a ``.gatekit`` directory, as written or
     after realpath."""
     for candidate in (_lower_abs(path), _lower_abs(os.path.realpath(path))):
-        if candidate.rsplit("/", 1)[-1] == _STATE:
+        if candidate.rsplit("/", 1)[-1] in _STATES:
             return True
     return False
 
@@ -952,7 +955,7 @@ def _state_dir_text(text: str) -> bool:
     spells a ``.gatekit`` directory or a gatekit-owned path below one."""
     segs = [s for s in write._canonical(text).lower().split("/") if s and s != "."]
     for index, seg in enumerate(segs):
-        if seg == _STATE and not write.user_owned(segs[index + 1:]):
+        if seg in _STATES and not write.user_owned(segs[index + 1:]):
             return True
     return False
 
@@ -964,7 +967,7 @@ def _copy_hit(root, sources: List[str], dest: str, raws: List[str]) -> Optional[
     ``.gatekit`` directory."""
     state = _state_path(root)
     dests = {_lower_abs(dest), _lower_abs(os.path.realpath(dest))}
-    into_state = any(d.rsplit("/", 1)[-1] == _STATE for d in dests)
+    into_state = any(d.rsplit("/", 1)[-1] in _STATES for d in dests)
     into_parent = state.rsplit("/", 1)[0] in dests
     for source, raw in zip(sources, raws):
         base = _base(source)
@@ -972,8 +975,8 @@ def _copy_hit(root, sources: List[str], dest: str, raws: List[str]) -> Optional[
         if into_state and (by_contents or _GLOB_CHARS & set(base)
                            or not write.user_owned([base])):
             return _STATE + "/"
-        if into_parent and (_segment_match(_STATE, base)
-                            or (by_contents and _dir_holds(source, {_STATE}))):
+        if into_parent and (any(_segment_match(s, base) for s in _STATES)
+                            or (by_contents and _dir_holds(source, set(_STATES)))):
             return _STATE + "/"
     return None
 
@@ -998,7 +1001,8 @@ def _gatekit_cwd(root, found: WriteTargets) -> bool:
 def _in_state_cwd(root, command: str, found: WriteTargets) -> bool:
     """True when the command may run from gatekit's state: one of its
     working directories is there (after realpath), or its text names one."""
-    return _STATE in command.lower() or _gatekit_cwd(root, found)
+    lowered = command.lower()
+    return any(s in lowered for s in _STATES) or _gatekit_cwd(root, found)
 
 
 def protected_hit(root, command: str, found: WriteTargets) -> Optional[str]:
@@ -1076,7 +1080,7 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return hookio.allow()
 
     root = hookio.event_root(event)
-    task_id = os.environ.get("GATEKIT_TASK_ID")
+    task_id = names.task_id()
     if task_id and invokes_gatekit_approve(command):
         return hookio.deny(_message(
             write.session_lang(root, event), "approve", task=task_id, cmd=_shown(command)))
