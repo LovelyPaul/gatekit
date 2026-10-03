@@ -972,6 +972,11 @@ class TestUnpassedTasksAreNotAHandoffOk(Project):
         self.assertIn("t2 (failed)", result["reason"])
         self.assertIn("t3 (blocked)", result["reason"])
         self.assertNotIn("t1", result["reason"])
+        # Host execution reruns a task with `jobs complete`; a worker build with
+        # `jobs redelegate`. Naming only the latter pushes a host session to
+        # spawn a worker.
+        self.assertIn("jobs complete <task>", result["reason"])
+        self.assertIn("jobs redelegate <task>", result["reason"])
         data = self.led().data["stop"]
         self.assertEqual(data["block_count"], 1)
         self.assertIsNone(data["stood_down"])

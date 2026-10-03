@@ -112,7 +112,8 @@ _MESSAGES = {
         "tasks_unpassed": (
             "gatekit: build job {job} has settled, but not every task passed, so this "
             "work is not done:\n{reasons}\n"
-            "Fix those tasks and run them again (`jobs redelegate <task>`), or start "
+            "Fix those tasks and run them again — `jobs complete <task>` under host "
+            "execution, `jobs redelegate <task>` under worker execution — or start "
             "a new job. A task that is `blocked` never ran: that is not a pass."
         ),
         "tasks_line": "tasks not passed in {job}: {tasks}",
@@ -174,8 +175,8 @@ _MESSAGES = {
         "tasks_unpassed": (
             "gatekit: 빌드 잡 {job} 은 끝났지만 통과하지 못한 태스크가 있어 아직 끝난 "
             "것이 아닙니다:\n{reasons}\n"
-            "그 태스크를 고친 뒤 다시 실행하거나(`jobs redelegate <task>`) 새 잡을 "
-            "시작하세요. `blocked` 태스크는 실행되지 않았으며 통과가 아닙니다."
+            "그 태스크를 고친 뒤 다시 실행하거나(호스트 실행이면 `jobs complete <task>`, "
+            "워커 실행이면 `jobs redelegate <task>`) 새 잡을 시작하세요. `blocked` 태스크는 실행되지 않았으며 통과가 아닙니다."
         ),
         "tasks_line": "{job} 에서 통과하지 못한 태스크: {tasks}",
         "stale": (
