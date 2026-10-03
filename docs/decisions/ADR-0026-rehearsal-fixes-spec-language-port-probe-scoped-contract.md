@@ -159,3 +159,16 @@ to the spec's on its next bare prompt. Loading now backfills a missing key as
 `"prompt"` when the ledger's `output_lang` is `ko` or it holds a `prompt`
 event (before ADR-0026 only a prompt could set the language), and as `null`
 otherwise. A present key, `null` included, is left alone.
+
+### A4. The contract field's suffix describes the last run on this tree
+
+Decision 3 compared only `source_sha256`. After edits the suffix described an
+older tree's run; `contract=ok (turn tier; …)` read as a passing verdict even
+when that run had failed; and a record without `scope` (pre-ADR-0024) was
+read as having judged nothing. The suffix is now shown only when
+`contract.same_tree_record(root)` holds (same contract, no-tests signatures
+and tree fingerprint) and the record has a `scope` list. It names the run and
+its scope, never a verdict: `contract=ok (last run: turn tier, N deferred to
+/gatekit:verify)` and `last run: M unjudged`, in Korean `contract=ok (마지막
+실행: turn 등급만, N개는 /gatekit:verify 로 미룸)` and `M개 미판정`.
+`contract=ok` keeps its meaning: the contract matches the approved gate file.

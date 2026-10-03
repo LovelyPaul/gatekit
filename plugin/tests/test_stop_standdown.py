@@ -427,12 +427,12 @@ class TestContractFieldScope(Project):
     def test_turn_tier_result_names_the_deferred_count(self) -> None:
         self.stood_down("en")
         text = prompt_gate.build_context(self.root, self.led())
-        self.assertIn("contract=ok (turn tier; 1 deferred to /gatekit:verify)", text)
+        self.assertIn("contract=ok (last run: turn tier, 1 deferred to /gatekit:verify)", text)
 
     def test_korean_scope(self) -> None:
         self.stood_down("ko")
         text = prompt_gate.build_context(self.root, self.led())
-        self.assertIn("contract=ok (turn 등급만; 1개는 /gatekit:verify 로 미룸)", text)
+        self.assertIn("contract=ok (마지막 실행: turn 등급만, 1개는 /gatekit:verify 로 미룸)", text)
 
     def test_a_full_run_shows_plain_ok(self) -> None:
         self.stood_down("en")
@@ -454,7 +454,7 @@ class TestContractFieldScope(Project):
             "reasons": [], "scope": ["a"],
             "deferred": [{"id": "b", "tier": "turn", "reason": "budget"}]})
         text = prompt_gate.build_context(self.root, self.led())
-        self.assertIn("contract=ok (1 unjudged)", text)
+        self.assertIn("contract=ok (last run: 1 unjudged)", text)
 
     def test_record_for_another_contract_is_ignored(self) -> None:
         self.stood_down("en")
@@ -462,6 +462,35 @@ class TestContractFieldScope(Project):
                             counting("extra"))
         text = prompt_gate.build_context(self.root, self.led())
         self.assertNotIn("contract=ok (", text)
+
+    def test_record_for_an_older_tree_is_ignored(self) -> None:
+        # Review of 0.16.1: after edits the record describes another tree.
+        self.stood_down("en")
+        (self.root / "src").mkdir(exist_ok=True)
+        (self.root / "src" / "edited.ts").write_text("x", encoding="utf-8")
+        text = prompt_gate.build_context(self.root, self.led())
+        self.assertIn("contract=ok", text)
+        self.assertNotIn("contract=ok (", text)
+
+    def test_record_without_scope_is_ignored(self) -> None:
+        # A pre-ADR-0024 record does not say what it judged.
+        self.write_contract(counting("a"), counting("b", tier="verify"))
+        contract.save_last(self.root, {"verdict": "ok", "criteria": [], "reasons": []})
+        path = contract._last_result_path(self.root)
+        record = json.loads(path.read_text(encoding="utf-8"))
+        del record["scope"]
+        path.write_text(json.dumps(record), encoding="utf-8")
+        text = prompt_gate.build_context(self.root, self.led())
+        self.assertNotIn("contract=ok (", text)
+
+    def test_suffix_never_reads_as_a_verdict(self) -> None:
+        # The last turn-tier run failed: the suffix must not say "ok".
+        self.write_contract(counting("a", exit_code=1), counting("b", tier="verify"))
+        contract.save_last(self.root, contract.execute(self.root, tiers=("turn",)))
+        self.assertEqual(contract.load_last(self.root)["result"]["verdict"], "fail")
+        text = prompt_gate.build_context(self.root, self.led())
+        self.assertIn("contract=ok (last run: turn tier, 1 deferred to /gatekit:verify)", text)
+        self.assertNotIn("ok (turn tier", text)
 
     def test_line_survives_the_600_char_cut(self) -> None:
         self.stood_down("ko")

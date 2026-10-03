@@ -176,24 +176,29 @@ def build_context(root, led: "ledger.Ledger") -> str:
 
 #: ADR-0026: what the last recorded result left unjudged. `contract=ok` alone
 #: says the contract matches the approved gate file; next to a stand-down it
-#: read as "fully verified" while verify-tier criteria had not run.
+#: read as "fully verified" while verify-tier criteria had not run. The
+#: suffix describes the last run's *scope* only, never its verdict, so it
+#: cannot contradict the record (0.16.2 amendment).
 _SCOPE = {
-    "en": {"tier": "turn tier; {count} deferred to /gatekit:verify",
+    "en": {"lead": "last run: ",
+           "tier": "turn tier, {count} deferred to /gatekit:verify",
            "other": "{count} unjudged"},
-    "ko": {"tier": "turn 등급만; {count}개는 /gatekit:verify 로 미룸",
+    "ko": {"lead": "마지막 실행: ",
+           "tier": "turn 등급만, {count}개는 /gatekit:verify 로 미룸",
            "other": "{count}개 미판정"},
 }
 
 
 def _contract_scope(root, lang: str = "en") -> str:
-    """`` (turn tier; N deferred to /gatekit:verify)`` when the last recorded
-    result for this contract did not judge every criterion, else ""."""
+    """`` (last run: turn tier, N deferred to /gatekit:verify)`` when the
+    last recorded result is for this contract *and this tree*, says what it
+    judged (a ``scope`` list, ADR-0024), and did not judge every criterion;
+    else ""."""
     try:
-        last = contract.load_last(root)
-        data = contract.load(root)
-        if not last or not data or last.get("source_sha256") != data.get("source_sha256"):
+        last = contract.same_tree_record(root)
+        if not last or not isinstance(last.get("scope"), list):
             return ""
-        judged = {str(i) for i in (last.get("scope") or [])}
+        judged = {str(i) for i in last["scope"]}
         unjudged = [i for i in contract.tier_scope(root) if i not in judged]
         if not unjudged:
             return ""
@@ -206,7 +211,7 @@ def _contract_scope(root, lang: str = "en") -> str:
             pieces.append(table["tier"].format(count=held))
         if other:
             pieces.append(table["other"].format(count=other))
-        return " (" + "; ".join(pieces) + ")"
+        return " (" + table["lead"] + "; ".join(pieces) + ")"
     except Exception:
         # The context line is a convenience; never let it break the hook.
         return ""
