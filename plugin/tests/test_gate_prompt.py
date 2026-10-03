@@ -109,6 +109,71 @@ class TestLanguageDetection(PromptProject):
         self.assertIn("en", self.context_of(result))
 
 
+BARE_BUILD = ("<command-message>gatekit:build</command-message>\n"
+              "<command-name>/gatekit:build</command-name>\n"
+              "<command-args></command-args>")
+KO_PRD = "# 메모 앱\n\n## 문제\n사용자는 메모를 빠르게 남기고 싶다.\n"
+EN_PRD = "# Notes app\n\n## Problem\nUsers want to jot notes down fast.\n"
+
+
+class TestLanguageFromSpec(PromptProject):
+    """ADR-0026: until a prompt carries a signal, the spec decides.
+
+    Rehearsal of 0.16.0: the only prompt was `/gatekit:build`, the ledger kept
+    its blank `en`, and a Korean project got English build reports."""
+
+    def write_prd(self, text: str, name: str = "01-prd.md") -> None:
+        (self.root / "spec").mkdir(exist_ok=True)
+        (self.root / "spec" / name).write_text(text, encoding="utf-8")
+
+    def test_bare_slash_command_in_a_korean_spec_project_is_ko(self) -> None:
+        self.write_prd(KO_PRD)
+        context = self.context_of(prompt_gate.handle(self.event(BARE_BUILD)))
+        self.assertEqual(self.led().data["output_lang"], "ko")
+        self.assertEqual(self.led().data["lang_source"], "spec")
+        self.assertIn("output_lang=ko", context)
+
+    def test_bare_slash_command_in_an_english_spec_project_is_en(self) -> None:
+        self.write_prd(EN_PRD)
+        prompt_gate.handle(self.event(BARE_BUILD))
+        self.assertEqual(self.led().data["output_lang"], "en")
+
+    def test_bare_slash_command_without_a_spec_is_en(self) -> None:
+        prompt_gate.handle(self.event(BARE_BUILD))
+        self.assertEqual(self.led().data["output_lang"], "en")
+        self.assertIsNone(self.led().data["lang_source"])
+
+    def test_discovery_record_when_no_prd(self) -> None:
+        self.write_prd("# 발견\n\n사용자 인터뷰 기록\n", name="00-discovery.md")
+        prompt_gate.handle(self.event("/gatekit:build"))
+        self.assertEqual(self.led().data["output_lang"], "ko")
+
+    def test_korean_prompt_in_an_english_spec_project_is_ko(self) -> None:
+        self.write_prd(EN_PRD)
+        prompt_gate.handle(self.event("로그인 화면을 만들어줘"))
+        self.assertEqual(self.led().data["output_lang"], "ko")
+        self.assertEqual(self.led().data["lang_source"], "prompt")
+
+    def test_a_prompt_signal_is_not_overridden_by_the_spec_later(self) -> None:
+        self.write_prd(KO_PRD)
+        prompt_gate.handle(self.event("build the login screen"))
+        prompt_gate.handle(self.event(BARE_BUILD))
+        prompt_gate.handle(self.event("1"))
+        self.assertEqual(self.led().data["output_lang"], "en")
+
+    def test_a_spec_written_later_in_the_session_is_picked_up(self) -> None:
+        prompt_gate.handle(self.event(BARE_BUILD))
+        self.assertEqual(self.led().data["output_lang"], "en")
+        self.write_prd(KO_PRD)
+        prompt_gate.handle(self.event("2"))
+        self.assertEqual(self.led().data["output_lang"], "ko")
+
+    def test_unreadable_spec_keeps_the_hook_working(self) -> None:
+        (self.root / "spec" / "01-prd.md").mkdir(parents=True)
+        result = prompt_gate.handle(self.event(BARE_BUILD))
+        self.assertIn("output_lang=en", self.context_of(result))
+
+
 class TestContextPayload(PromptProject):
     def test_shape_is_user_prompt_submit(self) -> None:
         result = prompt_gate.handle(self.event("hello"))

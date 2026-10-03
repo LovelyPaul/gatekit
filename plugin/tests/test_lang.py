@@ -80,6 +80,51 @@ class TestDetect(unittest.TestCase):
         self.assertEqual(lang.detect("漢字 only here"), "en")
 
 
+class TestFromSpec(unittest.TestCase):
+    """ADR-0026: the spec's language, for a session whose prompts said nothing."""
+
+    def setUp(self) -> None:
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self._tmp.name)
+        (self.root / "spec").mkdir()
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def write(self, name: str, text: str) -> None:
+        (self.root / "spec" / name).write_text(text, encoding="utf-8")
+
+    def test_no_spec_is_none(self) -> None:
+        self.assertIsNone(lang.from_spec(self.root))
+
+    def test_korean_prd(self) -> None:
+        self.write("01-prd.md", "# 메모 앱\n\n## 문제\n사용자는 메모를 빠르게 남기고 싶다.\n")
+        self.assertEqual(lang.from_spec(self.root), "ko")
+
+    def test_english_prd(self) -> None:
+        self.write("01-prd.md", "# Notes app\n\n## Problem\nUsers want to jot notes fast.\n")
+        self.assertEqual(lang.from_spec(self.root), "en")
+
+    def test_discovery_when_no_prd(self) -> None:
+        self.write("00-discovery.md", "# 발견\n\n사용자 인터뷰 기록\n")
+        self.assertEqual(lang.from_spec(self.root), "ko")
+
+    def test_prd_wins_over_discovery(self) -> None:
+        self.write("00-discovery.md", "# 발견\n\n사용자 인터뷰 기록\n")
+        self.write("01-prd.md", "# Notes app\n\nUsers want to jot notes fast.\n")
+        self.assertEqual(lang.from_spec(self.root), "en")
+
+    def test_only_the_head_is_read(self) -> None:
+        body = "# Notes app\n" + "Plain English line.\n" * 45 + "한국어 " * 500 + "\n"
+        self.write("01-prd.md", body)
+        self.assertEqual(lang.from_spec(self.root), "en")
+
+    def test_spec_without_letters_is_none(self) -> None:
+        self.write("01-prd.md", "---\n1. 2. 3.\n")
+        self.assertIsNone(lang.from_spec(self.root))
+
+
 class TestRun(unittest.TestCase):
     def test_run_prints_detected_language(self) -> None:
         import io

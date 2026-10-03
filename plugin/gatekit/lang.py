@@ -113,6 +113,36 @@ def detect(text: Optional[str]) -> str:
     return KO if (hangul / letters) >= HANGUL_THRESHOLD else EN
 
 
+#: Spec files whose language stands in for the user's while no prompt in the
+#: session has said anything (ADR-0026), in order of preference.
+SPEC_LANG_FILES = ("01-prd.md", "00-discovery.md")
+#: Only the head of the file is read: the title and the first sections are
+#: the user's words; later sections may quote code or English sources.
+SPEC_LANG_LINES = 40
+
+
+def from_spec(root) -> Optional[str]:
+    """``"ko"``/``"en"`` from the project's spec, else ``None``.
+
+    The first of :data:`SPEC_LANG_FILES` under ``spec/`` whose first
+    :data:`SPEC_LANG_LINES` lines carry a signal decides. A missing or
+    unreadable file, or one with no letters, gives no answer — never a
+    default.
+    """
+    from gatekit import paths
+
+    for name in SPEC_LANG_FILES:
+        try:
+            with open(paths.spec_dir(root) / name, encoding="utf-8",
+                      errors="replace") as handle:
+                head = "".join(line for _, line in zip(range(SPEC_LANG_LINES), handle))
+        except (OSError, ValueError):
+            continue
+        if carries_signal(head):
+            return detect(head)
+    return None
+
+
 def run(argv: List[str]) -> int:
     """``python3 -m gatekit lang <text...>`` — print the detected language."""
     text = " ".join(argv)

@@ -16,7 +16,8 @@ This gate never blocks. It does two things on every prompt:
    is exactly the kind of instruction that fires nondeterministically.
 
 An empty prompt leaves the stored language alone: submitting a blank line is
-not evidence that the user switched to English.
+not evidence that the user switched to English. Until some prompt in the
+session carries a signal, the spec's language stands in (ADR-0026).
 """
 from __future__ import annotations
 
@@ -172,6 +173,16 @@ def build_context(root, led: "ledger.Ledger") -> str:
     return " | ".join(parts)
 
 
+def _lang_from_spec(root, led: "ledger.Ledger") -> None:
+    try:
+        found = lang.from_spec(root)
+    except Exception:
+        # A convenience; never let it break the hook.
+        return
+    if found:
+        led.set_output_lang(found, source="spec")
+
+
 def _stand_down_line(root, led: "ledger.Ledger") -> str:
     try:
         from gatekit.gates import stop as stop_gate
@@ -252,7 +263,12 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     # <command-args> content counts.
     signal = language_signal(text)
     if lang.carries_signal(signal):
-        led.set_output_lang(lang.detect(signal))
+        led.set_output_lang(lang.detect(signal), source="prompt")
+    elif led.data.get("lang_source") != "prompt":
+        # ADR-0026: no prompt has said anything yet — a bare `/gatekit:build`
+        # left a Korean project reporting in English. The spec the user wrote
+        # stands in until their own words arrive.
+        _lang_from_spec(root, led)
 
     apply_command(led, text)
 

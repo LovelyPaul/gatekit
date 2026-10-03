@@ -77,6 +77,8 @@ def _blank(session_id: str) -> Dict[str, Any]:
         "created_at": now,
         "updated_at": now,
         "output_lang": "en",
+        # ADR-0026: where output_lang came from — "prompt", "spec" or None.
+        "lang_source": None,
         "active_pipeline": None,
         "questions": {"asked": 0, "max_calls": 2, "budget_exceeded": False},
         "scopes": [],
@@ -297,8 +299,13 @@ class Ledger:
         value = self.data.get("output_lang")
         return value if value in ("ko", "en") else "en"
 
-    def set_output_lang(self, value: str) -> None:
+    def set_output_lang(self, value: str, source: Optional[str] = None) -> None:
+        """Store the language; *source* (``"prompt"``/``"spec"``) is recorded
+        when given, so the prompt hook knows whether the user has spoken yet
+        (ADR-0026)."""
         self.data["output_lang"] = value if value in ("ko", "en") else "en"
+        if source in ("prompt", "spec"):
+            self.data["lang_source"] = source
 
     def set_pipeline(self, name: Optional[str]) -> bool:
         """Set ``active_pipeline`` to *name* (``None`` clears it).
