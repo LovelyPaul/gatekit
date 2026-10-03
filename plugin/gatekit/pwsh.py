@@ -252,7 +252,7 @@ def _lex(text: str, nested: List[str]) -> List[_Tok]:
 
     while i < n:
         ch = text[i]
-        nxt = text[i + 1] if i + 1 < n else ""
+        nxt = text[i + 1] if i + 1 < n else "\0"
         if ch in _WS:
             i += 1
             continue
@@ -487,6 +487,13 @@ _OPAQUE_PATTERNS = (
      ".NET I/O type"),
     (re.compile(r"\[\s*(?:system\.)?io\.(?:file|directory)\s*\]\s*::\s*new\b", re.I),
      ".NET I/O type"),
+    (re.compile(r"(?im)^\s*using\s+namespace\b"), "using namespace"),
+    (re.compile(r"(?:\)|\$[\w:{}]+)\s*::"), "static call on a computed type"),
+    (re.compile(r"::\s*['\"(]"), "computed member name"),
+    (re.compile(r"\[[^\]\n]*,[^\]\n]*\]\s*::"), "assembly-qualified type"),
+    (re.compile(r"\[\s*(?:system\.)?environment\s*\]\s*::\s*currentdirectory", re.I),
+     "process current directory"),
+    (re.compile(r"(?i)(?<![\w-])(?:alias|function):"), "alias or function through a provider"),
     (re.compile(r"(?<![:\w])\.\s*(?:delete|moveto|copyto|create|createtext|appendtext|"
                 r"createsubdirectory|open|openwrite|encrypt|decrypt|save|downloadfile|"
                 r"downloadfileasync|downloadstring|write|writeline|writealltext|"
@@ -645,7 +652,7 @@ CMDLETS: Dict[str, dict] = {
     "export-csv": _spec("write", ("path", "delimiter"), _EXPORT),
     "export-clixml": _spec("write", ("path",), _EXPORT),
     "start-transcript": _spec("transcript", ("path",), _PATHS, {
-        "outputdirectory": "path", "append": "switch", "force": "switch",
+        "outputdirectory": "outdir", "append": "switch", "force": "switch",
         "noclobber": "switch", "includeinvocationheader": "switch",
         "useminimalheader": "switch"}),
     "compress-archive": _spec("write", ("source", "path"), _SOURCES, {
@@ -661,19 +668,38 @@ CMDLETS: Dict[str, dict] = {
         "filepath": "program", "argumentlist": "arglist", "args": "arglist",
         "redirectstandardoutput": "path", "rso": "path", "redirectstandarderror": "path",
         "rse": "path", "redirectstandardinput": "value", "rsi": "value",
-        "workingdirectory": "value", "verb": "value", "windowstyle": "value",
+        "workingdirectory": "wd", "verb": "value", "windowstyle": "value",
         "credential": "value", "environment": "value", "wait": "switch",
         "nonewwindow": "switch", "nnw": "switch", "passthru": "switch",
         "loaduserprofile": "switch", "lup": "switch", "usenewenvironment": "switch"},
         lenient=True),
     "invoke-expression": _spec("iex", ("command",), {"command": "command"}),
-    "invoke-command": _spec("icm", ("scriptblock",), {"scriptblock": "command"}, lenient=True),
-    "start-job": _spec("icm", ("scriptblock",), {"scriptblock": "command"}, lenient=True),
-    "start-threadjob": _spec("icm", ("scriptblock",), {"scriptblock": "command"}, lenient=True),
+    "invoke-command": _spec("icm", ("scriptblock",), {"scriptblock": "command", "workingdirectory": "wd",
+                                          "filepath": "script"}, lenient=True),
+    "start-job": _spec("icm", ("scriptblock",), {"scriptblock": "command", "workingdirectory": "wd",
+                                          "filepath": "script"}, lenient=True),
+    "start-threadjob": _spec("icm", ("scriptblock",), {"scriptblock": "command", "workingdirectory": "wd",
+                                          "filepath": "script"}, lenient=True),
     "new-object": _spec("newobj", ("typename", "arglist"), {
         "typename": "typename", "comobject": "com", "argumentlist": "value", "args": "value",
         "property": "value", "strict": "switch"}, lenient=True),
     "add-type": _spec("opaque", (), lenient=True),
+    "new-psdrive": _spec("opaque", (), lenient=True),
+    "foreach-object": _spec("foreach", ("member",), {
+        "membername": "member", "process": "value", "begin": "value", "end": "value",
+        "remainingscripts": "value", "argumentlist": "value", "inputobject": "value",
+        "parallel": "value", "throttlelimit": "value", "timeoutseconds": "value",
+        "asjob": "switch"}, lenient=True),
+    "unblock-file": _spec("write", ("path",), _PATHS),
+    "save-help": _spec("write", ("path",), {"destinationpath": "path", "literalpath": "path"},
+                       lenient=True),
+    "save-module": _spec("write", (), _PATHS, lenient=True),
+    "save-script": _spec("write", (), _PATHS, lenient=True),
+    "save-psresource": _spec("write", (), _PATHS, lenient=True),
+    "new-modulemanifest": _spec("write", ("path",), {"path": "path"}, lenient=True),
+    "new-scriptfileinfo": _spec("write", ("path",), {"path": "path"}, lenient=True),
+    "set-authenticodesignature": _spec("write", ("path",), {
+        "filepath": "path", "literalpath": "path"}, lenient=True),
     "set-alias": _spec("opaque", (), lenient=True),
     "new-alias": _spec("opaque", (), lenient=True),
     "import-alias": _spec("opaque", (), lenient=True),
@@ -700,7 +726,8 @@ ALIASES = {
     "epcsv": "export-csv", "iwr": "invoke-webrequest", "curl": "invoke-webrequest",
     "wget": "invoke-webrequest", "irm": "invoke-restmethod", "saps": "start-process",
     "start": "start-process", "iex": "invoke-expression", "icm": "invoke-command",
-    "sajb": "start-job", "sal": "set-alias", "nal": "new-alias", "ipal": "import-alias", "cd": "set-location", "chdir": "set-location", "sl": "set-location",
+    "sajb": "start-job", "ndr": "new-psdrive", "%": "foreach-object", "foreach": "foreach-object",
+    "epal": "export-alias", "sal": "set-alias", "nal": "new-alias", "ipal": "import-alias", "cd": "set-location", "chdir": "set-location", "sl": "set-location",
     "pushd": "push-location", "popd": "pop-location", "sv": "set-variable",
     "set": "set-variable", "nv": "new-variable",
 }
@@ -720,11 +747,15 @@ _RUNNERS = {"pwsh", "powershell", "cmd", "bash", "sh", "zsh", "wsl", "python", "
             "py", "node", "ruby", "perl", "php", "deno", "bun", "ts-node", "tsx", "wscript",
             "cscript", "mshta", "rundll32", "regsvr32"}
 #: Native programs whose effect the reader does not model.
-_NATIVE_OPAQUE = {"cmd": "cmd /c", "wsl": "wsl", "fsutil": "fsutil", "certutil": "certutil",
+_NATIVE_OPAQUE = {"cmd": "cmd /c", "subst": "subst", "wsl": "wsl", "fsutil": "fsutil", "certutil": "certutil",
                   "wscript": "wscript", "cscript": "cscript", "mshta": "mshta",
                   "rundll32": "rundll32", "regsvr32": "regsvr32", "msiexec": "msiexec",
                   "expand": "expand", "makecab": "makecab", "mklink": "mklink"}
 _SHELL_NAMES = {"pwsh", "powershell"}
+_VERSIONED_RUNNER = re.compile(r"^(?:python|pypy|node|ruby|perl|php)[\d.]*$")
+_WRITE_MEMBER = re.compile(
+    r"(?i)^(?:delete|moveto|copyto|create\w*|open\w*|write\w*|append\w*|save|encrypt|"
+    r"decrypt|replace|setaccesscontrol|clear|remove\w*|set\w*|invoke\w*|refresh)$")
 _LINK_TYPES = {"symboliclink", "hardlink", "junction"}
 _PATH_KINDS = ("path", "source", "dest", "target", "name", "newname", "program")
 
@@ -733,7 +764,7 @@ _PATH_KINDS = ("path", "source", "dest", "target", "name", "newname", "program")
 # the reading context
 # --------------------------------------------------------------------------
 class _Ctx:
-    __slots__ = ("result", "cwd", "stack", "string_depth", "block_depth")
+    __slots__ = ("result", "cwd", "stack", "string_depth", "block_depth", "ran_script")
 
     def __init__(self, result: PSWriteTargets, cwd: Optional[str]) -> None:
         self.result = result
@@ -741,6 +772,9 @@ class _Ctx:
         self.stack: List[Optional[str]] = []
         self.string_depth = 0
         self.block_depth = 0
+        #: a script file or interpreter script runs; one written by the same
+        #: command could do anything (ADR-0028 review)
+        self.ran_script = False
 
 
 class _Value:
@@ -976,7 +1010,7 @@ def _command(toks: List[_Tok], ctx: _Ctx, piped: bool) -> None:
             return
         if head.quoted or head.dynamic or head.value[:1] in "[0123456789-+!":
             return  # an expression, not a command
-        if head.value.lower() in _KEYWORDS:
+        if head.value.lower() in _KEYWORDS and not (piped and head.value.lower() == "foreach"):
             _command(toks[1:], ctx, piped)
             return
     elif head.dynamic or head.splat:
@@ -984,13 +1018,22 @@ def _command(toks: List[_Tok], ctx: _Ctx, piped: bool) -> None:
         return
     raw = head.value
     args = _args(toks[1:])
-    if call == "." and raw.lower().endswith(".ps1"):
-        return  # dot-sourcing a script: a program invoked by name
+    if raw.lower().endswith(".ps1"):
+        ctx.ran_script = True
+        return  # a script: a program invoked by name
     _dispatch(raw, args, ctx, piped)
 
 
 def _assignment(toks: List[_Tok], ctx: _Ctx) -> Optional[List[_Tok]]:
     """For ``$x = …``: record the value and return the tokens of its right side."""
+    head = toks[0]
+    right = _assignment_right(toks, ctx)
+    if right is not None and "pwd" in ctx.result.assigns:
+        ctx.cwd = None  # $PWD reassigned: it no longer names the location
+    return right
+
+
+def _assignment_right(toks: List[_Tok], ctx: _Ctx) -> Optional[List[_Tok]]:
     head = toks[0]
     match = _VAR_ASSIGN.match(head.value) if not head.quoted else None
     if match and head.dynamic:
@@ -1106,6 +1149,9 @@ def _bind(spec: dict, args: List[List[_Tok]]) -> _Binding:
     while index < len(args):
         arg = args[index]
         first = arg[0]
+        if len(arg) == 1 and first.kind == "word" and first.param and first.value == "--":
+            positional.extend(args[index + 1:])  # `--` ends the parameters
+            break
         match = _PARAM_RE.match(first.value) if (
             len(arg) == 1 and first.kind == "word" and first.param) else None
         if match and not first.value.startswith("--"):
@@ -1195,9 +1241,20 @@ def _run_cmdlet(cmdlet: str, spec: dict, args: List[List[_Tok]], ctx: _Ctx, pipe
                 _read_string(value.text, ctx)
         return
     if kind == "icm":
+        if binding.values("wd"):
+            result.mark_opaque("%s in another working directory" % cmdlet)
+        if binding.values("script"):
+            ctx.ran_script = True
         for value in binding.values("command"):
             if value.code is None and (value.dynamic or value.splat):
                 result.mark_opaque("%s of a variable" % cmdlet)
+        return
+    if kind == "foreach":
+        for value in binding.values("member"):
+            if value.code is not None:
+                continue
+            if value.dynamic or value.splat or _WRITE_MEMBER.match(value.text):
+                result.mark_opaque("method call that may write")
         return
     if kind == "newobj":
         if binding.values("com"):
@@ -1220,8 +1277,26 @@ def _run_cmdlet(cmdlet: str, spec: dict, args: List[List[_Tok]], ctx: _Ctx, pipe
             result.mark_opaque("Start-Process of a variable")
             return
         name = _canonical_name(program.text)[0]
-        if name in _RUNNERS or name in ("gatekit", "gatekit.py"):
+        if name.endswith(".ps1"):
+            ctx.ran_script = True
+            return
+        if name in _RUNNERS or _VERSIONED_RUNNER.match(name) or name in ("gatekit", "gatekit.py"):
             result.mark_opaque("Start-Process %s" % name)
+            return
+        values: List[_Value] = []
+        for value in binding.values("arglist"):
+            if value.dynamic or value.splat:
+                result.mark_opaque("Start-Process arguments from a variable")
+                return
+            values.extend(_Value(part, False) for part in value.text.split())
+        saved = ctx.cwd
+        for wd in binding.values("wd"):
+            new = _resolve(wd.text, wd.dynamic, ctx.cwd)
+            ctx.cwd = new if isinstance(new, str) else None
+        try:
+            _native_values(name, values, ctx, False)
+        finally:
+            ctx.cwd = saved
         return
     if kind == "download":
         for value in binding.values("path"):
@@ -1229,6 +1304,9 @@ def _run_cmdlet(cmdlet: str, spec: dict, args: List[List[_Tok]], ctx: _Ctx, pipe
         return
     if kind == "transcript":
         paths = binding.values("path")
+        for value in binding.values("outdir"):
+            paths.append(_Value(value.text.rstrip("\\/") + "/PowerShell_transcript.txt",
+                                value.dynamic, value.splat))
         if not paths:
             result.mark_opaque("transcript to the default location")
         for value in paths:
@@ -1368,8 +1446,11 @@ def _copy_move(binding: _Binding, ctx: _Ctx, piped: bool, why: str, kind: str) -
 # native programs
 # --------------------------------------------------------------------------
 def _native(name: str, args: List[List[_Tok]], ctx: _Ctx, piped: bool) -> None:
+    _native_values(name, [_value_of(t) for arg in args for t in arg], ctx, piped)
+
+
+def _native_values(name: str, flat: List[_Value], ctx: _Ctx, piped: bool) -> None:
     result = ctx.result
-    flat: List[_Value] = [_value_of(t) for arg in args for t in arg]
     if name in _SHELL_NAMES:
         _nested_powershell(flat, ctx, piped)
         return
@@ -1390,6 +1471,10 @@ def _native(name: str, args: List[List[_Tok]], ctx: _Ctx, piped: bool) -> None:
         return
     if name == "py":
         name = "python"
+    if (name in _RUNNERS or _VERSIONED_RUNNER.match(name)) and any(
+            not v.text.startswith("-") for v in flat) and not any(
+            v.text in bash._INLINE_FLAGS for v in flat):
+        ctx.ran_script = True
     keep = name in bash._SHELLS  # a POSIX script: leave its text alone
     words = [name]
     for value in flat:
@@ -1448,6 +1533,15 @@ _PS_VALUED = ("executionpolicy", "ep", "ex", "windowstyle", "w", "workingdirecto
 def _nested_powershell(flat: List[_Value], ctx: _Ctx, piped: bool) -> None:
     """``pwsh -Command '…'``, ``-EncodedCommand``, ``-File``, stdin."""
     result = ctx.result
+    saved = ctx.cwd
+    try:
+        _powershell_args(flat, ctx, piped)
+    finally:
+        ctx.cwd = saved
+
+
+def _powershell_args(flat: List[_Value], ctx: _Ctx, piped: bool) -> None:
+    result = ctx.result
     index = 0
     while index < len(flat):
         value = flat[index]
@@ -1457,15 +1551,24 @@ def _nested_powershell(flat: List[_Value], ctx: _Ctx, piped: bool) -> None:
             result.mark_opaque("PowerShell code from a variable")
             return
         if low.startswith(("-", "/")) and len(low) > 1:
-            option = low.lstrip("-/")
+            option, colon, attached = low.lstrip("-/").partition(":")
             if option == "":
                 break
+            operand = text.split(":", 1)[1] if colon else (
+                flat[index + 1].text if index + 1 < len(flat) else None)
             if option in ("e", "ec") or (len(option) >= 2 and "encodedcommand".startswith(option)):
-                if index + 1 >= len(flat):
+                if operand is None:
                     result.mark_opaque("encoded command")
                     return
-                _encoded(flat[index + 1].text, ctx)
+                _encoded(operand, ctx)
                 return
+            if option in ("wd",) or (len(option) >= 2 and "workingdirectory".startswith(option)):
+                if operand is not None:
+                    new = _resolve(operand, flat[index + 1].dynamic if not colon else False,
+                                   ctx.cwd)
+                    ctx.cwd = new if isinstance(new, str) else None
+                index += 1 if colon else 2
+                continue
             if option == "c" or (len(option) >= 2 and "command".startswith(option)):
                 code = flat[index + 1:]
                 if not code or (len(code) == 1 and code[0].text == "-"):
@@ -1477,8 +1580,9 @@ def _nested_powershell(flat: List[_Value], ctx: _Ctx, piped: bool) -> None:
                 _read_string(" ".join(v.text for v in code), ctx)
                 return
             if option == "f" or (len(option) >= 2 and "file".startswith(option)):
-                if index + 1 < len(flat) and flat[index + 1].text == "-":
+                if operand == "-":
                     result.mark_opaque("PowerShell script on stdin")
+                ctx.ran_script = True
                 return  # a script file: a program invoked by name
             if option in _PS_VALUED:
                 index += 2
@@ -1489,6 +1593,7 @@ def _nested_powershell(flat: List[_Value], ctx: _Ctx, piped: bool) -> None:
             result.mark_opaque("PowerShell script on stdin")
             return
         if low.endswith(".ps1"):
+            ctx.ran_script = True
             return
         _read_string(" ".join(v.text for v in flat[index:]), ctx)
         return
@@ -1499,10 +1604,15 @@ def _nested_powershell(flat: List[_Value], ctx: _Ctx, piped: bool) -> None:
 def _encoded(blob: str, ctx: _Ctx) -> None:
     ctx.result.mark_opaque("encoded command")
     try:
-        code = base64.b64decode(blob, validate=True).decode("utf-16-le")
+        code = _b64(blob)
     except (binascii.Error, ValueError, UnicodeDecodeError):
         return
     _read_string(code, ctx)
+
+
+def _b64(blob: str) -> str:
+    """Decode an ``-EncodedCommand`` operand; .NET ignores whitespace in it."""
+    return base64.b64decode(re.sub(r"\s+", "", blob), validate=True).decode("utf-16-le")
 
 
 # --------------------------------------------------------------------------
@@ -1528,18 +1638,43 @@ def read(command: str, cwd: Optional[str]) -> PSWriteTargets:
     if base:
         result.cwds.append(base)
     ctx = _Ctx(result, base)
-    _read_text(_normal(command), ctx)
+    try:
+        _read_text(_normal(command), ctx)
+    except (RecursionError, IndexError, ValueError, KeyError, TypeError) as err:
+        result.mark_opaque("unreadable command (%s)" % type(err).__name__)
+    if ctx.ran_script and result.targets:
+        result.mark_opaque("a script runs in the command that writes")
+    _dot_globs(result)
     return result
 
 
-_ENCODED_RE = re.compile(r"(?i)(?:^|\s)[-/](?:e|ec|en\w*)\s+['\"]?([A-Za-z0-9+/=]{4,})")
+def _dot_globs(result: PSWriteTargets) -> None:
+    """PowerShell wildcards match names that start with a dot (``*`` matches
+    ``.gatekit``), which the shell-glob checks do not assume: add each target
+    or removed path once more with such segments spelled ``.gatekit``."""
+    from fnmatch import fnmatchcase
+    for paths in (result.targets, result.removed):
+        for path in list(paths):
+            segs = path.split("/")
+            if not any(c in seg for seg in segs for c in "*?["):
+                continue
+            variant = [paths_seg if not any(c in paths_seg for c in "*?[")
+                       or not fnmatchcase(".gatekit", paths_seg.lower()) else ".gatekit"
+                       for paths_seg in segs]
+            joined = "/".join(variant)
+            if joined != path and joined not in paths:
+                paths.append(joined)
+
+
+_ENCODED_RE = re.compile(
+    r"(?i)(?:^|\s)[-/](?:e|ec|en\w*)(?::|\s+)(?:'([^']*)'|\"([^\"]*)\"|([A-Za-z0-9+/=]+))")
 
 
 def _decoded_texts(command: str) -> List[str]:
     out = []
     for match in _ENCODED_RE.finditer(command):
         try:
-            out.append(base64.b64decode(match.group(1), validate=True).decode("utf-16-le"))
+            out.append(_b64(match.group(1) or match.group(2) or match.group(3) or ""))
         except (binascii.Error, ValueError, UnicodeDecodeError):
             continue
     return out
@@ -1568,12 +1703,86 @@ def invokes_gatekit_approve(command: str) -> bool:
         texts.extend(decoded)
         frontier = decoded
     for text in texts:
+        if _approve_in_code(text, 0):
+            return True
         flat = _flatten(text)
         for match in _GATEKIT_RE.finditer(flat):
-            tail = re.split(r"[;|&\n]", flat[match.end():], maxsplit=1)[0].split()
-            if _approves(tail):
+            tail = re.split(r"[;|&\n]", flat[match.end():match.end() + 400], maxsplit=1)[0]
+            if _approves(tail.split()):
                 return True
     return False
+
+
+_GATEKIT_WORD = re.compile(r"^(?:-m)?gatekit(?:\.py|\.cli|\.__main__)?$")
+_APPROVAL_MODULE = re.compile(r"^(?:-m)?gatekit\.approval(?:\.py)?$")
+
+
+def _approve_in_code(text: str, depth: int) -> bool:
+    """The lexed reading: quotes, comments and continuations resolved as
+    PowerShell does; a computed word where the subcommand goes counts."""
+    if depth > MAX_STRING_DEPTH:
+        return False
+    nested: List[str] = []
+    try:
+        toks = _lex(text, nested)
+    except (_Unlexable, RecursionError, IndexError):
+        return False
+    element: List[_Tok] = []
+    for tok in toks + [_Tok("sep", ";")]:
+        if tok.kind in ("sep", "pipe"):
+            if _element_approves(element):
+                return True
+            element = []
+            continue
+        if tok.kind in ("group", "block") and _approve_in_code(tok.value, depth + 1):
+            return True
+        if tok.kind == "word" and " " in tok.value and "approv" in tok.value.lower() \
+                and _approve_in_code(tok.value, depth + 1):
+            return True
+        if tok.kind in ("word", "group", "block"):
+            element.append(tok)
+    return any(_approve_in_code(code, depth + 1) for code in nested)
+
+
+def _element_approves(toks: List[_Tok]) -> bool:
+    computed_before = False
+    for index, tok in enumerate(toks):
+        if tok.kind != "word" or tok.dynamic:
+            computed_before = computed_before or index > 0
+            continue
+        base = re.split(r"[\\/]", tok.value.lower())[-1]
+        if _APPROVAL_MODULE.match(base):
+            return _approve_rest(toks, index + 1, seen=True)
+        if _GATEKIT_WORD.match(base) and _approve_rest(toks, index + 1, seen=False):
+            return True
+        if base == "approve" and computed_before and _approve_rest(toks, index, seen=False):
+            return True
+    return False
+
+
+def _approve_rest(toks: List[_Tok], index: int, seen: bool) -> bool:
+    """From *index*: the gatekit arguments run ``approve`` (not check/list);
+    stops at the first word that decides it."""
+    while index < len(toks):
+        tok = toks[index]
+        computed = tok.kind != "word" or tok.dynamic or tok.splat
+        word = tok.value.lower()
+        if not computed and word in _APPROVE_OPERANDS:
+            index += 2
+            continue
+        if not computed and word.startswith("-"):
+            index += 1
+            continue
+        if computed:
+            return True  # a computed subcommand or action: never round it down
+        if not seen:
+            if word != "approve":
+                return False
+            seen = True
+            index += 1
+            continue
+        return word not in ("check", "list")
+    return seen
 
 
 def _approves(words: List[str]) -> bool:

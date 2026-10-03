@@ -137,6 +137,37 @@ shell was therefore a convention.
    a `Skill` matcher would see none of them. What a skill tells the model to
    run arrives as ordinary `Bash`/`PowerShell`/`Write` calls, which are gated.
 
+9. **Review pass (same day).** A separate adversarial review of the
+   reader found forms it allowed; each is now covered and tested:
+   a `$`/`@` at the end of the text crashed the lexer (fail-open) and very
+   deep `"$(…)"` nesting hit Python's recursion limit — `pwsh.read` now never
+   raises (an unreadable command is opaque); `using namespace` with a short
+   type name, a static call on a computed type (`([type]'IO.File')::`,
+   `$t::`), a quoted or computed member name (`::'WriteAllText'(`), an
+   assembly-qualified type literal and `[Environment]::CurrentDirectory`
+   are opaque; `ForEach-Object`/`%` invoking a member that may write
+   (`| % Delete`, `-MemberName MoveTo`) is opaque; aliases and functions
+   made through the `Alias:`/`Function:` providers and `New-PSDrive`/`subst`
+   are opaque; `--` ends a cmdlet's parameters; `Start-Transcript
+   -OutputDirectory` writes inside that directory; a PowerShell wildcard
+   segment that matches `.gatekit` (PowerShell has no leading-dot rule, so
+   `Remove-Item *` reaches it) is also judged as `.gatekit`; `pwsh -wd`/
+   `-WorkingDirectory` sets the cwd of the nested command, and
+   `Start-Job`/`Invoke-Command -WorkingDirectory` is opaque;
+   reassigning `$PWD` makes the cwd unknown; `-EncodedCommand:<b64>` and
+   whitespace inside the operand are decoded as .NET does; `Start-Process`
+   hands a program's argument list to the native reading (`git clean`,
+   `tar -C`, `robocopy`), and versioned interpreters (`python3.12`) count as
+   runners; a command that writes and also runs a script or interpreter
+   script (`Set-Content x.ps1 …; & ./x.ps1`) is opaque; `Unblock-File`,
+   `Save-Help`, `Save-Module`/`Save-Script`/`Save-PSResource`,
+   `New-ModuleManifest`, `New-ScriptFileInfo`, `Set-AuthenticodeSignature`
+   and the `epal` alias are writes. The worker-approve detector also reads
+   the lexed words, so `ap''prove`, `<#…#>`, a backtick line continuation,
+   `-mgatekit`, a computed subcommand (`('ap'+'prove')`, `$('approve')`), a
+   launcher held in a variable, `-m gatekit.cli` and `-m gatekit.approval`
+   are denied, and it is linear in the command's length.
+
 ## What remains (documented trust boundary)
 
 - **Anything opaque after approval that does not spell a protected path**:
@@ -156,6 +187,14 @@ shell was therefore a convention.
 - **Codex on Windows.** Codex reports every shell call as `Bash`; if its
   command text there is PowerShell, the Bash reader reads it as shell syntax.
   Not observed; not decided here.
+- **Shared with the Bash gate** (review): `Expand-Archive -DestinationPath .`,
+  `git clean -fdx`/`reset --hard`/`stash -u` after approval, a launcher
+  copied under another name, and a program (not a script) written and run
+  by name. The Bash gate does not recognise `python3 -m gatekit.approval`
+  as a worker approval either; that is left to a Bash-gate change.
+- **Conservative refusals**: a write to `$env:TEMP\…` is opaque, so it is
+  refused while a restriction is active; `Get-ChildItem function:` is
+  opaque too.
 - **Injected skill commands** (`` !`…` ``) and `skill shell: powershell`
   blocks never reach a PreToolUse hook (decision 8).
 

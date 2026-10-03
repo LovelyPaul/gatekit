@@ -249,6 +249,28 @@ class TestApproveDetection(unittest.TestCase):
             with self.subTest(cmd=cmd):
                 self.assertTrue(pwsh.invokes_gatekit_approve(cmd))
 
+    def test_review_forms(self) -> None:
+        for cmd in (
+            "python3 bin/gatekit.py ap''prove x",
+            'python3 bin/gatekit.py app""rove x',
+            "python3 bin/gatekit.py ('ap'+'prove') x",
+            "python3 bin/gatekit.py $('approve') x",
+            "python3 bin/gatekit.py <#c#> approve x",
+            "python3 -m gatekit `\n approve x",
+            "python3 -mgatekit approve x",
+            "$g='bin/gatekit.py'; python3 $g approve x",
+            "python3 -m gatekit.approval spec/05-gate.md",
+            "python3 -m gatekit.cli approve x",
+        ):
+            with self.subTest(cmd=cmd):
+                self.assertTrue(pwsh.invokes_gatekit_approve(cmd))
+
+    def test_detector_is_linear(self) -> None:
+        import time
+        start = time.monotonic()
+        pwsh.invokes_gatekit_approve("gatekit " * 50000)
+        self.assertLess(time.monotonic() - start, 2.0)
+
     def test_allowed_forms(self) -> None:
         for cmd in (
             "python bin/gatekit.py approve check spec/05-gate.md",
@@ -353,6 +375,19 @@ class TestSpecBeforeCode(PSProject):
                     "Get-ChildItem *.tmp | Remove-Item"):
             self.assertDenied(cmd, "cannot determine")
 
+    def test_reviewed_forms_denied_before_approval(self) -> None:
+        for cmd in ("Start-Process git 'clean -fdx'", "Start-Process python3.12 '-c x'",
+                    "Start-Process robocopy 'src out /E'",
+                    "gci | % Delete", "Save-Help -DestinationPath src/help",
+                    "New-ModuleManifest -Path src/m.psd1", "Unblock-File src/x.ts",
+                    "Get-Process | epal -Path src/a.txt"):
+            with self.subTest(cmd=cmd):
+                self.assertDenied(cmd)
+
+    def test_member_names_that_only_read_stay_allowed(self) -> None:
+        self.assertAllowed("Get-ChildItem src | % FullName")
+        self.assertAllowed("Get-ChildItem src | ForEach-Object Name")
+
     def test_after_approval_writes_and_opaque_allowed(self) -> None:
         self.approve()
         for cmd in ("Set-Content src/x.ts 'x'", "'x' > src\\x.ts", "iex $code",
@@ -420,6 +455,49 @@ class TestProtectedState(PSProject):
         "Set-Content -Path ([IO.Path]::Combine('.gatekit','approvals.json')) -Value x",
         "Remove-Item -Recurse -Force .",
     )
+
+    # ADR-0028 review: forms a separate review pass found allowed.
+    REVIEWED = (
+        "Set-Content .gatekit/state.json x; echo $",
+        "Set-Content .gatekit/state.json x; Write-Output @",
+        "using namespace System.IO; [File]::WriteAllText('.gatekit/state.json','x')",
+        "([type]'IO.File')::WriteAllText('.gatekit/state.json','x')",
+        "$t=[IO.File]; $t::WriteAllText('.gatekit/state.json','x')",
+        "[IO.File]::'WriteAllText'('.gatekit/state.json','x')",
+        "[System.IO.File, mscorlib]::Delete('.gatekit/state.json')",
+        "Get-Item -Force .gatekit/state.json | % Delete",
+        "Get-Item -Force .gatekit/state.json | ForEach-Object -MemberName MoveTo -ArgumentList x",
+        "Set-Item alias:zz Set-Content; zz .gatekit/state.json x",
+        "${function:zz} = { Set-Content $args[0] x }; zz .gatekit/state.json",
+        "'x' | Set-Content -- .gatekit/state.json",
+        "New-PSDrive G FileSystem .gatekit; sc G:\\state.json x",
+        "Start-Transcript -OutputDirectory .gatekit",
+        "Remove-Item * -Recurse -Force",
+        "Remove-Item .\\* -Recurse",
+        "[Environment]::CurrentDirectory = (Resolve-Path .gatekit); [IO.File]::WriteAllText('state.json','x')",
+        "pwsh -wd .gatekit -c 'sc state.json x'",
+        "pwsh -WorkingDirectory .gatekit -Command 'sc state.json x'",
+        "Start-Job -WorkingDirectory .gatekit { sc state.json x }",
+        "$PWD = '.gatekit'; Set-Content $PWD/state.json x",
+        "Set-Content src/x.ps1 'Set-Content .gatekit/state.json x'; & ./src/x.ps1",
+        "Start-Process git 'checkout -- .gatekit'",
+        "Start-Process tar '-xf a.tar -C .gatekit'",
+        "Unblock-File .gatekit/state.json",
+    )
+
+    def test_reviewed_forms_denied_after_approval(self) -> None:
+        self.approve()
+        for cmd in self.REVIEWED + (
+                "pwsh -EncodedCommand:" + encoded("Set-Content .gatekit/state.json x"),
+                "pwsh -enc '%s'" % (lambda b: b[:8] + " " + b[8:])(
+                    encoded("Set-Content .gatekit/state.json x"))):
+            with self.subTest(cmd=cmd):
+                self.assertDenied(cmd)
+
+    def test_reader_never_raises_on_deep_nesting(self) -> None:
+        cmd = "Set-Content .gatekit/state.json x; " + '"$(' * 900 + ")" * 900
+        self.approve()
+        self.assertDenied(cmd)
 
     def check_all_denied(self) -> None:
         for cmd in self.DENIED + ("Set-Content \\\\?\\%s\\.gatekit\\approvals.json x" % self.root,):
