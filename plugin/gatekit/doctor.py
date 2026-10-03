@@ -1,4 +1,4 @@
-"""7-axis diagnosis (§12).
+"""8-axis diagnosis (§12).
 
 Each axis returns `{"axis", "verdict", "detail", "fix"}` where `fix` is a
 copy-pasteable command or "". The overall verdict is `verdict.aggregate` over
@@ -9,6 +9,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
+import socket
+import subprocess
 import sys
 
 from gatekit import paths, verdict
@@ -185,14 +189,150 @@ def axis_project_state(root) -> dict:
     if problems:
         return _axis("project state", verdict.FAIL, "; ".join(problems),
                      "fix or delete the offending file under .gatekit/")
+    fixes = []
+    if warnings:
+        fixes.append("edit stop.budget_s in .gatekit/config.json (seconds, at most 570)")
+    for message, fix in _port_clashes(root):
+        warnings.append(message)
+        fixes.append(fix)
     detail = ".gatekit/ present and parseable"
     note = _stand_down_note(state)
     if note:
         detail += "; " + note
     if warnings:
         return _axis("project state", verdict.WARN, "; ".join(warnings) + "; " + detail,
-                     "edit stop.budget_s in .gatekit/config.json (seconds, at most 570)")
+                     "; ".join(fixes))
     return _axis("project state", verdict.OK, detail)
+
+
+# ADR-0026: a server already listening on the Playwright webServer port. With
+# `reuseExistingServer: true` the e2e tests run against whatever answers
+# there — in the 0.16.0 rehearsal, another project's app. The port is found
+# by regex, not by parsing JS/TS: `port: <n>` or `url: '<scheme>://<host>:<n>'`
+# within WEBSERVER_WINDOW characters after each `webServer`. A port set from a
+# variable is not found.
+PLAYWRIGHT_CONFIGS = tuple("playwright.config." + ext for ext in ("ts", "js", "mjs", "cjs"))
+#: Also searched (recursively) for Playwright configs.
+E2E_CONFIG_DIR = ("spec", "design", "e2e")
+WEBSERVER_WINDOW = 2000
+_WEBSERVER_RE = re.compile(r"\bwebServer\b")
+_PORT_RE = re.compile(r"\bport\s*:\s*(\d{1,5})\b")
+_URL_PORT_RE = re.compile(
+    r"\burl\s*:\s*['\"`][A-Za-z][A-Za-z0-9+.-]*://(?:\[[^\]]*\]|[^'\"`/\s:]+):(\d{1,5})")
+PROBE_TIMEOUT_S = 0.3
+LSOF_TIMEOUT_S = 3
+
+
+def _playwright_configs(root) -> list:
+    found = [root / name for name in PLAYWRIGHT_CONFIGS if (root / name).is_file()]
+    e2e = root.joinpath(*E2E_CONFIG_DIR)
+    if e2e.is_dir():
+        found += sorted(p for p in e2e.rglob("playwright.config.*")
+                        if p.name in PLAYWRIGHT_CONFIGS and p.is_file())
+    return found
+
+
+def webserver_ports(root) -> list:
+    """Sorted ports named in the ``webServer`` blocks of the Playwright configs."""
+    import pathlib
+
+    ports = set()
+    for path in _playwright_configs(pathlib.Path(root)):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for match in _WEBSERVER_RE.finditer(text):
+            window = text[match.end():match.end() + WEBSERVER_WINDOW]
+            for regex in (_PORT_RE, _URL_PORT_RE):
+                for found in regex.findall(window):
+                    port = int(found)
+                    if 0 < port < 65536:
+                        ports.add(port)
+    return sorted(ports)
+
+
+def _listening(port: int) -> bool:
+    """Whether something accepts a TCP connection on the loopback *port*.
+
+    127.0.0.1 first; ::1 too, since a dev server bound to ``localhost`` may
+    listen on IPv6 only."""
+    for family, host in ((socket.AF_INET, "127.0.0.1"), (socket.AF_INET6, "::1")):
+        try:
+            with socket.socket(family, socket.SOCK_STREAM) as sock:
+                sock.settimeout(PROBE_TIMEOUT_S)
+                if sock.connect_ex((host, port)) == 0:
+                    return True
+        except OSError:
+            continue
+    return False
+
+
+def _lsof_fields(args: list) -> list:
+    """``lsof -F`` output as ``(field, value)`` pairs; [] when unavailable."""
+    if os.name == "nt":
+        return []
+    exe = shutil.which("lsof")
+    if not exe:
+        return []
+    try:
+        proc = subprocess.run([exe] + args, capture_output=True, text=True,
+                              timeout=LSOF_TIMEOUT_S)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [(line[0], line[1:]) for line in proc.stdout.splitlines() if line]
+
+
+def _listener(port: int, root) -> str:
+    """``pid N (command), cwd X — inside/outside this project`` or ""."""
+    pid = command = ""
+    for field, value in _lsof_fields(["-nP", "-iTCP:%d" % port, "-sTCP:LISTEN", "-Fpc"]):
+        if field == "p" and not pid:
+            pid = value
+        elif field == "c" and pid and not command:
+            command = value
+    if not pid.isdigit():
+        return ""
+    text = "pid %s" % pid
+    if command:
+        text += " (%s)" % command
+    cwd = ""
+    for field, value in _lsof_fields(["-a", "-p", pid, "-d", "cwd", "-Fn"]):
+        if field == "n":
+            cwd = value
+            break
+    if cwd:
+        real_root = os.path.realpath(str(root))
+        real_cwd = os.path.realpath(cwd)
+        inside = real_cwd == real_root or real_cwd.startswith(real_root.rstrip(os.sep) + os.sep)
+        text += ", cwd %s — %s this project" % (cwd, "inside" if inside else "outside")
+    return text
+
+
+def _port_clashes(root) -> list:
+    """``(message, fix)`` per webServer port something already listens on.
+
+    Never stops a process. A probe that raises is skipped: a diagnosis must
+    not crash doctor."""
+    try:
+        ports = webserver_ports(root)
+    except Exception:  # noqa: BLE001
+        return []
+    clashes = []
+    for port in ports:
+        try:
+            if not _listening(port):
+                continue
+            who = _listener(port, root)
+        except Exception:  # noqa: BLE001
+            continue
+        message = ("port %d (Playwright webServer) is already in use%s; with "
+                   "reuseExistingServer the e2e tests run against whatever answers there"
+                   % (port, (" by " + who) if who else ""))
+        fix = ("stop the process listening on port %d, or change the webServer port "
+               "in playwright.config (doctor stops nothing)" % port)
+        clashes.append((message, fix))
+    return clashes
 
 
 def _stand_down_note(state) -> str:

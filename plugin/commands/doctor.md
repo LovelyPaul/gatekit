@@ -74,6 +74,10 @@ Common cases:
   manifest. Expected; not a problem to fix.
 - **project state** fail — `.gatekit/config.json` or `approvals.json` does not
   parse. Show the parse error; the file has to be fixed or removed by hand.
+- **project state** warn, port in use — something already listens on a
+  Playwright `webServer` port, so e2e tests would run against it (ADR-0026).
+  Name the process from the detail. Do not stop it yourself; the user decides
+  whether to stop it or change the port.
 - **spec set** — route to the pipeline owning the failing file.
 - **contract freshness** fail — `spec/05-gate.md` changed after the contract was
   derived, or a design input did (`02-screens.md`, `02-design.md`, or

@@ -10,6 +10,7 @@ import json
 import os
 import pathlib
 import shutil
+import socket
 import stat
 import sys
 import tempfile
@@ -223,6 +224,147 @@ class TestAxisProjectState(DoctorTestCase):
         result = doctor.axis_project_state(self.root)
         self.assertEqual(result["verdict"], verdict.FAIL)
         self.assertIn("approvals.json", result["detail"])
+
+
+class TestAxisProjectStatePortProbe(DoctorTestCase):
+    """ADR-0026: a server already on the Playwright webServer port.
+
+    Rehearsal of 0.16.0: another project's server held the port and, with
+    `reuseExistingServer: true`, the e2e tests ran against the wrong app."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.listener.bind(("127.0.0.1", 0))
+        self.listener.listen(16)
+        self.port = self.listener.getsockname()[1]
+
+    def tearDown(self) -> None:
+        self.listener.close()
+        super().tearDown()
+
+    def write_config(self, port: int, where: str = "playwright.config.ts",
+                     key: str = "port") -> None:
+        target = self.root / where
+        target.parent.mkdir(parents=True, exist_ok=True)
+        value = (str(port) if key == "port"
+                 else '"http://localhost:%d/"' % port)
+        target.write_text(
+            'import { defineConfig } from "@playwright/test";\n'
+            "export default defineConfig({\n"
+            '  use: { baseURL: "http://localhost:%d" },\n'
+            "  webServer: {\n"
+            '    command: "node server.js",\n'
+            "    %s: %s,\n"
+            "    reuseExistingServer: true,\n"
+            "  },\n"
+            "});\n" % (port, key, value),
+            encoding="utf-8")
+
+    def free_port(self) -> int:
+        probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+        probe.close()
+        return port
+
+    def test_ports_read_from_webserver_port_and_url(self) -> None:
+        self.write_config(4183)
+        self.write_config(5173, where="spec/design/e2e/playwright.config.mjs", key="url")
+        self.assertEqual(doctor.webserver_ports(self.root), [4183, 5173])
+
+    def test_no_config_no_ports(self) -> None:
+        self.assertEqual(doctor.webserver_ports(self.root), [])
+
+    def test_busy_port_warns_and_names_it(self) -> None:
+        self.write_config(self.port)
+        result = doctor.axis_project_state(self.root)
+        self.assertEqual(result["verdict"], verdict.WARN)
+        self.assertIn(str(self.port), result["detail"])
+        self.assertIn("reuseExistingServer", result["detail"])
+        self.assertIn(str(self.port), result["fix"])
+        self.assertIn("change", result["fix"])
+
+    def test_url_form_is_probed_too(self) -> None:
+        self.write_config(self.port, key="url")
+        self.assertEqual(doctor.axis_project_state(self.root)["verdict"], verdict.WARN)
+
+    def test_free_port_stays_ok(self) -> None:
+        self.write_config(self.free_port())
+        self.assertEqual(doctor.axis_project_state(self.root)["verdict"], verdict.OK)
+
+    def test_lsof_names_pid_command_and_cwd_inside_the_project(self) -> None:
+        make_python_stub(self.bindir, "lsof", (
+            "import sys\n"
+            "args = sys.argv[1:]\n"
+            "if '-d' in args:\n"
+            "    print('p4242'); print('fcwd'); print('n%s')\n"
+            "else:\n"
+            "    print('p4242'); print('cnode')\n") % str(self.root / "app"))
+        self.write_config(self.port)
+        detail = doctor.axis_project_state(self.root)["detail"]
+        self.assertIn("pid 4242", detail)
+        self.assertIn("node", detail)
+        self.assertIn("inside this project", detail)
+
+    def test_lsof_cwd_outside_the_project_is_said(self) -> None:
+        other = tempfile.TemporaryDirectory()
+        self.addCleanup(other.cleanup)
+        make_python_stub(self.bindir, "lsof", (
+            "import sys\n"
+            "args = sys.argv[1:]\n"
+            "if '-d' in args:\n"
+            "    print('p4242'); print('fcwd'); print('n%s')\n"
+            "else:\n"
+            "    print('p4242'); print('cnode')\n") % other.name)
+        self.write_config(self.port)
+        detail = doctor.axis_project_state(self.root)["detail"]
+        self.assertIn("outside this project", detail)
+
+    def test_real_lsof_when_present_names_this_process(self) -> None:
+        real = shutil.which("lsof", path=self._old_path)
+        self.write_config(self.port)
+        if real and os.name != "nt":
+            os.environ["PATH"] = os.path.dirname(real)
+            detail = doctor.axis_project_state(self.root)["detail"]
+            self.assertIn("pid %d" % os.getpid(), detail)
+            self.assertIn("outside this project", detail)
+        else:
+            detail = doctor.axis_project_state(self.root)["detail"]
+            self.assertIn(str(self.port), detail)
+
+    def test_a_failing_lsof_still_warns_on_the_socket_probe(self) -> None:
+        make_python_stub(self.bindir, "lsof", echo_stub_body("", exit_code=1))
+        self.write_config(self.port)
+        result = doctor.axis_project_state(self.root)
+        self.assertEqual(result["verdict"], verdict.WARN)
+        self.assertNotIn("pid", result["detail"])
+
+    def test_probe_error_is_skipped_not_raised(self) -> None:
+        self.write_config(self.port)
+        original = doctor._listening
+
+        def boom(port):
+            raise RuntimeError("probe exploded")
+
+        doctor._listening = boom
+        try:
+            result = doctor.axis_project_state(self.root)
+        finally:
+            doctor._listening = original
+        self.assertEqual(result["verdict"], verdict.OK)
+
+    def test_doctor_cli_still_exits_normally(self) -> None:
+        self.write_config(self.port)
+        report = doctor.diagnose(self.root)
+        self.assertEqual(self.axis(report, 3)["verdict"], verdict.WARN)
+        self.assertEqual(len(report["axes"]), 8)
+
+    def test_doctor_never_kills_the_listener(self) -> None:
+        self.write_config(self.port)
+        doctor.diagnose(self.root)
+        conn = socket.create_connection(("127.0.0.1", self.port), timeout=1)
+        conn.close()
 
 
 # ------------------------------------------------------------------- axis 4
