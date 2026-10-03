@@ -279,3 +279,18 @@ brief now says the write gate refuses every write except scratch under
 that the evaluator then keeps scratch in memory or reports the step it was
 for as `unverified`. The scratch bullet of `spec-kit/evaluator-brief.md`
 says the same.
+
+### C3. Commands read the spec's language the way the hook does
+
+A2 left the commands' `gatekit lang "$(head -40 spec/01-prd.md)"` calls
+unchanged, so `/gatekit:build`, `/gatekit:tasks`, `/gatekit:gate` and
+`/gatekit:verify` still read a table-heavy Korean PRD (English frontmatter,
+an English feature table) as `en` while the hook read it as `ko`. A new form
+`gatekit lang --spec [--root PATH]` prints `lang.spec_lang(root)`:
+`from_spec` (the prose head of `spec/01-prd.md`, else `spec/00-discovery.md`),
+else the `output_lang` of the most recently updated session ledger, else
+`en`, always with exit 0. A command does not know its session id, so it
+reads the latest ledger; this is for the language only — scopes are still
+resolved by session id alone. Every command file now calls
+`python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang --spec`. The positional
+form `gatekit lang <text...>` is unchanged.

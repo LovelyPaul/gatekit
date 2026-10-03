@@ -16,7 +16,7 @@ Input: `$ARGUMENTS` — optional additional criteria the user wants enforced.
 2. Detect the language:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang "$(head -40 spec/01-prd.md)"
+python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang --spec
 ```
 
 Call it `output_lang`.

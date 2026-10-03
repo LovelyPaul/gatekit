@@ -245,5 +245,105 @@ class TestModuleEntryPoint(unittest.TestCase):
         self.assertIn("lang", proc.stdout)
 
 
+
+class TestRunSpec(unittest.TestCase):
+    """Review of 0.16.3: commands detected the language from
+    `head -40 spec/01-prd.md`, which a table-heavy Korean PRD misreads.
+    `lang --spec` uses the hook's logic (`from_spec`), then the latest
+    session ledger, then `en`."""
+
+    def setUp(self) -> None:
+        import tempfile
+
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.root = pathlib.Path(self._tmp.name)
+        (self.root / ".gatekit").mkdir()
+
+    def run_spec(self, *extra: str) -> str:
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = lang.run(["--spec", "--root", str(self.root), *extra])
+        self.assertEqual(rc, 0)
+        return buf.getvalue().strip()
+
+    def write_prd(self, text: str) -> None:
+        (self.root / "spec").mkdir(exist_ok=True)
+        (self.root / "spec" / "01-prd.md").write_text(text, encoding="utf-8")
+
+    def write_ledger(self, name: str, output_lang: str, mtime: float) -> None:
+        import json
+
+        runs = self.root / ".gatekit" / "runs"
+        runs.mkdir(parents=True, exist_ok=True)
+        path = runs / (name + ".json")
+        path.write_text(json.dumps({"session_id": name, "output_lang": output_lang}),
+                        encoding="utf-8")
+        os.utime(path, (mtime, mtime))
+
+    def test_table_heavy_korean_prd_is_ko(self) -> None:
+        rows = "".join("| F-%02d | Login API endpoint `POST /api/v1/auth` | P0 | REST |\n" % i
+                       for i in range(30))
+        prd = ("---\ntitle: Memo board PRD\nstatus: draft\n---\n"
+               "| ID | Feature | Priority | Type |\n|---|---|---|---|\n" + rows
+               + "\n# 메모 보드\n\n팀이 함께 쓰는 메모 보드를 만든다. 로그인한 사용자만 메모를 쓴다.\n")
+        self.write_prd(prd)
+        # The old command form reads the raw head and gets it wrong.
+        self.assertEqual(lang.detect("".join(prd.splitlines(True)[:40])), "en")
+        self.assertEqual(self.run_spec(), "ko")
+
+    def test_english_prd_is_en(self) -> None:
+        self.write_ledger("s1", "ko", 2000)
+        self.write_prd("# Memo board\n\nA shared memo board for a small team.\n")
+        self.assertEqual(self.run_spec(), "en")
+
+    def test_no_spec_falls_back_to_the_latest_ledger(self) -> None:
+        self.write_ledger("old", "en", 1000)
+        self.write_ledger("new", "ko", 2000)
+        (self.root / ".gatekit" / "runs" / "contract-last.json").write_text(
+            '{"output_lang": "en"}', encoding="utf-8")
+        os.utime(self.root / ".gatekit" / "runs" / "contract-last.json", (3000, 3000))
+        self.assertEqual(self.run_spec(), "ko")
+
+    def test_no_spec_no_ledger_is_en(self) -> None:
+        self.assertEqual(self.run_spec(), "en")
+
+    def test_unreadable_ledger_is_en(self) -> None:
+        runs = self.root / ".gatekit" / "runs"
+        runs.mkdir(parents=True)
+        (runs / "bad.json").write_text("{not json", encoding="utf-8")
+        self.assertEqual(self.run_spec(), "en")
+        (runs / "bad.json").write_text('{"output_lang": "fr"}', encoding="utf-8")
+        self.assertEqual(self.run_spec(), "en")
+
+    def test_spec_flag_through_the_launcher(self) -> None:
+        self.write_prd("# 메모 보드\n\n팀이 함께 쓰는 메모 보드를 만든다.\n")
+        env = {k: v for k, v in os.environ.items() if k != "PYTHONPATH"}
+        proc = subprocess.run(
+            [sys.executable, str(PLUGIN_DIR / "bin" / "gatekit.py"), "lang", "--spec"],
+            cwd=str(self.root), env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), "ko")
+
+    def test_commands_use_the_spec_form(self) -> None:
+        for path in sorted((PLUGIN_DIR / "commands").glob("*.md")):
+            text = path.read_text(encoding="utf-8")
+            # A command reading the spec's language uses `lang --spec`;
+            # the positional form stays for the user's own words.
+            self.assertNotIn('lang "$(head', text, path.name)
+            self.assertNotIn("lang \"$(cat spec/", text, path.name)
+
+    def test_positional_form_is_unchanged(self) -> None:
+        import io
+        from contextlib import redirect_stdout
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            lang.run(["팀이", "함께", "쓰는", "메모"])
+        self.assertEqual(buf.getvalue().strip(), "ko")
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

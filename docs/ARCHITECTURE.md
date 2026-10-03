@@ -576,6 +576,13 @@ no prompt in the session has carried a signal (ledger `lang_source` is `null`
 or `"spec"`) and records `lang_source = "spec"`; a prompt with a signal sets
 `lang_source = "prompt"` and the spec is not read again in that session.
 
+Commands detect the language with `gatekit lang --spec [--root PATH]`
+(`spec_lang`, ADR-0026 0.16.4): `from_spec`, else the `output_lang` of the
+most recently updated session ledger under `.gatekit/runs/` (a command does
+not know its session id; only the language is read this way, never scopes),
+else `en`; always exit 0. The positional form `gatekit lang <text...>` prints
+`detect(text)` as before.
+
 ## 9. Config (`config.py`)
 
 `.gatekit/config.json` with defaults:
@@ -1056,6 +1063,7 @@ def stop_budget_s(cfg: dict) -> tuple[float, str]      # ADR-0024: (value in for
 # lang.py
 def detect(text: str) -> str                           # "ko" | "en"
 def from_spec(root: pathlib.Path) -> str | None        # language of spec/01-prd.md, else 00-discovery.md (ADR-0026)
+def spec_lang(root: pathlib.Path) -> str               # from_spec, else latest session ledger's output_lang, else "en" (ADR-0026 0.16.4)
 def run(argv: list[str]) -> int
 
 # verdict.py

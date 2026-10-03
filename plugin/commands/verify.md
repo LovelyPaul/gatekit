@@ -21,7 +21,7 @@ and calling that verification.
 2. Detect the language and call it `output_lang`:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang "$(head -40 spec/01-prd.md)"
+python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang --spec
 ```
 
 ## Step 1 — preconditions

@@ -193,3 +193,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang "감지할 텍스트"
 ```
 
 `ko` 또는 `en` 한 단어를 출력한다. 언제나 종료 코드 0이다.
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang --spec [--root PATH]
+```
+
+텍스트 대신 프로젝트의 스펙에서 언어를 고른다. 프롬프트 훅과 같은 방식으로 `spec/01-prd.md`(없거나 신호가 없으면 `spec/00-discovery.md`)의 산문 앞부분 40줄을 읽는다(프런트매터·코드 블록·표 행·인라인 코드는 건너뜀). 스펙으로 정해지지 않으면 가장 최근에 갱신된 세션 레저(`.gatekit/runs/`)의 `output_lang`, 그것도 없으면 `en`을 출력한다. 명령 파일들이 출력 언어를 정할 때 이 형식을 쓴다(ADR-0026). 언제나 종료 코드 0이다.

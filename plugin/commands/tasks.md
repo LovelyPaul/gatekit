@@ -13,10 +13,10 @@ Input: `$ARGUMENTS` — optional constraints on scope or ordering.
 
 1. Read `${CLAUDE_PLUGIN_ROOT}/policy/language.md` and
    `${CLAUDE_PLUGIN_ROOT}/policy/verification.md`.
-2. Detect the language from `spec/01-prd.md`:
+2. Detect the language from the spec:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang "$(head -40 spec/01-prd.md)"
+python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang --spec
 ```
 
 Call it `output_lang`.

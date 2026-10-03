@@ -13,6 +13,12 @@ The result is `ko` or `en`. Use the user's text, not your own paraphrase, as
 the input. When a session ledger already holds an `output_lang` for this
 session, prefer that value — the prompt gate recorded it from the same rule.
 
+A command that works from the spec rather than from new words detects with
+`python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" lang --spec`: the spec's
+prose, read as the prompt gate reads it, else the most recently updated
+session ledger (the prompt gate saves this session's on every prompt), else
+`en`.
+
 ## What follows the detected language
 
 Everything the user reads:

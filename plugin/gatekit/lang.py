@@ -196,8 +196,52 @@ def from_spec(root) -> Optional[str]:
     return None
 
 
+def _latest_ledger_lang(root) -> Optional[str]:
+    """``output_lang`` of the most recently updated session ledger, else
+    ``None``. Used only by ``lang --spec`` when the spec gives no answer: a
+    command does not know its session id, and the language is the one thing
+    read this way — never scopes (``ledger.py`` resolves those by id only)."""
+    import json
+
+    from gatekit import paths
+
+    try:
+        ledgers = [p for p in paths.runs_dir(root).glob("*.json")
+                   if p.name != "contract-last.json"]
+        if not ledgers:
+            return None
+        latest = max(ledgers, key=lambda p: p.stat().st_mtime)
+        with latest.open(encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return None
+    value = data.get("output_lang") if isinstance(data, dict) else None
+    return value if value in (KO, EN) else None
+
+
+def spec_lang(root) -> str:
+    """What ``lang --spec`` prints: :func:`from_spec`, else the latest
+    session ledger's ``output_lang``, else ``en``."""
+    try:
+        return from_spec(root) or _latest_ledger_lang(root) or EN
+    except Exception:  # noqa: BLE001 — a language answer must never crash a command
+        return EN
+
+
 def run(argv: List[str]) -> int:
-    """``python3 -m gatekit lang <text...>`` — print the detected language."""
+    """``python3 -m gatekit lang <text...>`` — print the detected language.
+
+    ``lang --spec [--root PATH]`` prints :func:`spec_lang` for the project
+    (root found from the working directory by default) instead."""
+    if argv[:1] == ["--spec"]:
+        from gatekit import paths
+
+        rest = argv[1:]
+        root_arg = None
+        if len(rest) >= 2 and rest[0] == "--root":
+            root_arg = rest[1]
+        print(spec_lang(paths.project_root(root_arg)))
+        return 0
     text = " ".join(argv)
     print(detect(text))
     return 0
