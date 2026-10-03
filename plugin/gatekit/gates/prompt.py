@@ -105,7 +105,7 @@ def _gate_state(root) -> str:
     gate_md = paths.spec_dir(root) / "05-gate.md"
     if not gate_md.is_file():
         return "no gate spec"
-    status = approval.check(root, "spec/05-gate.md")
+    status = approval.check_gate(root)[0]
     if status == "ok":
         return "gate approved"
     if status == "fail":

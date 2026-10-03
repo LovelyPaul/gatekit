@@ -273,8 +273,9 @@ def _parse_budget(text: str) -> float:
     return value
 
 
-def derive(root: pathlib.Path) -> Dict[str, Any]:
-    """Parse ``spec/05-gate.md`` into ``.gatekit/contract.json`` and return it."""
+def _parse_gate(root: pathlib.Path) -> "tuple":
+    """``(total_budget_s, criteria)`` from ``spec/05-gate.md``, each criterion
+    carrying the current hashes of its grading files (ADR-0023)."""
     source = gate_file(root)
     try:
         text = source.read_text(encoding="utf-8")
@@ -290,8 +291,15 @@ def derive(root: pathlib.Path) -> Dict[str, Any]:
         if crit["id"] in seen:
             raise ValueError(f"duplicate criterion id '{crit['id']}'")
         seen.add(crit["id"])
-        # ADR-0023: the files that judge this criterion, as approved.
+        # ADR-0023: the files that judge this criterion, as they are now.
         crit["grading"] = runcheck.grading_hashes(crit["argv"], root)
+    return total_budget_s, criteria
+
+
+def derive(root: pathlib.Path) -> Dict[str, Any]:
+    """Parse ``spec/05-gate.md`` into ``.gatekit/contract.json`` and return it."""
+    source = gate_file(root)
+    total_budget_s, criteria = _parse_gate(root)
 
     data = {
         "version": VERSION,
@@ -303,6 +311,68 @@ def derive(root: pathlib.Path) -> Dict[str, Any]:
     }
     config.write_json_atomic(paths.contract_file(root), data)
     return data
+
+
+#: ``contract.execute`` reason when the contract was re-derived after an
+#: approved grading file changed and ``05-gate.md`` was not approved again.
+GRADING_UNAPPROVED_REASON = "grading_unapproved"
+
+
+def approved_grading(root: pathlib.Path, gate_sha256: str) -> Dict[str, Dict[str, str]]:
+    """What an approval of ``05-gate.md`` (hashing to *gate_sha256*) pins
+    beside the file: ``{criterion id: {relpath: sha256}}``.
+
+    Taken from ``contract.json`` when it was derived from that very file, so
+    the approval covers the contract the user was shown; otherwise hashed now
+    from the file's criteria. ``{}`` when the file cannot be parsed, since no
+    contract can then be derived from it either.
+    """
+    data = load(root)
+    if data is not None and data.get("source_sha256") == gate_sha256:
+        criteria = data.get("criteria") or []
+    else:
+        try:
+            criteria = _parse_gate(root)[1]
+        except (OSError, ValueError, TypeError):
+            return {}
+    pinned: Dict[str, Dict[str, str]] = {}
+    for crit in criteria:
+        if isinstance(crit, dict) and isinstance(crit.get("grading"), dict):
+            pinned[str(crit.get("id"))] = {str(k): str(v) for k, v in crit["grading"].items()}
+    return pinned
+
+
+def unapproved_grading(root: pathlib.Path) -> List[str]:
+    """Approved grading files the derived contract no longer records with the
+    approved hash, sorted (ADR-0023, F1).
+
+    A re-derive records the current hashes, so without this a test edited
+    after approval and then re-derived would count again with nobody having
+    approved the change. Files that did not exist at approval were never
+    approved and are not compared. Empty when there is no contract, no
+    approval of ``05-gate.md``, an approval recorded without grading (before
+    0.15.0), or an approval of another version of the file (a stale approval
+    in its own right).
+    """
+    data = load(root)
+    if data is None:
+        return []
+    entry = approval.find(root, approval.GATE_TARGET)
+    if not isinstance(entry, dict) or not isinstance(entry.get("grading"), dict):
+        return []
+    if entry.get("sha256") != data.get("source_sha256"):
+        return []
+    recorded = {str(c.get("id")): (c.get("grading") if isinstance(c.get("grading"), dict) else {})
+                for c in (data.get("criteria") or []) if isinstance(c, dict)}
+    changed = set()
+    for crit_id, pinned in entry["grading"].items():
+        if not isinstance(pinned, dict):
+            continue
+        now = recorded.get(str(crit_id), {})
+        for rel, digest in pinned.items():
+            if now.get(rel) != digest:
+                changed.add(str(rel))
+    return sorted(changed)
 
 
 def load(root: pathlib.Path) -> Optional[Dict[str, Any]]:
@@ -515,6 +585,15 @@ def execute(
             "verdict": verdict.UNVERIFIED,
             "criteria": [],
             "reasons": [STALE_REASON],
+        }
+
+    unapproved = unapproved_grading(root)
+    if unapproved:
+        return {
+            "verdict": verdict.UNVERIFIED,
+            "criteria": [],
+            "reasons": [GRADING_UNAPPROVED_REASON],
+            "unapproved_grading": unapproved,
         }
 
     criteria = data.get("criteria") or []

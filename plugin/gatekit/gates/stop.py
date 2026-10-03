@@ -67,6 +67,13 @@ _MESSAGES = {
             "completion cannot be judged (contract_stale). "
             "Run `" + paths.cli_invocation() + " contract derive`, then finish the work."
         ),
+        "unapproved": (
+            "gatekit: grading files changed after spec/05-gate.md was approved and "
+            "the contract was re-derived, so completion cannot be judged "
+            "(grading_unapproved): {paths}\n"
+            "If the change is intended, re-run /gatekit:gate to re-approve; "
+            "otherwise revert it."
+        ),
     },
     "ko": {
         "blocked": (
@@ -83,6 +90,12 @@ _MESSAGES = {
             "gatekit: .gatekit/contract.json 이 spec/05-gate.md 와 더 이상 일치하지 "
             "않아 완료 여부를 판정할 수 없습니다 (contract_stale). "
             "`" + paths.cli_invocation() + " contract derive` 를 실행한 뒤 작업을 마치세요."
+        ),
+        "unapproved": (
+            "gatekit: spec/05-gate.md 승인 이후 채점 파일이 바뀐 채 계약이 다시 "
+            "파생되어 완료 여부를 판정할 수 없습니다 (grading_unapproved): {paths}\n"
+            "의도한 변경이면 /gatekit:gate 를 다시 실행해 재승인하고, 아니면 "
+            "변경을 되돌리세요."
         ),
     },
 }
@@ -191,6 +204,9 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
     if contract.STALE_REASON in result["reasons"]:
         return hookio.block_stop(_message(lang, "stale"))
+    if contract.GRADING_UNAPPROVED_REASON in result["reasons"]:
+        return hookio.block_stop(_message(
+            lang, "unapproved", paths=", ".join(result.get("unapproved_grading") or [])))
 
     unmet = [
         item

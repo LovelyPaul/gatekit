@@ -977,12 +977,82 @@ class TestGradingFilesChangedSinceApproval(TempProject):
         path.write_text("import sys\nsys.exit(3)\n", encoding="utf-8")
         self.assertEqual(self.only()["verdict"], "fail")
 
-    def test_re_derive_clears_it(self) -> None:
+    def test_re_derive_without_any_approval_clears_it(self) -> None:
+        # Nothing was approved, so there is no approved grading to hold to.
         path = self.setup_contract()
         path.write_text(self.PASS + "# intended\n", encoding="utf-8")
         self.assertEqual(self.only()["verdict"], "unverified")
         contract.derive(self.root)
         self.assertEqual(self.only()["verdict"], "ok")
+
+    def test_re_derive_alone_does_not_clear_it(self) -> None:
+        # F1, the reviewer's repro: approval pins the grading files too, so a
+        # re-derive after a test edit leaves the contract waiting for
+        # re-approval; approving again clears it.
+        path = self.setup_contract()
+        approval.approve(self.root, "spec/05-gate.md")
+        self.assertEqual(self.only()["verdict"], "ok")
+        path.write_text(self.PASS + "# loosened\n", encoding="utf-8")
+        self.assertEqual(self.only()["verdict"], "unverified")
+        contract.derive(self.root)
+        result = contract.execute(self.root)
+        self.assertEqual(result["verdict"], "unverified")
+        self.assertEqual(result["reasons"], [contract.GRADING_UNAPPROVED_REASON])
+        self.assertEqual(result["unapproved_grading"], ["tests/check.py"])
+        self.assertEqual(contract.unapproved_grading(self.root), ["tests/check.py"])
+        self.assertEqual(approval.check(self.root, "spec/05-gate.md"), "ok")  # file hash only
+        self.assertEqual(approval.check_gate(self.root), ("fail", ["tests/check.py"]))
+        approval.approve(self.root, "spec/05-gate.md")
+        self.assertEqual(approval.check_gate(self.root), ("ok", []))
+        self.assertEqual(self.only()["verdict"], "ok")
+
+    def test_approval_records_the_derived_grading(self) -> None:
+        import hashlib
+        self.setup_contract()
+        entry = approval.approve(self.root, "spec/05-gate.md")
+        self.assertEqual(entry["grading"], {
+            "c": {"tests/check.py": hashlib.sha256(self.PASS.encode()).hexdigest()}})
+
+    def test_approval_before_derive_hashes_the_files_itself(self) -> None:
+        self.spec()
+        self.write_gate({"id": "c", "argv": [PY, "tests/check.py"]})
+        approval.approve(self.root, "spec/05-gate.md")
+        contract.derive(self.root)
+        self.assertEqual(contract.unapproved_grading(self.root), [])
+        self.assertEqual(self.only()["verdict"], "ok")
+
+    def test_a_test_written_after_approval_is_not_held_back(self) -> None:
+        # Greenfield: the test did not exist at approval, so nothing approved
+        # it, and a re-derive (verify does one) records it without complaint.
+        self.write_gate({"id": "c", "argv": [PY, "tests/check.py"]})
+        contract.derive(self.root)
+        approval.approve(self.root, "spec/05-gate.md")
+        self.spec()
+        contract.derive(self.root)
+        self.assertEqual(contract.unapproved_grading(self.root), [])
+        self.assertEqual(self.only()["verdict"], "ok")
+
+    def test_an_approval_without_grading_is_judged_on_the_file_alone(self) -> None:
+        path = self.setup_contract()
+        approval.approve(self.root, "spec/05-gate.md")
+        store = self.root / ".gatekit" / "approvals.json"
+        data = json.loads(store.read_text())
+        for entry in data["approvals"]:
+            entry.pop("grading", None)
+        store.write_text(json.dumps(data))
+        path.write_text(self.PASS + "# intended\n", encoding="utf-8")
+        contract.derive(self.root)
+        self.assertEqual(contract.unapproved_grading(self.root), [])
+        self.assertEqual(self.only()["verdict"], "ok")
+
+    def test_a_changed_gate_file_is_left_to_the_stale_approval(self) -> None:
+        path = self.setup_contract()
+        approval.approve(self.root, "spec/05-gate.md")
+        path.write_text(self.PASS + "# x\n", encoding="utf-8")
+        self.write_gate({"id": "c", "argv": [PY, "tests/check.py"]}, prose="# Gate v2\n")
+        contract.derive(self.root)
+        self.assertEqual(contract.unapproved_grading(self.root), [])
+        self.assertEqual(approval.check_gate(self.root)[0], "fail")
 
     def test_baseline_right_after_derive_is_unaffected(self) -> None:
         self.setup_contract()

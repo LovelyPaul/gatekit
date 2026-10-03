@@ -86,6 +86,23 @@ class TestSpecBeforeCode(WriteGateProject):
         self.gate_md.write_text("# Gate\nchanged\n", encoding="utf-8")
         self.assertIsNotNone(write_gate.handle(self.event(str(self.root / "src" / "app.ts"))))
 
+    def test_unapproved_grading_never_blocks_a_write(self) -> None:
+        # ADR-0023: report, never block. A re-derive after an approved test
+        # changed makes `approve check` fail, but the write gate keys on the
+        # file hash alone.
+        from gatekit import contract
+        test = self.root / "tests" / "test_x.py"
+        test.parent.mkdir()
+        test.write_text("a", encoding="utf-8")
+        self.gate_md.write_text('# Gate\n```gatekit-criterion\n{"id": "c", "argv": '
+                                '["pytest", "tests/test_x.py"]}\n```\n', encoding="utf-8")
+        contract.derive(self.root)
+        approval.approve(self.root, "spec/05-gate.md")
+        test.write_text("b", encoding="utf-8")
+        contract.derive(self.root)
+        self.assertEqual(approval.check_gate(self.root)[0], "fail")
+        self.assertIsNone(write_gate.handle(self.event(str(self.root / "src" / "app.ts"))))
+
     def test_allowlist_spec_dir_always_writable(self) -> None:
         self.assertIsNone(write_gate.handle(self.event(str(self.root / "spec" / "01-prd.md"))))
 

@@ -148,6 +148,61 @@ class TestApprove(TempProject):
         self.assertEqual(targets, {"other.md", "spec/05-gate.md"})
 
 
+class TestWorkerNeverApproves(TempProject):
+    """F1: a worker (GATEKIT_TASK_ID set) cannot record an approval."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._old = os.environ.get("GATEKIT_TASK_ID")
+        os.environ["GATEKIT_TASK_ID"] = "t1"
+
+    def tearDown(self) -> None:
+        if self._old is None:
+            os.environ.pop("GATEKIT_TASK_ID", None)
+        else:
+            os.environ["GATEKIT_TASK_ID"] = self._old
+        super().tearDown()
+
+    def test_approve_raises(self) -> None:
+        with self.assertRaises(PermissionError):
+            approval.approve(self.root, "spec/05-gate.md")
+        self.assertFalse((self.root / ".gatekit" / "approvals.json").exists())
+
+    def test_cli_approve_is_refused_but_check_and_list_work(self) -> None:
+        err = io.StringIO()
+        with redirect_stderr(err), redirect_stdout(io.StringIO()):
+            code = approval.run(["spec/05-gate.md", "--root", str(self.root)])
+        self.assertEqual(code, 1)
+        self.assertIn("worker", err.getvalue())
+        self.assertFalse((self.root / ".gatekit" / "approvals.json").exists())
+        out = io.StringIO()
+        with redirect_stdout(out):
+            self.assertEqual(approval.run(["check", "spec/05-gate.md", "--root", str(self.root)]), 1)
+            self.assertEqual(approval.run(["list", "--root", str(self.root)]), 0)
+        self.assertIn("unverified", out.getvalue())
+
+
+class TestCheckGateCli(TempProject):
+    def test_check_prints_fail_and_says_why_for_unapproved_grading(self) -> None:
+        from gatekit import contract
+        test = self.root / "tests" / "test_x.py"
+        test.parent.mkdir()
+        test.write_text("a", encoding="utf-8")
+        self.gate.write_text('# Gate\n```gatekit-criterion\n{"id": "c", "argv": ["pytest", '
+                             '"tests/test_x.py"]}\n```\n', encoding="utf-8")
+        contract.derive(self.root)
+        approval.approve(self.root, "spec/05-gate.md")
+        test.write_text("b", encoding="utf-8")
+        contract.derive(self.root)
+        out, err = io.StringIO(), io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err):
+            code = approval.run(["check", "spec/05-gate.md", "--root", str(self.root)])
+        self.assertEqual(code, 1)
+        self.assertEqual(out.getvalue().strip(), "fail")
+        self.assertIn("tests/test_x.py", err.getvalue())
+        self.assertIn("/gatekit:gate", err.getvalue())
+
+
 class TestRun(TempProject):
     def _run(self, argv: "list[str]") -> "tuple[int, str]":
         out, err = io.StringIO(), io.StringIO()

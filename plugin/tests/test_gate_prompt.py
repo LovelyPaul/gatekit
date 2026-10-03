@@ -460,3 +460,24 @@ class TestUnmanagedProject(unittest.TestCase):
                  "hook_event_name": "UserPromptSubmit", "prompt": "hello"}
         prompt_gate.handle(event)
         self.assertFalse((self.root / ".gatekit").exists())
+
+
+class TestGateStateCoversGrading(PromptProject):
+    """F1: a re-derive after an approved grading file changed reads as a stale
+    approval, the same word a changed 05-gate.md gets."""
+
+    def test_stale_after_unapproved_re_derive(self) -> None:
+        from gatekit import approval, contract
+        (self.root / "spec").mkdir()
+        (self.root / "tests").mkdir()
+        test = self.root / "tests" / "test_x.py"
+        test.write_text("a", encoding="utf-8")
+        (self.root / "spec" / "05-gate.md").write_text(
+            '# Gate\n```gatekit-criterion\n{"id": "c", "argv": ["pytest", "tests/test_x.py"]}\n```\n',
+            encoding="utf-8")
+        contract.derive(self.root)
+        approval.approve(self.root, "spec/05-gate.md")
+        self.assertEqual(prompt_gate._gate_state(self.root), "gate approved")
+        test.write_text("b", encoding="utf-8")
+        contract.derive(self.root)
+        self.assertEqual(prompt_gate._gate_state(self.root), "gate approval STALE (re-approve)")

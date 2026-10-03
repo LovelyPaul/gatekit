@@ -555,3 +555,36 @@ class TestStopAfterAGradingFileChange(StopProject):
         result = stop_gate.handle(self.event())
         self.assertEqual(result["decision"], "block")
         self.assertIn("grading file changed", result["reason"])
+
+
+class TestStopAfterAnUnapprovedReDerive(StopProject):
+    """F1: re-deriving after a grading file changed needs re-approval."""
+
+    def setup(self, lang: str = "en") -> None:
+        from gatekit import approval
+        check = self.root / "tests" / "check.py"
+        check.parent.mkdir()
+        check.write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
+        self.write_contract({"id": "c", "argv": [PY, "tests/check.py"], "timeout_s": 20})
+        approval.approve(self.root, "spec/05-gate.md")
+        check.write_text("import sys\nsys.exit(0)  # loosened\n", encoding="utf-8")
+        contract.derive(self.root)
+        led = self.led()
+        led.data["active_pipeline"] = "build"
+        led.set_output_lang(lang)
+        led.save()
+
+    def test_blocks_and_sends_the_user_to_re_approve(self) -> None:
+        self.setup()
+        result = stop_gate.handle(self.event())
+        self.assertEqual(result["decision"], "block")
+        self.assertIn("grading_unapproved", result["reason"])
+        self.assertIn("tests/check.py", result["reason"])
+        self.assertIn("/gatekit:gate", result["reason"])
+        self.assertNotIn("contract derive", result["reason"])
+
+    def test_korean(self) -> None:
+        self.setup("ko")
+        reason = stop_gate.handle(self.event())["reason"]
+        self.assertTrue(any("가" <= ch <= "힣" for ch in reason), reason)
+        self.assertIn("/gatekit:gate", reason)

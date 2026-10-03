@@ -22,6 +22,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import os
 import pathlib
 import sys
 from typing import Any, Dict, List, Optional
@@ -29,6 +30,13 @@ from typing import Any, Dict, List, Optional
 from . import config, paths, verdict
 
 VERSION = 1
+
+#: The completion gate. Its approval also pins the contract's grading files
+#: (ADR-0023), and :func:`check_gate` judges both.
+GATE_TARGET = "spec/05-gate.md"
+
+#: Set in every worker's environment (`jobs.py`); a worker never approves.
+WORKER_ENV = "GATEKIT_TASK_ID"
 
 _CHUNK = 65536
 
@@ -94,6 +102,20 @@ def check(root: pathlib.Path, relpath: str) -> str:
     return verdict.OK if current == entry.get("sha256") else verdict.FAIL
 
 
+def check_gate(root: pathlib.Path) -> "tuple":
+    """``(verdict, paths)`` for ``spec/05-gate.md``: :func:`check`, and when
+    that is ``ok``, ``fail`` with the paths if the derived contract no longer
+    records an approved grading file with its approved hash (ADR-0023). The
+    write gate keeps :func:`check` alone, so no write is blocked by this."""
+    result = check(root, GATE_TARGET)
+    if result != verdict.OK:
+        return result, []
+    from . import contract  # lazy: contract imports this module
+
+    changed = contract.unapproved_grading(root)
+    return (verdict.FAIL, changed) if changed else (verdict.OK, [])
+
+
 def approve(
     root: pathlib.Path, relpath: str, note: str = "", by: str = "user"
 ) -> Dict[str, Any]:
@@ -104,6 +126,11 @@ def approve(
     :class:`FileNotFoundError` when the target does not exist, because
     approving a file that is not there records a meaningless hash.
     """
+    if os.environ.get(WORKER_ENV):
+        raise PermissionError(
+            "a worker never approves (%s=%s is set); approval is the user's "
+            "decision, taken in the host session through /gatekit:gate"
+            % (WORKER_ENV, os.environ.get(WORKER_ENV)))
     key = _normalize(relpath)
     target = pathlib.Path(root) / key
     digest = sha256_file(target)
@@ -117,6 +144,10 @@ def approve(
         "approved_at": _now(),
         "note": str(note or ""),
     }
+    if key == GATE_TARGET:
+        from . import contract  # lazy: contract imports this module
+
+        entry["grading"] = contract.approved_grading(root, digest)
 
     data = load(root)
     kept = [
@@ -163,13 +194,21 @@ def run(argv: List[str]) -> int:
         if not args.path:
             print("gatekit: 'check' needs a path", file=sys.stderr)
             return 2
-        result = check(root, args.path)
+        if _normalize(args.path) == GATE_TARGET:
+            result, changed = check_gate(root)
+            if changed:
+                print("gatekit: grading files changed and were re-derived after "
+                      "approval: %s — if the change is intended, re-approve through "
+                      "/gatekit:gate; otherwise revert it" % ", ".join(changed),
+                      file=sys.stderr)
+        else:
+            result = check(root, args.path)
         print(result)
         return 0 if result == verdict.OK else 1
 
     try:
         entry = approve(root, args.action_or_path, note=args.note, by=args.by)
-    except FileNotFoundError as err:
+    except (FileNotFoundError, PermissionError) as err:
         print(f"gatekit: {err}", file=sys.stderr)
         return 1
     print(f"approved {entry['target']} {entry['sha256'][:12]}")
