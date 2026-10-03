@@ -79,6 +79,10 @@ Report in `output_lang`, in this order:
    other criterion, never folded silently into the aggregate or omitted
    because the aggregate already said `ok`.**
 5. Any disagreement between the evaluator's run and yours.
+6. A warning per build task whose `grading_changed_after_failure` is set in
+   `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs status --json`
+   (ADR-0023): "<task> passed only after its own test changed — review the
+   diff of <paths>". Its verdict stays `passed`; this is for the reviewer.
 
 Rules for the report:
 

@@ -907,3 +907,84 @@ class TestReuseFollowsTheSignatures(TempProject):
         record.pop("signatures_sha256", None)
         path.write_text(json.dumps(record), encoding="utf-8")
         self.assertIsNone(contract.reusable_last(self.root))
+
+
+class TestGradingFilesChangedSinceApproval(TempProject):
+    """ADR-0023 decision 2."""
+
+    PASS = "import sys\nsys.exit(0)\n"
+
+    def spec(self, body: str = PASS) -> pathlib.Path:
+        path = self.root / "tests" / "check.py"
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    def setup_contract(self, body: str = PASS) -> pathlib.Path:
+        path = self.spec(body)
+        self.write_gate({"id": "c", "argv": [PY, "tests/check.py"]})
+        contract.derive(self.root)
+        return path
+
+    def only(self) -> dict:
+        return contract.execute(self.root)["criteria"][0]
+
+    def test_derive_records_the_hashes(self) -> None:
+        import hashlib
+        self.setup_contract()
+        crit = contract.load(self.root)["criteria"][0]
+        self.assertEqual(crit["grading"],
+                         {"tests/check.py": hashlib.sha256(self.PASS.encode()).hexdigest()})
+
+    def test_a_command_naming_no_file_records_nothing(self) -> None:
+        self.write_gate({"id": "c", "argv": emitting(stdout="ok\n")})
+        contract.derive(self.root)
+        self.assertEqual(contract.load(self.root)["criteria"][0]["grading"], {})
+
+    def test_unchanged_stays_ok(self) -> None:
+        self.setup_contract()
+        self.assertEqual(self.only()["verdict"], "ok")
+
+    def test_a_changed_file_is_unverified_with_the_detail(self) -> None:
+        path = self.setup_contract()
+        path.write_text(self.PASS + "# loosened\n", encoding="utf-8")
+        result = contract.execute(self.root)
+        item = result["criteria"][0]
+        self.assertEqual(item["verdict"], "unverified")
+        self.assertIn("grading file changed since approval: tests/check.py", item["detail"])
+        self.assertIn("re-derive and re-approve 05-gate", item["detail"])
+        self.assertEqual(result["verdict"], "unverified")
+        self.assertTrue(any("grading file changed" in r for r in result["reasons"]))
+
+    def test_a_deleted_file_is_unverified(self) -> None:
+        path = self.setup_contract()
+        path.unlink()
+        item = self.only()
+        # python cannot open the script: exit 2, which is a fail in its own right
+        self.assertEqual(item["verdict"], "fail")
+        self.spec("import sys\nsys.exit(0)\n")
+        other = self.root / "tests" / "data.txt"
+        other.write_text("x", encoding="utf-8")
+        self.write_gate({"id": "c", "argv": [PY, "tests/check.py", "tests/data.txt"]})
+        contract.derive(self.root)
+        other.unlink()
+        item = self.only()
+        self.assertEqual(item["verdict"], "unverified")
+        self.assertIn("tests/data.txt", item["detail"])
+
+    def test_a_failing_criterion_stays_fail(self) -> None:
+        path = self.setup_contract("import sys\nsys.exit(1)\n")
+        path.write_text("import sys\nsys.exit(3)\n", encoding="utf-8")
+        self.assertEqual(self.only()["verdict"], "fail")
+
+    def test_re_derive_clears_it(self) -> None:
+        path = self.setup_contract()
+        path.write_text(self.PASS + "# intended\n", encoding="utf-8")
+        self.assertEqual(self.only()["verdict"], "unverified")
+        contract.derive(self.root)
+        self.assertEqual(self.only()["verdict"], "ok")
+
+    def test_baseline_right_after_derive_is_unaffected(self) -> None:
+        self.setup_contract()
+        result = contract.baseline(self.root)
+        self.assertEqual(result["criteria"][0]["class"], "already_passes")

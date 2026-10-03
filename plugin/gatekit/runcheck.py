@@ -404,3 +404,81 @@ def dependency_program(program: Any, root: Any,
                 return {"path": rel, "dir": part, "manifest": candidate, "owner": owner}
         return {"path": rel, "dir": part, "manifest": candidates[0], "owner": None}
     return None
+
+
+def _inside(path: str, base: str) -> bool:
+    return path == base or path.startswith(base.rstrip(os.sep) + os.sep)
+
+
+def grading_files(argv: Any, root: Any) -> List[str]:
+    """ADR-0023: project-relative paths of the files *argv* names that do the
+    judging — each token (after ``${CLAUDE_PLUGIN_ROOT}`` expansion) naming an
+    existing regular file inside *root*, in argv order, each once.
+
+    argv[0] counts only as a path (a script); a bare program name is looked up
+    on PATH and never counts. Options are skipped; a pytest node id counts by
+    its part before ``::``. A file whose realpath leaves the root does not
+    count. Never raises.
+    """
+    if not isinstance(argv, list) or not argv:
+        return []
+    try:
+        token = paths.PLUGIN_ROOT_TOKEN
+        plugin = str(paths.plugin_root())
+        real_root = os.path.realpath(str(root))
+    except (OSError, ValueError, AttributeError):
+        return []
+    found: List[str] = []
+    for index, arg in enumerate(argv):
+        if not isinstance(arg, str):
+            continue
+        text = arg.replace(token, plugin).strip()
+        if not text or text.startswith("-") or "\x00" in text:
+            continue
+        if index == 0 and "/" not in text and "\\" not in text:
+            continue
+        if "::" in text:
+            text = text.split("::", 1)[0]
+        try:
+            rel = relativize(text, root)
+            if rel is None or rel in found:
+                continue
+            full = os.path.join(str(root), *rel.split("/"))
+            if not os.path.isfile(full) or not _inside(os.path.realpath(full), real_root):
+                continue
+        except (OSError, ValueError):
+            continue
+        found.append(rel)
+    return found
+
+
+def grading_hashes(argv: Any, root: Any) -> Dict[str, str]:
+    """``{relpath: sha256}`` of :func:`grading_files`; an unreadable file is
+    left out. Never raises."""
+    hashes: Dict[str, str] = {}
+    for rel in grading_files(argv, root):
+        try:
+            with open(os.path.join(str(root), *rel.split("/")), "rb") as handle:
+                hashes[rel] = hashlib.sha256(handle.read()).hexdigest()
+        except (OSError, ValueError):
+            continue
+    return hashes
+
+
+def changed_grading(recorded: Any, root: Any) -> List[str]:
+    """Paths in *recorded* (``{relpath: sha256}``) whose file now hashes
+    differently or is gone, sorted. Never raises."""
+    if not isinstance(recorded, dict):
+        return []
+    changed = []
+    for rel, digest in recorded.items():
+        if not isinstance(rel, str):
+            continue
+        try:
+            with open(os.path.join(str(root), *rel.split("/")), "rb") as handle:
+                now = hashlib.sha256(handle.read()).hexdigest()
+        except (OSError, ValueError):
+            now = None
+        if now != digest:
+            changed.append(rel)
+    return sorted(changed)

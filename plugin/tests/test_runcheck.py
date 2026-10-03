@@ -398,5 +398,91 @@ class TestScopeOwner(unittest.TestCase):
         self.assertIsNone(runcheck.missing_path_owner(gate, "/work/app", self.TASKS))
 
 
+class TestGradingFiles(unittest.TestCase):
+    """ADR-0023: the files a command names that do the judging."""
+
+    def setUp(self) -> None:
+        import tempfile
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = os.path.realpath(self._tmp.name)
+        os.makedirs(os.path.join(self.root, "tests"))
+        os.makedirs(os.path.join(self.root, "scripts"))
+        for rel, body in (("tests/test_a.py", "a"), ("scripts/e2e.sh", "e"),
+                          ("e2e.spec.ts", "s")):
+            with open(os.path.join(self.root, rel), "w") as h:
+                h.write(body)
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def files(self, argv):
+        return runcheck.grading_files(argv, self.root)
+
+    def test_a_script_as_argv0(self) -> None:
+        self.assertEqual(self.files(["./scripts/e2e.sh", "--fast"]), ["scripts/e2e.sh"])
+        self.assertEqual(self.files(["scripts/e2e.sh"]), ["scripts/e2e.sh"])
+
+    def test_a_spec_path_argument(self) -> None:
+        self.assertEqual(self.files(["npx", "playwright", "test", "e2e.spec.ts"]),
+                         ["e2e.spec.ts"])
+        self.assertEqual(self.files(["python3", "-m", "pytest", "tests/test_a.py::test_x", "-q"]),
+                         ["tests/test_a.py"])
+        self.assertEqual(self.files(["python3", os.path.join(self.root, "tests", "test_a.py")]),
+                         ["tests/test_a.py"])
+
+    def test_a_bare_program_is_not_a_grading_file(self) -> None:
+        # Even when a file of that name sits in the root.
+        with open(os.path.join(self.root, "pytest"), "w") as h:
+            h.write("x")
+        self.assertEqual(self.files(["pytest"]), [])
+        self.assertEqual(self.files(["npm", "test"]), [])
+
+    def test_outside_the_root_and_dot_dot(self) -> None:
+        outside = os.path.join(os.path.dirname(self.root), "elsewhere.py")
+        self.assertEqual(self.files(["python3", outside, "/etc/hosts"]), [])
+        self.assertEqual(self.files(["python3", "../x.py", "tests/../../x.py"]), [])
+        self.assertEqual(self.files(["python3", "tests/../tests/test_a.py"]), ["tests/test_a.py"])
+
+    def test_a_symlink_out_of_the_root(self) -> None:
+        import tempfile
+        with tempfile.NamedTemporaryFile("w", delete=False) as h:
+            h.write("x")
+        try:
+            os.symlink(h.name, os.path.join(self.root, "tests", "link.py"))
+            self.assertEqual(self.files(["python3", "tests/link.py"]), [])
+        finally:
+            os.unlink(h.name)
+
+    def test_missing_files_and_directories(self) -> None:
+        self.assertEqual(self.files(["python3", "tests/nope.py", "tests", "."]), [])
+
+    def test_the_plugin_root_token_is_expanded(self) -> None:
+        plugin = os.path.join(self.root, "plug")
+        os.makedirs(os.path.join(plugin, ".claude-plugin"))
+        with open(os.path.join(plugin, ".claude-plugin", "plugin.json"), "w") as h:
+            h.write("{}")
+        with open(os.path.join(plugin, "check.py"), "w") as h:
+            h.write("x")
+        old = os.environ.get("CLAUDE_PLUGIN_ROOT")
+        os.environ["CLAUDE_PLUGIN_ROOT"] = plugin
+        try:
+            self.assertEqual(self.files(["python3", "${CLAUDE_PLUGIN_ROOT}/check.py"]),
+                             ["plug/check.py"])
+        finally:
+            if old is None:
+                os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
+            else:
+                os.environ["CLAUDE_PLUGIN_ROOT"] = old
+
+    def test_each_once_and_hashed(self) -> None:
+        hashes = runcheck.grading_hashes(["bash", "scripts/e2e.sh", "./scripts/e2e.sh"], self.root)
+        import hashlib
+        self.assertEqual(hashes, {"scripts/e2e.sh": hashlib.sha256(b"e").hexdigest()})
+
+    def test_never_raises(self) -> None:
+        self.assertEqual(runcheck.grading_hashes(None, self.root), {})
+        self.assertEqual(runcheck.grading_hashes([3, None, "\x00bad"], self.root), {})
+
+
 if __name__ == "__main__":
     unittest.main()

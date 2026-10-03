@@ -290,6 +290,8 @@ def derive(root: pathlib.Path) -> Dict[str, Any]:
         if crit["id"] in seen:
             raise ValueError(f"duplicate criterion id '{crit['id']}'")
         seen.add(crit["id"])
+        # ADR-0023: the files that judge this criterion, as approved.
+        crit["grading"] = runcheck.grading_hashes(crit["argv"], root)
 
     data = {
         "version": VERSION,
@@ -379,7 +381,26 @@ def _artifact_hashes(
     return hashes, problems
 
 
+GRADING_CHANGED = ("grading file changed since approval: %s — re-derive and "
+                   "re-approve 05-gate if the change is intended")
+
+
 def _run_one(
+    root: pathlib.Path, crit: Dict[str, Any], remaining: float
+) -> Dict[str, Any]:
+    """Execute one criterion, then hold back an `ok` whose grading files
+    changed since derive (ADR-0023): it becomes `unverified`, never `ok`;
+    any other verdict stands."""
+    result = _run_one_raw(root, crit, remaining)
+    if result.get("verdict") == verdict.OK:
+        changed = runcheck.changed_grading(crit.get("grading"), root)
+        if changed:
+            result["verdict"] = verdict.UNVERIFIED
+            result["detail"] = GRADING_CHANGED % ", ".join(changed)
+    return result
+
+
+def _run_one_raw(
     root: pathlib.Path, crit: Dict[str, Any], remaining: float
 ) -> Dict[str, Any]:
     """Execute one criterion and classify the outcome."""

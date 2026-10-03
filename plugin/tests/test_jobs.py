@@ -3082,6 +3082,129 @@ class TestMalformedSignatureFile(JobTestCase):
                 self.assertEqual(result["gates"][0]["verdict"], verdict.OK)
 
 
+class TestGradingChangedAfterFailure(JobTestCase):
+    """ADR-0023 decision 3: report, never refuse."""
+
+    STRICT = "import sys\nsys.exit(1)\n"
+    LOOSE = "import sys\nsys.exit(0)  # loosened\n"
+
+    def host_config(self) -> None:
+        cfg = {"build": {"execution": "host", "max_retries": 3, "parallel": 1,
+                         "task_timeout_s": 60}}
+        (self.root / ".gatekit" / "config.json").write_text(json.dumps(cfg), encoding="utf-8")
+
+    def check(self, body: str) -> None:
+        path = self.root / "tests" / "check.py"
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+
+    def task(self, *extra_argv) -> dict:
+        return self.simple_task(task_id="t", target="tests/**", gates=[
+            {"name": "check", "argv": [sys.executable, "tests/check.py", *extra_argv]}])
+
+    def st(self, job_id) -> dict:
+        return json.loads((self.task_dir(job_id, "t") / "status.json").read_text())
+
+    def test_gates_json_records_the_hashes(self) -> None:
+        import hashlib
+        self.check(self.LOOSE)
+        result = jobs.run_gates(self.root, self.task())
+        self.assertEqual(result["gates"][0]["grading"],
+                         {"tests/check.py": hashlib.sha256(self.LOOSE.encode()).hexdigest()})
+
+    def test_host_complete_flags_a_pass_after_the_test_changed(self) -> None:
+        self.host_config()
+        self.check(self.STRICT)
+        self.write_tasks(self.task())
+        job = jobs.start(self.root)
+        self.assertEqual(jobs.complete_task(self.root, "t", job["job_id"])["state"], "failed")
+        self.assertIn("check", self.st(job["job_id"])["failed_grading"])
+        self.check(self.LOOSE)
+        final = jobs.complete_task(self.root, "t", job["job_id"])
+        self.assertEqual(final["state"], "passed")
+        self.assertEqual(final["grading_changed_after_failure"], ["tests/check.py"])
+        self.assertNotIn("failed_grading", {k for k, v in self.st(job["job_id"]).items() if v})
+        payload = jobs.status(self.root, job["job_id"])
+        self.assertEqual(payload["tasks"][0]["grading_changed_after_failure"], ["tests/check.py"])
+        import contextlib, io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            jobs.run(["status", "--root", str(self.root), "--job", job["job_id"]])
+        self.assertIn("grading changed after failure: tests/check.py", out.getvalue())
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            jobs.run(["results", "--root", str(self.root), "--job", job["job_id"], "--compact"])
+        self.assertIn("grading-changed=tests/check.py", out.getvalue())
+
+    def test_a_pass_without_a_change_is_not_flagged(self) -> None:
+        self.host_config()
+        self.check("import os, sys\nsys.exit(0 if os.path.exists('src/x.txt') else 1)\n")
+        self.write_tasks(self.task())
+        job = jobs.start(self.root)
+        self.assertEqual(jobs.complete_task(self.root, "t", job["job_id"])["state"], "failed")
+        (self.root / "src" / "x.txt").write_text("x", encoding="utf-8")
+        final = jobs.complete_task(self.root, "t", job["job_id"])
+        self.assertEqual(final["state"], "passed")
+        self.assertFalse(final.get("grading_changed_after_failure"))
+        payload = jobs.status(self.root, job["job_id"])
+        self.assertEqual(payload["tasks"][0]["grading_changed_after_failure"], [])
+
+    def test_a_first_time_pass_is_not_flagged(self) -> None:
+        self.host_config()
+        self.check(self.STRICT)
+        self.write_tasks(self.task())
+        job = jobs.start(self.root)
+        self.check(self.LOOSE)  # written before any failed attempt: normal work
+        final = jobs.complete_task(self.root, "t", job["job_id"])
+        self.assertEqual(final["state"], "passed")
+        self.assertFalse(final.get("grading_changed_after_failure"))
+
+    def test_recheck_flags_it(self) -> None:
+        self.host_config()
+        self.check(self.STRICT)
+        self.write_tasks(self.task())
+        job = jobs.start(self.root)
+        jobs.recheck(self.root, ["t"], job["job_id"])
+        self.assertEqual(self.st(job["job_id"])["state"], "failed")
+        self.check(self.LOOSE)
+        jobs.recheck(self.root, ["t"], job["job_id"])
+        st = self.st(job["job_id"])
+        self.assertEqual(st["state"], "passed")
+        self.assertEqual(st["grading_changed_after_failure"], ["tests/check.py"])
+
+    def test_a_worker_redelegate_flags_it(self) -> None:
+        self.write_config()
+        self.check(self.STRICT)
+        self.write_tasks(self.task())
+        counter = str(self.root / "attempts.txt")
+        self.set_env(FAKE_WORKER_OUT="tests/check.py", FAKE_WORKER_BODY=self.LOOSE,
+                     FAKE_WORKER_ATTEMPT_FILE=counter, FAKE_WORKER_PASS_AT=2)
+        job = jobs.start(self.root)
+        self.assertEqual(self.st(job["job_id"])["state"], "failed")
+        final = jobs.redelegate(self.root, "t", job["job_id"])
+        self.assertEqual(final["state"], "passed")
+        self.assertEqual(final["grading_changed_after_failure"], ["tests/check.py"])
+
+    def test_a_worker_redelegate_without_a_change_is_not_flagged(self) -> None:
+        self.write_config()
+        self.check("import os, sys\nsys.exit(0 if os.path.exists('tests/out.txt') else 1)\n")
+        self.write_tasks(self.task())
+        counter = str(self.root / "attempts.txt")
+        self.set_env(FAKE_WORKER_OUT="tests/out.txt", FAKE_WORKER_ATTEMPT_FILE=counter,
+                     FAKE_WORKER_PASS_AT=2)
+        job = jobs.start(self.root)
+        final = jobs.redelegate(self.root, "t", job["job_id"])
+        self.assertEqual(final["state"], "passed")
+        self.assertFalse(final.get("grading_changed_after_failure"))
+
+    def test_note_grading_never_raises(self) -> None:
+        jdir = self.root / ".gatekit" / "jobs" / "j"
+        (jdir / "tasks" / "t").mkdir(parents=True)
+        for gates in (None, {}, {"gates": "x"}, {"gates": [None, {"name": 3, "grading": 5}]}):
+            with self.subTest(gates=gates):
+                self.assertEqual(jobs.note_grading(jdir, "t", gates, True), [])
+
+
 class TestZeroTestsIsNotAPass(JobTestCase):
     def gate_task(self, argv) -> dict:
         return self.simple_task(gates=[{"name": "tests", "argv": argv}])

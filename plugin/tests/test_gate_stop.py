@@ -537,3 +537,21 @@ class TestStopWithMalformedSignatures(StopProject):
             runcheck._signatures.cache_clear()
         self.assertEqual(result["decision"], "block")
         self.assertIsNotNone(contract.load_last(self.root))
+
+
+class TestStopAfterAGradingFileChange(StopProject):
+    """ADR-0023: a reused `ok` must not survive a change to its grading file."""
+
+    def test_a_stale_ok_is_not_reused(self) -> None:
+        check = self.root / "tests" / "check.py"
+        check.parent.mkdir()
+        check.write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
+        self.write_contract({"id": "c", "argv": [PY, "tests/check.py"], "timeout_s": 20})
+        self.set_pipeline("build")
+        self.assertIsNone(stop_gate.handle(self.event()))
+        self.assertIsNotNone(contract.reusable_last(self.root))
+        check.write_text("import sys\nsys.exit(0)  # loosened\n", encoding="utf-8")
+        self.assertIsNone(contract.reusable_last(self.root))
+        result = stop_gate.handle(self.event())
+        self.assertEqual(result["decision"], "block")
+        self.assertIn("grading file changed", result["reason"])
