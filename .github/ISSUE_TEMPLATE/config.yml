@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions & ideas → GitHub Discussions
+    url: https://github.com/gatebound/gatebound/discussions
+    about: Ask how something works or float an idea before it becomes a feature request.
+  - name: Security → private vulnerability reporting
+    url: https://github.com/gatebound/gatebound/security/advisories/new
+    about: Report a vulnerability privately, as SECURITY.md describes. Do not open a public issue.

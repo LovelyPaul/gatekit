@@ -1,0 +1,48 @@
+name: Feature request
+description: A change to what gatekit does or how it does it.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check ROADMAP.md first: the item may already be planned, or listed as a non-goal.
+        Open-ended ideas fit better in GitHub Discussions. 한국어로 작성하셔도 됩니다.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What goes wrong or costs you time today? Describe a real session if you can.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should gatekit do instead? If it changes a gate, say what the gate would check.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other ways around the problem, including doing nothing.
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Pipeline stage
+      multiple: true
+      options:
+        - discover
+        - interview
+        - mockup / design
+        - tasks
+        - gate (completion contract, approvals)
+        - build (jobs, workers)
+        - verify
+        - doctor / setup
+        - hooks (write, bash, stop, prompt, spawn, question, compact)
+        - Codex host
+        - docs / manual
+        - other
+    validations:
+      required: true

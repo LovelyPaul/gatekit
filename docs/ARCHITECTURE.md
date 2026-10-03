@@ -72,6 +72,7 @@ gatekit/
 ├── tools/                               # CI gates (stdlib)
 ├── docs/ARCHITECTURE.md (this), decisions/ADR-*.md
 ├── .github/workflows/ci.yml
+├── .github/ISSUE_TEMPLATE/{bug_report,feature_request,config}.yml, .github/PULL_REQUEST_TEMPLATE.md
 ├── README.md, README.ko.md, CHANGELOG.md, CONTRIBUTING.md, SECURITY.md, LICENSE, CLAUDE.md
 ```
 

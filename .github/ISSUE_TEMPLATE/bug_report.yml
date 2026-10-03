@@ -1,0 +1,78 @@
+name: Bug report
+description: Something gatekit did (or failed to do) that it should not have.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. Before you paste anything below,
+        **remove secrets, tokens and personal paths** (for example your home directory).
+        한국어로 작성하셔도 됩니다. 붙여 넣기 전에 비밀값·토큰·개인 경로를 지워 주세요.
+
+        A security issue does not belong here: report it privately as described in SECURITY.md.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you see? Include the exact message a gate printed, if any.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The commands you ran, in order, starting from a project state someone else can recreate.
+      placeholder: |
+        1. /gatekit:interview ...
+        2. /gatekit:gate
+        3. /gatekit:build
+        4. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: host
+    attributes:
+      label: Host
+      options:
+        - Claude Code CLI
+        - Claude desktop app
+        - Codex CLI
+        - Codex app
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "macOS 15.6 / Ubuntu 24.04 / Windows 11"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: gatekit version
+      description: The version the host's plugin list shows for gatekit (Claude Code `/plugin`), or the `Status:` line of the README you installed from.
+      placeholder: "0.16.3"
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of /gatekit:doctor
+      description: |
+        Run `/gatekit:doctor` (Codex: `$gatekit-doctor`) in the affected project and paste the full output.
+        Remove secrets and personal paths first.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Relevant lines from `.gatekit/runs/hook-errors.log`, a job's `status`, screenshots.
