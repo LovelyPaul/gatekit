@@ -152,5 +152,141 @@ class TestLauncherUnchanged(Forms):
                     self.assertIsNone(self.bash("%s %s" % (launcher, sub)))
 
 
+
+class TestWholeStateDirectory(Forms):
+    """ADR-0027 amendment B: everything under .gatekit/ is gatekit's, except
+    config.json (the user's settings) and eval/** (evaluator scratch)."""
+
+    GATEKIT_ONLY = (
+        ".gatekit/runs/contract-last.json", ".gatekit/runs/sess-1.json",
+        ".gatekit/runs/hook-errors.log", ".gatekit/jobs/j1/tasks/t1/status.json",
+        ".gatekit/jobs/j1/job.json", ".gatekit/attempts.json", ".gatekit/baseline.json",
+        ".gatekit/notes.txt", ".GATEKIT/Runs/X.json", "other/.gatekit/runs/x.json",
+        ".gatekit/eval/../runs/x.json", ".gatekit/jobs",
+    )
+    USER_OWNED = (".gatekit/config.json", ".GATEKIT/Config.json", ".gatekit/eval",
+                  ".gatekit/eval/drive.mjs", ".gatekit/eval/shots/a.png", ".gatekit",
+                  "src/runs/x.json", "config/status.json")
+
+    def test_protected_state_covers_the_directory(self) -> None:
+        from gatekit.gates import write as write_gate
+        for raw in self.GATEKIT_ONLY:
+            with self.subTest(raw=raw):
+                self.assertIsNotNone(write_gate.protected_state(self.root, raw))
+        for raw in self.USER_OWNED:
+            with self.subTest(raw=raw):
+                self.assertIsNone(write_gate.protected_state(self.root, raw))
+
+    def test_user_owned_names_followed_through_links(self) -> None:
+        from gatekit.gates import write as write_gate
+        (self.root / ".gatekit" / "runs").mkdir()
+        (self.root / ".gatekit" / "eval").symlink_to(self.root / ".gatekit" / "runs",
+                                                    target_is_directory=True)
+        (self.root / ".gatekit" / "config.json").symlink_to(
+            self.root / ".gatekit" / "approvals.json")
+        self.assertIsNotNone(write_gate.protected_state(self.root, ".gatekit/eval/x.json"))
+        self.assertIsNotNone(write_gate.protected_state(self.root, ".gatekit/config.json"))
+
+    def test_write_tool_denied_before_and_after_approval(self) -> None:
+        for approved in (False, True):
+            if approved:
+                self.approve()
+            for path in self.GATEKIT_ONLY[:9]:
+                with self.subTest(approved=approved, path=path):
+                    self.assertDenied(self.write(path))
+            for path in (".gatekit/config.json", ".gatekit/eval/drive.mjs"):
+                with self.subTest(approved=approved, path=path):
+                    self.assertIsNone(self.write(path))
+
+    def test_evaluator_scratch_still_writable(self) -> None:
+        import json
+        edir = self.root / ".gatekit" / "jobs" / "j1" / "evaluate"
+        edir.mkdir(parents=True)
+        (edir / "task.json").write_text(json.dumps({"id": "evaluate"}), encoding="utf-8")
+        self.approve()
+        os.environ["GATEKIT_TASK_ID"] = "evaluate"
+        os.environ["GATEKIT_JOB_ID"] = "j1"
+        self.assertIsNone(self.write(".gatekit/eval/drive.mjs"))
+        self.assertIsNone(self.bash("echo x > .gatekit/eval/server.log"))
+        self.assertDenied(self.write(".gatekit/runs/contract-last.json"))
+        self.assertDenied(self.bash("echo x > .gatekit/jobs/j1/status.json"))
+
+    def test_bash_writes_denied(self) -> None:
+        (self.root / "sub").mkdir()
+        self.denied_always((
+            "echo x > .gatekit/other.json",
+            "jq . x > .gatekit/runs/contract-last.json",
+            "mkdir -p .gatekit/jobs/t1 && echo '{}' > .gatekit/jobs/t1/status.json",
+            "echo '{}' > .gatekit/jobs/t1/contract.json",
+            "rm -rf .gatekit/runs", "rm -rf .gatekit/jobs/abc", "rm -rf .gatekit",
+            "rm .gatekit/runs/*", "echo > .gatekit/*.json", "rm -f .gatekit/b*",
+            "cp x .gatekit/", "cp -R sub .gatekit", "ln -sfn sub .gatekit",
+            "cp -a other/.gatekit/. .gatekit", "mv .gatekit/attempts.json /tmp/a",
+            "ln -s .gatekit/runs/contract-last.json l",
+            "tar -xf a.tar -C .gatekit", "unzip -o a.zip -d .gatekit/runs",
+            "find .gatekit -name '*.json' -exec rm {} +", "find .gatekit/runs -delete",
+            "cd .gatekit && python3 -c \"open('approvals.json','w').write('{}')\"",
+            "python3 -c \"import pathlib; pathlib.Path('.gatekit','approvals.json').write_text('{}')\"",
+            "python3 -c \"open('.gatekit/runs/s.json','w')\"",
+            "if true; then cd .gatekit; fi; echo {} > attempts.json",
+            "d=.gatekit/runs; echo x > $d/s.json",
+            "git checkout -- .gatekit/runs",
+        ))
+
+    def test_bash_normal_work_allowed(self) -> None:
+        commands = (
+            "mkdir .gatekit", "mkdir -p .gatekit/eval", "echo x > .gatekit/eval/log.txt",
+            "rm -rf .gatekit/eval", "cp cfg.json .gatekit/config.json",
+            "cp config.json .gatekit/", "cat .gatekit/runs/x.json", "jq . .gatekit/attempts.json",
+            "ls -R .gatekit", "grep -r x .gatekit", "diff .gatekit/baseline.json /tmp/b",
+            "python3 -m json.tool .gatekit/baseline.json", "wc -c .gatekit/approvals.json",
+            "tar -czf backup.tgz .gatekit", "zip -r b.zip .gatekit",
+            "rsync -a .gatekit/ /tmp/bk/", "cp -a .gatekit /tmp/bk", "git add .gatekit/",
+            "git diff .gatekit/attempts.json", "rm -rf node_modules", "rm -rf build dist",
+            "echo x > sub/approvals.json", "echo x > config/status.json",
+            "cd .gatekit && ls", "tar -xf a.tar -C build", "find . -name '*.pyc' -delete",
+            "d=.gatekit/eval; echo x > $d/log.txt",
+        )
+        for approved in (False, True):
+            if approved:
+                self.approve()
+            for command in commands:
+                with self.subTest(approved=approved, command=command):
+                    result = self.bash(command)
+                    reason = (result or {}).get("hookSpecificOutput", {}).get(
+                        "permissionDecisionReason", "")
+                    self.assertNotIn("ADR-0027", reason)
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertIsNone(self.bash(command))
+
+    def test_git_clean_stays_allowed(self) -> None:
+        self.allowed_after_approval(("git clean -fdx", "git stash", "git checkout -b f"))
+
+    def test_message_names_the_rule(self) -> None:
+        reason = self.write(".gatekit/runs/contract-last.json")["hookSpecificOutput"][
+            "permissionDecisionReason"]
+        self.assertIn(".gatekit/runs/contract-last.json", reason)
+        self.assertIn("config.json", reason)
+
+    def test_setup_still_creates_config(self) -> None:
+        import shutil
+        import subprocess
+        launcher = PLUGIN / "bin" / "gatekit.py"
+        fresh = self.root / "fresh"
+        fresh.mkdir()
+        (fresh / ".git").mkdir()
+        command = 'python3 "%s" workers set-default claude' % launcher
+        event = self.tool("Bash", {"command": command})
+        event["cwd"] = str(fresh)
+        from gatekit.gates import bash as bash_gate
+        self.assertIsNone(bash_gate.handle(event))
+        proc = subprocess.run([sys.executable, str(launcher), "workers", "set-default", "claude"],
+                              cwd=str(fresh), capture_output=True, text=True, timeout=60)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue((fresh / ".gatekit" / "config.json").is_file())
+        shutil.rmtree(fresh)
+
+
 if __name__ == "__main__":
     unittest.main()

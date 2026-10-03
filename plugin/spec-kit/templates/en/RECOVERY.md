@@ -52,8 +52,10 @@ attempt failed.
 
 ## Rollback procedure
 
-1. Preserve the current attempt under
-   `.gatekit/jobs/<job_id>/tasks/<id>/attempt-N/`.
+1. Preserve the current attempt. gatekit archives it itself under
+   `.gatekit/jobs/<job_id>/tasks/<id>/attempt-N/` (`jobs redelegate <id>`
+   moves it there before the rerun); do not copy files there by hand —
+   `.gatekit/` is written by gatekit only (ADR-0027).
 2. Return the files in the task scope to the last state that passed its gates:
    `git restore -- <write_scope paths>` or `git checkout <sha> -- <paths>`.
 3. Add one row to the "Failed attempts" table in `PROGRESS.md`.

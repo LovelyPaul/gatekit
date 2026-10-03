@@ -176,7 +176,8 @@ evaluated, in this order, and the first failure is the result
   consistent with a re-derived contract — the same outcome as the host
   running `gatekit approve`.
 - Other `.gatekit/**` files (session ledgers, `runs/contract-last.json`, job
-  directories) stay writable as before.
+  directories) stay writable as before. *(Superseded by amendment B below:
+  everything under `.gatekit/` but `config.json` and `eval/**` is protected.)*
 - The Bash reading is static: a glob under `shopt -s dotglob`, `git clean -x`
   (opaque, and it does not name the file), or a script file that writes the
   files are not seen after approval.
@@ -217,8 +218,10 @@ write; §13 the tests; §14 `write.protected_state`, `contract.integrity`,
   syntax) is a later ADR.
 - Whether `runs/contract-last.json` and the session ledger (`active_pipeline`,
   `stop.stood_down`) need the same protection: a forged record or a cleared
-  pipeline would let a Stop pass without a run.
-- An opaque command after approval that does not spell the path (above).
+  pipeline would let a Stop pass without a run. *(Answered yes by amendment
+  B.)*
+- An opaque command after approval that does not spell the path (above;
+  narrowed by amendment A, still open).
 
 ## Amendment (2026-10-04): what a security review of the Bash reading found
 
@@ -272,3 +275,87 @@ file unseen, before or after approval.
    stash pop` stay a trust boundary: they restore what is committed, which
    includes the user's own approval, and refusing them would refuse ordinary
    work.
+
+### B. The whole of `.gatekit/` is gatekit's
+
+The review's largest remaining hole was the files decision 1 left writable
+(see "Remaining trust boundary" and the open questions above). A forged
+`runs/contract-last.json` carrying the current `contract_sha256` and tree
+fingerprint is reused by the Stop gate as a judgement that never ran; a
+session ledger with `stop.stood_down` set makes the Stop gate stand down; a
+forged `jobs/*/status.json` or `attempts.json` changes the unpassed-task and
+retry checks.
+
+**Decision.** Everything under `.gatekit/` is written only by gatekit itself,
+except `.gatekit/config.json` (the user's settings) and `.gatekit/eval/**`
+(the evaluator's scratch, ADR-0026). The rule of decision 1 applies unchanged
+to that wider set, in both gates:
+
+- `write.protected_state` returns `.gatekit/<rest>` for any path below a
+  `.gatekit` directory (any project's, any case, after the same
+  canonicalisation, as written and after realpath) unless `<rest>` is exactly
+  `config.json` or starts with `eval`. The `.gatekit` directory itself is not
+  protected as a write target, so `mkdir .gatekit` stays allowed; deleting or
+  moving it is denied, as before. `samefile` compares with the key files
+  (`approvals.json`, `contract.json`, `baseline.json`, `attempts.json`,
+  `runs/contract-last.json`).
+- The Bash gate reads every command for the wider set: a copy, move or link
+  into a `.gatekit` directory of anything but `config.json`/`eval`, or of a
+  directory by its contents; a glob that can match below a `.gatekit`
+  directory; a `tar -C` / `unzip -d` directory and the start points of `find
+  -exec`/`-delete` that are or lie in gatekit's state; an opaque command whose
+  text spells a gatekit-owned `.gatekit` path (the bare directory included,
+  so `pathlib.Path('.gatekit', …)` counts) or that runs from inside one. The
+  base-name check for an unknown cwd and for `$d/name` uses
+  `write.PROTECTED_NAMES`, the names gatekit writes there.
+- **gatekit's own writers are not affected.** The hooks and the CLI write
+  these files in process — `ledger.save`, `contract.save_last`, the job
+  runner, `attempts.json`, `baseline.json`, `runs/hook-errors.log` — never
+  through a tool call the gates see. `/gatekit:setup` creates `.gatekit/` and
+  `config.json` through `workers set-default`. `jobs clean` is the CLI. The
+  stamp the compact hook writes is in `spec/PROGRESS.md`. The one prose
+  instruction that had the host write into `.gatekit/` — the evaluator
+  prompt for `jobs evaluate --prompt` — now goes to
+  `.gatekit/eval/evaluator-prompt.md`.
+- **Deleting the state while the plugin is active is refused.** `rm -rf
+  .gatekit` from an agent session is denied; `UNINSTALL.md` keeps its order
+  (remove the plugin first, then delete) and says so. A user's own terminal
+  is not a tool call and is not affected.
+- **Message.** The deny reason (en/ko) names the path, says everything under
+  `.gatekit/` but `config.json` and `eval/` is gatekit's own state, and points
+  to `/gatekit:gate` and to `UNINSTALL.md`.
+
+### Consequences of the amendment
+
+- A judgement, a stand-down or a job outcome can no longer be forged by a
+  plain write. Reads are unchanged: `cat`, `jq`, `grep`, `diff`, `ls`,
+  `python3 -m json.tool`, `git diff`/`log`/`show`/`add`/`commit`/`status`,
+  and backups out of `.gatekit` (`tar -czf`, `zip -r`, `rsync -a .gatekit/
+  …`, `cp -a .gatekit …`).
+- `enforce_spec_before_code: false` turns off rule (a) only. A project that
+  never approves `05-gate.md` gets `gate_not_approved` from the Stop gate
+  under `build`/`verify` (decision 2), which the manual now states.
+- **False positives accepted.** An opaque command (`python3 -c`, `awk`,
+  `xargs`, `find -exec`, `git checkout <branch>`, …) whose text names a
+  gatekit-owned `.gatekit` path is denied even when it only reads, and so is
+  a command line that pairs an opaque command with any such mention; a
+  command that names `.gatekit` and writes a file elsewhere whose name gatekit
+  uses (`status.json`, `task.json`, …) is denied too.
+
+### What still remains (trust boundary)
+
+- **Opaque commands that do not spell the path** after approval: a string
+  built at run time (`'.gate' + 'kit'`), a script file (`python3 tool.py`),
+  `patch`, `git apply`, a program the gate does not know (`sponge`,
+  `osascript`). Before approval they are `opaque` like any other.
+- **Archives extracted over the project root** (`tar -xf a.tar`, `unzip
+  a.zip` without `-d`) and `find . -name approvals.json -delete`: the
+  directory is the root, not `.gatekit`, and refusing them would refuse
+  ordinary work.
+- **git restores of the whole tree** — `git checkout -- .`, `git reset
+  --hard`, `git stash pop`, `git checkout <branch>`, `git clean -fdx` — bring
+  back or remove what is committed or ignored; they are the user's history,
+  not a forgery, and they stay allowed.
+- **The PowerShell tool** does not pass through the `Bash` matcher (open
+  question above).
+- The host session can still run `gatekit approve` (decision 1's boundary).

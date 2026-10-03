@@ -39,7 +39,11 @@ Nothing below is deleted by uninstalling. Decide per project.
 | `.codex/hooks.json` | Codex hook registrations from the generated layer | delete it if gatekit wrote it and you added nothing; otherwise remove only the entries that run gatekit |
 | `.agents/skills/gatekit-*` | Codex skills from the generated layer | delete these directories |
 
-A safe order:
+A safe order — remove the plugin (step 1) first, then run these yourself in a
+terminal. While gatekit's hooks are active, gatekit refuses an agent's command
+that deletes or rewrites its state (everything under `.gatekit/` but
+`config.json` and `eval/`, ADR-0027), so `rm -rf .gatekit` from a Claude or
+Codex session is denied:
 
 ```bash
 git status                       # start from a clean tree, so the removal is one reviewable diff
@@ -58,7 +62,9 @@ Leave `spec/` in place unless you are sure nothing else refers to it.
 Every gate stands down in a project that has no `.gatekit/` directory: no
 check runs and no state is created there. So with the plugin still
 installed, deleting a project's `.gatekit/` turns gatekit off for that
-project alone, and other projects keep their gates.
+project alone, and other projects keep their gates. Delete it yourself in a
+terminal: the same refusal applies to an agent session while the hooks are
+active.
 
 ## 한국어 요약
 
@@ -67,7 +73,9 @@ project alone, and other projects keep their gates.
    `codex plugin marketplace remove gatekit` 후 새 세션.
 2. **프로젝트에 남는 것.** 제거해도 프로젝트 파일은 지워지지 않습니다. `spec/`은 프로젝트 문서이므로
    보통 남깁니다. `.gatekit/`은 더 쓰지 않을 때 지웁니다(커밋돼 있었다면 `git rm -r --cached .gatekit`).
+   플러그인을 먼저 제거한 뒤 터미널에서 직접 지우세요. 훅이 켜져 있는 동안 gatekit은 에이전트가
+   자기 상태(`.gatekit/` 아래 `config.json`·`eval/` 외 전부, ADR-0027)를 지우거나 고치는 명령을 거부합니다.
    생성된 Codex 레이어를 썼다면 `AGENTS.md`의 `gatekit:begin`~`gatekit:end` 블록,
    `.codex/hooks.json`의 gatekit 항목, `.agents/skills/gatekit-*`를 지웁니다.
 3. **제거하지 않고 끄기.** `.gatekit/`이 없는 프로젝트에서는 모든 게이트가 물러납니다. 플러그인을
-   둔 채 그 프로젝트의 `.gatekit/`만 지우면 그 프로젝트에서만 꺼집니다.
+   둔 채 그 프로젝트의 `.gatekit/`만 지우면 그 프로젝트에서만 꺼집니다(터미널에서 직접 지웁니다).

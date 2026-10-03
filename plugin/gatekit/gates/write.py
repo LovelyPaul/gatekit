@@ -23,11 +23,14 @@ workers from editing each other's files. Rule (b) is deliberately stricter than
 rule (a): a scoped worker gets no documentation allowlist, because a worker
 assigned ``src/auth/**`` has no business rewriting the PRD.
 
-**(c) protected state** (ADR-0027). ``.gatekit/approvals.json`` and
-``.gatekit/contract.json`` are written only by gatekit's own CLI (``approve``,
-``contract derive``). Every other write to them is denied, always — before
-and after approval, in any session — checked before (a) and (b). See
-:func:`protected_state` for how a path is matched.
+**(c) protected state** (ADR-0027 and its amendment). Everything under
+``.gatekit/`` is written only by gatekit itself — its hooks and CLI, in
+process (``approve``, ``contract derive``, the ledger, ``runs/``, ``jobs/``,
+``attempts.json``, ``baseline.json``) — except ``.gatekit/config.json`` (the
+user's settings) and ``.gatekit/eval/**`` (the evaluator's scratch). Every
+other write there is denied, always — before and after approval, in any
+session — checked before (a) and (b). See :func:`protected_state` for how a
+path is matched.
 
 Denial reasons are written in the session's ``output_lang``.
 """
@@ -94,10 +97,13 @@ _MESSAGES = {
             "Blocked path: {path}"
         ),
         "protected": (
-            "gatekit: {path} is gatekit's own record (ADR-0027) and is written "
-            "only by gatekit itself — `approve` and `contract derive`, run through "
-            "/gatekit:gate. Editing it directly would void the approval it holds. "
-            "To change the gate or its criteria, re-run /gatekit:gate."
+            "gatekit: {path} is gatekit's own state (ADR-0027). Everything under "
+            ".gatekit/ except config.json and eval/ is written only by gatekit itself "
+            "— its hooks and CLI, such as `approve` and `contract derive` run through "
+            "/gatekit:gate. Editing it directly would void the approval or the "
+            "verification it records. To change the gate or its criteria, re-run "
+            "/gatekit:gate; to remove gatekit's state, uninstall the plugin first "
+            "(UNINSTALL.md)."
         ),
         "patch_opaque": (
             "gatekit: cannot determine which files this patch touches (no "
@@ -128,10 +134,12 @@ _MESSAGES = {
             "차단된 경로: {path}"
         ),
         "protected": (
-            "gatekit: {path} 는 gatekit 자체 기록(ADR-0027)이며 gatekit 만 씁니다 — "
+            "gatekit: {path} 는 gatekit 자체 상태(ADR-0027)입니다. .gatekit/ 아래는 "
+            "config.json 과 eval/ 을 빼고 gatekit 자신만 씁니다 — 훅과 CLI, 예컨대 "
             "/gatekit:gate 가 실행하는 `approve` 와 `contract derive`. 직접 수정하면 "
-            "그 안의 승인이 무효가 됩니다. 게이트나 기준을 바꾸려면 /gatekit:gate 를 "
-            "다시 실행하세요."
+            "그 안의 승인이나 검증 기록이 무효가 됩니다. 게이트나 기준을 바꾸려면 "
+            "/gatekit:gate 를 다시 실행하고, gatekit 상태를 지우려면 먼저 플러그인을 "
+            "제거하세요(UNINSTALL.md)."
         ),
         "patch_opaque": (
             "gatekit: 이 패치가 어떤 파일을 건드리는지 판별할 수 없고(*** Add/Update/"
@@ -184,8 +192,18 @@ def relative_target(root: pathlib.Path, raw_path: str) -> Optional[str]:
     return paths.relative_to_root(root, candidate)
 
 
-#: ADR-0027: the two state files only gatekit's CLI writes, by base name.
-PROTECTED_NAMES = ("approvals.json", "contract.json")
+#: ADR-0027 amendment: under ``.gatekit/`` only these belong to the user — the
+#: settings file and the evaluator's scratch directory.
+USER_FILES = ("config.json",)
+USER_DIRS = ("eval",)
+#: Names gatekit writes under ``.gatekit/``, for the checks that know only a
+#: base name (the Bash gate's unknown cwd, a hard link by ``samefile``).
+PROTECTED_NAMES = ("approvals.json", "contract.json", "contract-last.json", "baseline.json",
+                   "attempts.json", "status.json", "job.json", "task.json", "gates.json",
+                   "preflight.json", "stop.json", "hook-errors.log")
+#: The ones ``samefile`` compares against (relative to ``.gatekit/``).
+_KEY_FILES = ("approvals.json", "contract.json", "baseline.json", "attempts.json",
+              "runs/contract-last.json")
 _DRIVE_RE = re.compile(r"^[A-Za-z]:$")
 
 
@@ -207,29 +225,38 @@ def _canonical(raw: str) -> str:
     return "/".join(out)
 
 
+def user_owned(rest: List[str]) -> bool:
+    """True when *rest* (lowered segments below ``.gatekit/``) is the user's:
+    ``config.json`` or anything under ``eval/``."""
+    return bool(rest) and ((len(rest) == 1 and rest[0] in USER_FILES) or rest[0] in USER_DIRS)
+
+
 def _protected_tail(path: str) -> Optional[str]:
-    """``.gatekit/<name>`` when *path* (already absolute and canonical) ends
-    in a protected file, compared case-insensitively."""
+    """``.gatekit/<rest>`` when *path* (already absolute and canonical) lies
+    below a ``.gatekit`` directory and is not the user's, compared
+    case-insensitively."""
     parts = [p for p in os.path.normpath(path).replace("\\", "/").lower().split("/") if p]
-    if len(parts) >= 2 and parts[-2] == paths.STATE_DIRNAME and parts[-1] in PROTECTED_NAMES:
-        return "%s/%s" % (paths.STATE_DIRNAME, parts[-1])
+    for index, part in enumerate(parts[:-1]):
+        if part == paths.STATE_DIRNAME and not user_owned(parts[index + 1:]):
+            return "%s/%s" % (paths.STATE_DIRNAME, "/".join(parts[index + 1:]))
     return None
 
 
 def protected_files(root: pathlib.Path) -> List[pathlib.Path]:
-    """This project's protected files, as paths (they may not exist)."""
-    return [paths.state_dir(root) / name for name in PROTECTED_NAMES]
+    """This project's key state files, as paths (they may not exist)."""
+    return [paths.state_dir(root) / name for name in _KEY_FILES]
 
 
 def protected_state(root: pathlib.Path, raw_path: str) -> Optional[str]:
-    """``.gatekit/approvals.json`` / ``.gatekit/contract.json`` when *raw_path*
-    names one of them, else ``None`` (ADR-0027).
+    """``.gatekit/<rest>`` when *raw_path* lies below a ``.gatekit`` directory
+    and is not ``config.json`` or under ``eval/``, else ``None`` (ADR-0027 and
+    its amendment).
 
     Matched on the path as written (joined to *root* when relative) and on
     its realpath, so a symlinked file or directory is followed; when the
-    target exists, ``samefile`` against this project's two files also
-    catches a hard link or a short name. A protected file of another project
-    is still protected. Never raises.
+    target exists, ``samefile`` against this project's key state files also
+    catches a hard link or a short name. Another project's state is
+    protected too. Never raises.
     """
     try:
         text = _canonical(raw_path)
@@ -245,7 +272,8 @@ def protected_state(root: pathlib.Path, raw_path: str) -> Optional[str]:
         if os.path.exists(candidate):
             for own in protected_files(root):
                 if own.exists() and os.path.samefile(candidate, str(own)):
-                    return "%s/%s" % (paths.STATE_DIRNAME, own.name)
+                    return "%s/%s" % (paths.STATE_DIRNAME,
+                                      own.relative_to(paths.state_dir(root)).as_posix())
     except (OSError, ValueError, TypeError):
         return None
     return None

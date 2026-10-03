@@ -48,7 +48,9 @@ status: "초안"
 
 ## 롤백 절차
 
-1. 현재 시도의 산출물을 `.gatekit/jobs/<job_id>/tasks/<id>/attempt-N/`로 보존한다.
+1. 현재 시도의 산출물을 보존한다. gatekit이 직접
+   `.gatekit/jobs/<job_id>/tasks/<id>/attempt-N/`에 보관한다(`jobs redelegate <id>`가
+   재실행 전에 옮긴다). 직접 복사하지 않는다 — `.gatekit/`은 gatekit만 쓴다(ADR-0027).
 2. 작업 범위의 파일을 마지막으로 게이트를 통과한 상태로 되돌린다.
    `git restore -- <write_scope 경로>` 또는 `git checkout <sha> -- <경로>`.
 3. `PROGRESS.md`의 "실패한 시도" 표에 한 줄 추가한다.

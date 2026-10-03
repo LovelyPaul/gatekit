@@ -24,10 +24,10 @@ different model, running read-only against source (`write.py` refuses inside
 its session either way). Write the bullet list below (from "You
 are the evaluator" onward, in `output_lang`, leaving out the one bullet that
 starts "Record the result under" — a CLI evaluator cannot write) to
-`.gatekit/evaluator-prompt.md`, then run:
+`.gatekit/eval/evaluator-prompt.md` (the rest of `.gatekit/` is gatekit's own, ADR-0027), then run:
 
 ```
-python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs evaluate --prompt .gatekit/evaluator-prompt.md --lang <output_lang>
+python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs evaluate --prompt .gatekit/eval/evaluator-prompt.md --lang <output_lang>
 ```
 
 **For a Codex evaluator specifically** (ADR-0015): `--sandbox read-only`

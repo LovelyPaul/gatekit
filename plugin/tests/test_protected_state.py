@@ -80,9 +80,8 @@ class TestProtectedPath(Project):
                 self.assertIsNotNone(write_gate.protected_state(self.root, raw))
 
     def test_others_are_not_protected(self) -> None:
-        for raw in (".gatekit/config.json", ".gatekit/baseline.json", "src/contract.json",
-                    "approvals.json", ".gatekit/runs/x.json", ".gatekit/eval/contract.json.bak",
-                    "spec/05-gate.md"):
+        for raw in (".gatekit/config.json", "src/contract.json", "approvals.json",
+                    ".gatekit/eval/contract.json.bak", "spec/05-gate.md", ".gatekit"):
             with self.subTest(raw=raw):
                 self.assertIsNone(write_gate.protected_state(self.root, raw))
 
@@ -122,12 +121,13 @@ class TestWriteGate(Project):
     def test_denied_for_a_scoped_worker(self) -> None:
         jdir = self.root / ".gatekit" / "jobs" / "j1" / "tasks" / "t1"
         jdir.mkdir(parents=True)
-        (jdir / "task.json").write_text(json.dumps({"write_scope": [".gatekit/**"]}),
+        (jdir / "task.json").write_text(json.dumps({"write_scope": [".gatekit/**", "src/**"]}),
                                         encoding="utf-8")
         os.environ["GATEKIT_TASK_ID"] = "t1"
         os.environ["GATEKIT_JOB_ID"] = "j1"
         self.assertDenied(self.write(".gatekit/contract.json"))
-        self.assertIsNone(self.write(".gatekit/notes.json"))
+        self.assertDenied(self.write(".gatekit/notes.json"))
+        self.assertIsNone(self.write("src/notes.json"))
 
     def test_apply_patch_after_approval(self) -> None:
         self.approve()
@@ -147,7 +147,7 @@ class TestWriteGate(Project):
         self.assertIn("05-gate.md", result["hookSpecificOutput"]["permissionDecisionReason"])
         self.approve()
         self.assertIsNone(self.write("src/app.py"))
-        self.assertIsNone(self.write(".gatekit/baseline.json"))
+        self.assertIsNone(self.write(".gatekit/eval/drive.mjs"))
 
     def test_korean_message(self) -> None:
         led = ledger.Ledger.load(self.root, self.session)
@@ -258,14 +258,14 @@ class TestBashGate(Project):
     def test_reads_and_other_writes_unchanged(self) -> None:
         self.approve()
         for command in ("cat .gatekit/approvals.json", "jq . .gatekit/contract.json",
-                        "cp .gatekit/contract.json /tmp/c.json", "echo x > .gatekit/notes.txt",
-                        "rm -rf .gatekit/runs", "echo x > src/app.py", "ls -la .gatekit"):
+                        "cp .gatekit/contract.json /tmp/c.json", "echo x > .gatekit/eval/notes.txt",
+                        "rm -rf .gatekit/eval", "echo x > src/app.py", "ls -la .gatekit"):
             with self.subTest(command=command):
                 self.assertIsNone(self.bash(command))
 
     def test_reads_before_approval_unchanged(self) -> None:
         self.assertIsNone(self.bash("cat .gatekit/approvals.json"))
-        self.assertIsNone(self.bash("echo x > .gatekit/notes.txt"))
+        self.assertIsNone(self.bash("echo x > .gatekit/eval/notes.txt"))
 
 
 class TestExitZero(Project):

@@ -28,7 +28,15 @@
 
 **언제**: `Write`·`Edit`·`MultiEdit`·`NotebookEdit` 호출 직전.
 
-독립적인 두 규칙이 있고 각각이 단독으로 쓰기를 거부할 수 있다.
+독립적인 세 규칙이 있고 각각이 단독으로 쓰기를 거부할 수 있다. 보호 상태 규칙 (c)가 가장 먼저, 언제나 적용된다.
+
+### 규칙 (c) 보호 상태 — `.gatekit/`은 gatekit만 쓴다 (ADR-0027)
+
+`.gatekit/` 아래는 `config.json`(사용자 설정)과 `eval/**`(평가자 스크래치)을 빼고 전부 gatekit 자신이 쓴다. 승인 기록(`approvals.json`), 계약(`contract.json`), 마지막 판정 기록(`runs/contract-last.json`), 세션 원장(`runs/<session_id>.json`), 잡 디렉터리(`jobs/`), `attempts.json`, `baseline.json`, `runs/hook-errors.log`가 여기 든다. 훅과 CLI(`approve`, `contract derive`, `jobs …`)는 이 파일들을 도구 호출이 아니라 프로세스 안에서 쓰므로 이 규칙에 걸리지 않는다. 그 밖의 쓰기는 `Write`·`Edit`·`MultiEdit`·`NotebookEdit`·`apply_patch` 모두, 승인 전후, 어느 세션에서든, `GATEKIT_TASK_ID`나 `enforce_spec_before_code`와 상관없이 거부한다. 경로는 대소문자를 무시하고, `\`를 `/`로, NTFS 스트림 접미사(`::$DATA`)와 끝의 점·공백을 잘라낸 뒤, 쓴 그대로와 realpath 양쪽으로 비교한다. 심볼릭 링크와(대상이 있으면) 하드 링크도 따라간다. 다른 프로젝트의 `.gatekit/`도 보호된다. 읽기(`Read`, `cat`, `jq`)는 막지 않는다.
+
+이 규칙이 있는 이유는 승인 기록이나 Stop 게이트가 재사용하는 판정 기록을 손으로 쓰면 사용자 없이 게이트가 열리거나 판정 없이 Stop이 통과하기 때문이다.
+
+**차단됐을 때 할 일**: 기준이나 게이트를 바꾸려면 `/gatekit:gate`를 다시 실행한다. 설정은 `config.json`에서 바꾼다. gatekit 상태를 지우려면 먼저 플러그인을 제거하고 터미널에서 직접 지운다(`UNINSTALL.md`). 오래된 잡은 `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" jobs clean`으로 정리한다.
 
 ### 규칙 (a) 스펙 먼저
 
@@ -69,9 +77,11 @@ README*
 
 **하는 일**: 명령 문자열을 실행하지 않고 읽어서 그 명령이 쓸 파일을 뽑아낸 뒤, 각 경로를 write 게이트와 **같은 함수**로 판정한다. 리다이렉션(`>`, `>>`, `&>`), `tee`, `sed -i`, `perl -i`, `cp`/`mv`/`ln`/`install`/`rsync`의 목적지, `touch`/`rm`/`mkdir`/`truncate`/`chmod`/`chown`의 대상, `dd of=`, 그리고 `sort -o`·`curl -o`·`wget -O`·`tar -C`/`-f`·`unzip -d`·`zip`처럼 출력 경로가 인자에 그대로 보이는 도구를 인식한다. `cd`는 `;`, `&&`, `|`, 줄바꿈을 넘어 추적하고, `VAR=`·`sudo`·`env`·`nohup` 접두는 벗기며, 히어독 본문과 `/dev/*`는 무시하고, `sh -c "…"`는 재귀로 읽는다.
 
-**빠른 경로**: 어떤 규칙도 거부할 수 없는 상태(`GATEKIT_TASK_ID` 없음, 게이트 승인됨 또는 `spec/` 없음)면 파싱 없이 통과시킨다. 평소 세션은 이 게이트의 비용을 내지 않는다.
+**규칙이 꺼져 있을 때**: 규칙 (a)·(b)가 거부할 수 없는 상태(`GATEKIT_TASK_ID` 없음, 게이트 승인됨 또는 `spec/` 없음)에서도 명령은 읽지만, 아래 보호 상태 점검만 그 결과로 판정한다. 나머지는 판정하지 않고 통과시킨다. 읽기는 정적이고 가벼워서 평소 세션이 체감할 비용은 없다.
 
-**판별 불가는 거부**: 규칙이 살아 있는데 쓰기 대상을 알 수 없으면 거부한다. 경로 안의 `$VAR`나 백틱, 알 수 없는 디렉터리로 `cd`, `eval`, `xargs`, `patch`, `trap`, `find -exec`, 작업 트리를 바꾸는 `git` 하위 명령(`apply`, `checkout`, `restore`, `reset`, `merge`, `stash`, `init`, `clone` 등), 인라인 인터프리터 코드(`python3 -c`, `node -e`), `awk`, 명령줄 편집기(`ed`, `ex`, `vim`, `nano`), `busybox`, 파일명을 스스로 정하는 다운로드(`curl -O`, 옵션 없는 `wget`), 프로세스 치환, 짝이 안 맞는 따옴표가 여기 해당한다. 거부 메시지는 이유와 대안(Write/Edit 도구, 리터럴 경로)을 말한다. `unverified`를 `ok`로 반올림하지 않는 것과 같은 원칙이다.
+**판별 불가는 거부**: 규칙이 살아 있는데 쓰기 대상을 알 수 없으면 거부한다. 경로 안의 `$VAR`나 백틱, 알 수 없는 디렉터리로 `cd`, `eval`, `xargs`, `patch`, `trap`, `find -exec`, 작업 트리를 바꾸는 `git` 하위 명령(`apply`, `checkout`, `restore`, `reset`, `merge`, `stash`, `init`, `clone` 등), 인라인 인터프리터 코드(`python3 -c`, `node -e`), 스크립트를 표준 입력으로 받는 인터프리터(`python3 <<PY`, `echo … | node`, `python3 < s.py` — 스크립트 파일이나 `-m 모듈`이 인자에 있으면 해당 없음), `awk`, 명령줄 편집기(`ed`, `ex`, `vim`, `nano`), `busybox`, 파일명을 스스로 정하는 다운로드(`curl -O`, 옵션 없는 `wget`), 프로세스 치환, 짝이 안 맞는 따옴표가 여기 해당한다. 거부 메시지는 이유와 대안(Write/Edit 도구, 리터럴 경로)을 말한다. `unverified`를 `ok`로 반올림하지 않는 것과 같은 원칙이다.
+
+**보호 상태 (ADR-0027)**: 모든 명령을 규칙 (c)에 비춰 읽는다. 쓰기 대상이 gatekit 상태이면, `rm`·`mv`로 그것이나 그것을 담은 디렉터리(`rm -rf .gatekit`, `rm -rf .gatekit/runs`)를 지우거나 옮기면, `.gatekit/`으로 `config.json`·`eval` 외의 무언가를 복사·이동·링크하면(`cp x .gatekit/`, `cp -R src/ .gatekit`), `ln`(`cp -l`/`-s` 포함)이 gatekit 상태나 그것을 담은 디렉터리를 가리키면, `git checkout`/`restore`/`reset`/`stash push`의 경로가 그것이거나 `.gatekit` 디렉터리이면(`git checkout -- .gatekit`), `tar -C`·`unzip -d`의 풀 디렉터리나 `find -exec`/`-delete`의 시작점이 그것이면, 앞에서 `.gatekit`을 담은 변수로 만든 경로이면(`d=.gatekit; echo x > $d/approvals.json`), 판별 불가 명령의 본문이 `.gatekit` 경로를 적었거나(`python3 <<PY` 본문 포함) `.gatekit` 안에서 실행되면 거부한다. 글롭·중괄호, 셸 예약어 뒤의 `cd`, `pushd`, 조건부 `cd`도 따진다. 허용되는 것: `cat`/`jq`/`grep`/`diff`/`ls`/`python3 -m json.tool` 같은 읽기, `git diff`/`log`/`show`/`add`/`commit`/`status`, `.gatekit`을 밖으로 백업하는 `tar -czf`·`zip -r`·`rsync -a .gatekit/ …`·`cp -a .gatekit …`, `mkdir .gatekit`, `.gatekit/eval/` 아래 쓰기, `config.json` 수정, 런처 명령(`approve`, `contract derive`, `contract run`, `jobs …`). `git checkout -- .`, `git reset --hard`, `git stash pop`, `git clean -fdx`는 커밋된 상태를 되살리거나 지우는 명령이라 신뢰 경계로 남긴다. 판별 불가 명령이 경로를 적지 않고 쓰는 경우(문자열을 이어 붙인 경로, 스크립트 파일, 루트에 푸는 압축 파일)는 정적 읽기로 보이지 않는다. 그 효과는 Stop 게이트의 무결성 점검이 막는다(아래).
 
 **한계**: 이름으로 호출되는 프로그램(`npm run build`, `python3 script.py`)이 무엇을 쓰는지는 보지 않는다. 셸 문법을 읽는 게이트이지 모든 바이너리의 동작을 아는 게이트가 아니다. 근거는 `docs/decisions/ADR-0004-bash-write-gate.md`.
 
@@ -136,6 +146,10 @@ README*
 **차단 조건**: 계약 실행 결과에 `fail`이나 `unverified` 기준이 하나라도 있고, `block_count`가 3 미만이고, `stop_hook_active`가 참이 아닐 때. 차단 메시지에 실패한 기준 목록이 들어가고 `block_count`가 1 증가한다.
 
 계약이 stale이면 다른 메시지가 나간다. `contract derive`를 실행하고 작업을 마치라는 안내다.
+
+**무결성 점검 (ADR-0027)**: 기준을 하나라도 실행하기 전에, 그리고 앞 판정 기록을 재사용하기 전에 세 가지를 순서대로 본다. `contract_stale`(위), `gate_not_approved`(`approve check spec/05-gate.md`가 `ok`가 아님 — 승인이 없거나, 승인 뒤 파일이 바뀌었거나, 고정한 채점 파일이 계약과 다름), `contract_mismatch`(`05-gate.md`를 메모리에서 다시 파싱한 결과가 `contract.json`과 기준 필드·순서·예산 중 하나라도 다름). 어느 하나라도 걸리면 기준 없이 `unverified`이고, 다른 `unverified`처럼 차단한다. `contract run`도 같은 점검을 한다(`contract baseline`은 승인 전에 돌기 때문에 승인 점검만 뺀다). 판정 기록 `runs/contract-last.json`에는 그때의 `contract.json` 해시(`contract_sha256`)가 함께 남고, 해시가 다르거나 없으면 재사용하지 않는다.
+
+**`enforce_spec_before_code: false`의 결과**: 이 설정은 규칙 (a)만 끈다. 승인을 한 번도 하지 않은 프로젝트에서 `build`·`verify` 파이프라인의 Stop 게이트는 이제 `gate_not_approved`를 돌려준다. 합의되지 않은 기준을 판정하지 않는 것이 정직한 판정이기 때문이다. `/gatekit:gate`는 언제나 `/gatekit:build` 전에 승인하므로 보통의 흐름은 영향이 없다.
 
 ### 3회 차단 후 해제 규칙
 

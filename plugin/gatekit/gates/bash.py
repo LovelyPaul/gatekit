@@ -27,15 +27,17 @@ no execution — and it is deliberately conservative:
   (ADR-0023), because ``env -u GATEKIT_TASK_ID`` would otherwise hide the
   worker from the refusal in :func:`gatekit.approval.approve`. ``approve
   check`` and ``approve list`` stay allowed; they record nothing.
-* ``.gatekit/approvals.json`` and ``.gatekit/contract.json`` are protected
-  always (ADR-0027), so every command is read for them, also when nothing
-  else could be denied: a write target, a removed path (``rm``, ``mv``
-  sources) that is or contains one, a copy into ``.gatekit/`` of a file with
-  a protected name, a link to one (``ln``, ``cp -l``/``-s``), a path built
-  from a variable assigned a ``.gatekit`` directory, a ``git checkout`` /
-  ``restore`` / ``reset`` / ``stash push`` pathspec that is or holds one, or an
-  opaque command whose text names one is denied. Nothing else is judged
-  while no restriction is active.
+* gatekit's state — everything under ``.gatekit/`` but ``config.json`` and
+  ``eval/**`` — is protected always (ADR-0027 and its amendment), so every
+  command is read for it, also when nothing else could be denied: a write
+  target there, a removed path (``rm``, ``mv`` sources) that is or contains
+  it, a copy or link into a ``.gatekit`` directory, a link to it (``ln``,
+  ``cp -l``/``-s``), a path built from a variable assigned a ``.gatekit``
+  directory, a ``git checkout`` / ``restore`` / ``reset`` / ``stash push``
+  pathspec, a ``tar -C`` / ``unzip -d`` directory or a ``find -exec`` start
+  point that is or holds it, or an opaque command whose text names it or
+  that runs inside it is denied. Nothing else is judged while no
+  restriction is active.
 
 Denial reasons are written in the session's ``output_lang``.
 """
@@ -134,7 +136,7 @@ class WriteTargets:
     """Result of :func:`extract_write_targets`."""
 
     __slots__ = ("targets", "opaque", "why", "removed", "copies", "cwds", "unresolved",
-                 "linked", "pathspecs", "dollar", "assigns")
+                 "linked", "subtrees", "dollar", "assigns")
 
     def __init__(self) -> None:
         self.targets: List[str] = []
@@ -150,8 +152,9 @@ class WriteTargets:
         self.unresolved: List[str] = []
         #: ADR-0027 amendment: what ``ln`` (or ``cp -l``/``-s``) links to.
         self.linked: List[str] = []
-        #: ADR-0027 amendment: pathspecs of ``git checkout/restore/reset/stash``.
-        self.pathspecs: List[str] = []
+        #: ADR-0027 amendment: paths whose contents a command rewrites — git
+        #: pathspecs, an archive's extraction directory, ``find`` start points.
+        self.subtrees: List[str] = []
         #: ADR-0027 amendment: raw targets that contain a variable, and the
         #: ``VAR=value`` assignments seen earlier in the command.
         self.dollar: List[str] = []
@@ -420,6 +423,15 @@ def _flagged_output(
         index += 1
 
 
+def _subtree(result: WriteTargets, raw: Optional[str], cwd: Optional[str]) -> None:
+    """Record a directory whose contents the command rewrites (ADR-0027
+    amendment); the cwd itself (``tar -xf a.tar``) is not recorded."""
+    if raw:
+        resolved = _resolve(raw, cwd)
+        if resolved:
+            result.subtrees.append(resolved)
+
+
 def _archive(name: str, args: List[str], result: WriteTargets, cwd: Optional[str]) -> None:
     """``tar``/``unzip`` extraction writes into a directory; ``zip`` writes an archive."""
     if name == "zip":
@@ -437,6 +449,7 @@ def _archive(name: str, args: List[str], result: WriteTargets, cwd: Optional[str
             elif arg.startswith("-d") and len(arg) > 2:
                 target = arg[2:]
         _add(result, target or ".", cwd, "variable in unzip directory")
+        _subtree(result, target, cwd)
         return
     # tar: the mode lives in the first bare word (``xzf``) or a dashed
     # cluster (``-xf``) or a long option (``--extract``).
@@ -460,6 +473,7 @@ def _archive(name: str, args: List[str], result: WriteTargets, cwd: Optional[str
             elif arg.startswith("--directory="):
                 target = arg.split("=", 1)[1]
         _add(result, target or ".", cwd, "variable in tar directory")
+        _subtree(result, target, cwd)
 
 
 def _target_directory(args: List[str]) -> Optional[str]:
@@ -548,7 +562,7 @@ def _git(rest: List[str], result: WriteTargets, cwd: Optional[str]) -> None:
     for spec in _positional(args, consuming=_GIT_PATHSPEC[sub]):
         resolved = _resolve(spec, cwd)
         if resolved:
-            result.pathspecs.append(resolved)
+            result.subtrees.append(resolved)
         elif "$" in spec or "`" in spec:
             result.dollar.append(spec)
 
@@ -608,7 +622,7 @@ def _analyze(words: List[str], result: WriteTargets, cwd: Optional[str],
             result.cwds.extend(nested.cwds)
             result.unresolved.extend(nested.unresolved)
             result.linked.extend(nested.linked)
-            result.pathspecs.extend(nested.pathspecs)
+            result.subtrees.extend(nested.subtrees)
             result.dollar.extend(nested.dollar)
             result.assigns.update(nested.assigns)
             if nested.opaque:
@@ -645,6 +659,10 @@ def _analyze(words: List[str], result: WriteTargets, cwd: Optional[str],
     if name == "find":
         if any(a in ("-exec", "-execdir", "-ok", "-okdir", "-delete") or a.startswith("-fprint") for a in rest):
             result.mark_opaque("find -exec/-delete")
+            for start in rest:
+                if start.startswith(("-", "(", "!")):
+                    break
+                _subtree(result, start, cwd)
         return cwd
 
     if name == "git":
@@ -821,9 +839,21 @@ def invokes_gatekit_approve(command: str, depth: int = 0) -> bool:
 # --------------------------------------------------------------------------
 # protected state (ADR-0027)
 # --------------------------------------------------------------------------
-#: An opaque command whose text names a protected file.
-_PROTECTED_MENTION_RE = re.compile(
-    r"\.gatekit[\\/]+(?:approvals|contract)\.json", re.IGNORECASE)
+#: A path that names ``.gatekit``: what follows decides whether it is the
+#: user's (``config.json``, ``eval/``) or gatekit's.
+_STATE_MENTION_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])\.gatekit(?![A-Za-z0-9_-])((?:[\\/]+[^\s'\"\\/;|&)<>]*)*)",
+    re.IGNORECASE)
+
+
+def _mentions_state(command: str) -> Optional[str]:
+    """The first gatekit-owned path an (opaque) command's text spells — a
+    ``.gatekit`` directory itself or anything below it but the user's."""
+    for match in _STATE_MENTION_RE.finditer(command):
+        rest = [p for p in re.split(r"[\\/]+", match.group(1).lower()) if p and p != "."]
+        if not write.user_owned(rest):
+            return _STATE + ("/" + "/".join(rest) if rest else "")
+    return None
 
 
 def _lower_abs(path: str) -> str:
@@ -838,10 +868,9 @@ def _base(path: str) -> str:
     return _lower_abs(path).rsplit("/", 1)[-1]
 
 
-def _own_paths(root) -> "tuple[str, List[str]]":
-    """``(state dir, [protected files])``, realpath'd, lowered, canonical."""
-    state = _lower_abs(os.path.realpath(str(paths.state_dir(root))))
-    return state, [state + "/" + name for name in write.PROTECTED_NAMES]
+def _state_path(root) -> str:
+    """This project's state directory, realpath'd, lowered, canonical."""
+    return _lower_abs(os.path.realpath(str(paths.state_dir(root))))
 
 
 def _segment_match(name: str, pattern: str) -> bool:
@@ -873,31 +902,39 @@ def _glob_hits(path: str, candidates: List[str]) -> bool:
     return False
 
 
-def _glob_tail_hits(path: str) -> bool:
-    """A glob whose last two segments can match ``.gatekit/<protected name>``
-    in any directory (another project's record is protected too)."""
+def _glob_state_hit(path: str, whole: bool = False) -> bool:
+    """A glob that can match something of gatekit's below a ``.gatekit``
+    directory in any project (or, with *whole*, the directory itself)."""
     if not (_GLOB_CHARS & set(path)):
         return False
     segs = _glob_segments(path)
-    return (len(segs) >= 2 and _segment_match(_STATE, segs[-2])
-            and any(_segment_match(n, segs[-1]) for n in write.PROTECTED_NAMES))
+    for index, seg in enumerate(segs):
+        if not _segment_match(_STATE, seg):
+            continue
+        rest = segs[index + 1:]
+        if not rest:
+            if whole:
+                return True
+            continue
+        if _GLOB_CHARS & set(rest[0]) or not write.user_owned(rest):
+            return True
+    return False
 
 
 def _contains_protected(root, removed: str) -> bool:
-    """True when deleting or moving *removed* takes a protected file with it:
-    it is a ``.gatekit`` directory, or an ancestor of this project's own."""
-    state, files = _own_paths(root)
+    """True when deleting, moving or linking *removed* takes gatekit's state
+    with it: it is a ``.gatekit`` directory, or an ancestor of this project's."""
+    state = _state_path(root)
     ancestors = [state]
     while "/" in ancestors[-1].strip("/"):
         ancestors.append(ancestors[-1].rsplit("/", 1)[0])
-    if _glob_hits(removed, files + ancestors):
+    if _glob_hits(removed, ancestors) or _glob_state_hit(removed, whole=True):
         return True
     for candidate in {_lower_abs(removed), _lower_abs(os.path.realpath(removed))}:
         if candidate.rsplit("/", 1)[-1] == _STATE:
             return True
-        for mine in files:
-            if mine.startswith(candidate + "/") or candidate in ("", "/"):
-                return True
+        if state.startswith(candidate + "/") or candidate in ("", "/"):
+            return True
     return False
 
 
@@ -912,12 +949,33 @@ def _is_state_dir(path: str) -> bool:
 
 def _state_dir_text(text: str) -> bool:
     """True when *text* (a variable's value, possibly with variables in it)
-    spells a ``.gatekit`` directory or a protected file."""
+    spells a ``.gatekit`` directory or a gatekit-owned path below one."""
     segs = [s for s in write._canonical(text).lower().split("/") if s and s != "."]
-    if not segs:
-        return False
-    return segs[-1] == _STATE or (
-        len(segs) >= 2 and segs[-2] == _STATE and segs[-1] in write.PROTECTED_NAMES)
+    for index, seg in enumerate(segs):
+        if seg == _STATE and not write.user_owned(segs[index + 1:]):
+            return True
+    return False
+
+
+def _copy_hit(root, sources: List[str], dest: str, raws: List[str]) -> Optional[str]:
+    """A copy, move or link that lands something in gatekit's state: into a
+    ``.gatekit`` directory any source but ``config.json``/``eval`` (and any
+    directory copied by contents), into the directory holding ours a
+    ``.gatekit`` directory."""
+    state = _state_path(root)
+    dests = {_lower_abs(dest), _lower_abs(os.path.realpath(dest))}
+    into_state = any(d.rsplit("/", 1)[-1] == _STATE for d in dests)
+    into_parent = state.rsplit("/", 1)[0] in dests
+    for source, raw in zip(sources, raws):
+        base = _base(source)
+        by_contents = raw.endswith("/") or raw.endswith("/.")
+        if into_state and (by_contents or _GLOB_CHARS & set(base)
+                           or not write.user_owned([base])):
+            return _STATE + "/"
+        if into_parent and (_segment_match(_STATE, base)
+                            or (by_contents and _dir_holds(source, {_STATE}))):
+            return _STATE + "/"
+    return None
 
 
 def _dir_holds(path: str, names) -> bool:
@@ -928,42 +986,24 @@ def _dir_holds(path: str, names) -> bool:
         return False
 
 
-def _copy_hit(root, sources: List[str], dest: str, raws: List[str]) -> Optional[str]:
-    """A copy or move that lands a protected file: into a ``.gatekit``
-    directory a source named like one (or a directory with one, copied by
-    contents), into the directory holding ours a ``.gatekit`` directory."""
-    state, _ = _own_paths(root)
-    dests = {_lower_abs(dest), _lower_abs(os.path.realpath(dest))}
-    into_state = any(d.rsplit("/", 1)[-1] == _STATE for d in dests)
-    into_parent = state.rsplit("/", 1)[0] in dests
-    names = set(write.PROTECTED_NAMES)
-    for source, raw in zip(sources, raws):
-        base = _base(source)
-        by_contents = raw.endswith("/") or raw.endswith("/.")
-        if into_state and (base in names or any(_segment_match(n, base) for n in names)
-                           or (by_contents and _dir_holds(source, names))):
-            return _STATE + "/"
-        if into_parent and (_segment_match(_STATE, base)
-                            or (by_contents and _dir_holds(source, {_STATE}))):
-            return _STATE + "/"
-    return None
-
-
-def _in_state_cwd(command: str, found: WriteTargets) -> bool:
-    """True when the command may run from a ``.gatekit`` directory: one of its
-    working directories is one (after realpath), or its text names one."""
-    if _STATE in command.lower():
-        return True
+def _gatekit_cwd(root, found: WriteTargets) -> bool:
+    """True when one of the command's working directories is gatekit's state:
+    a ``.gatekit`` directory or a gatekit-owned directory below one."""
     for cwd in found.cwds:
-        for candidate in (_lower_abs(cwd), _lower_abs(os.path.realpath(cwd))):
-            if candidate.rsplit("/", 1)[-1] == _STATE:
-                return True
+        if _is_state_dir(cwd) or write.protected_state(root, cwd):
+            return True
     return False
 
 
+def _in_state_cwd(root, command: str, found: WriteTargets) -> bool:
+    """True when the command may run from gatekit's state: one of its
+    working directories is there (after realpath), or its text names one."""
+    return _STATE in command.lower() or _gatekit_cwd(root, found)
+
+
 def protected_hit(root, command: str, found: WriteTargets) -> Optional[str]:
-    """The protected file this command would write, remove or replace, else
-    ``None`` (ADR-0027). Never raises."""
+    """The gatekit-owned path this command would write, remove or replace,
+    else ``None`` (ADR-0027 and its amendment). Never raises."""
     try:
         return _protected_hit(root, command, found)
     except (OSError, ValueError, TypeError):
@@ -971,12 +1011,11 @@ def protected_hit(root, command: str, found: WriteTargets) -> Optional[str]:
 
 
 def _protected_hit(root, command: str, found: WriteTargets) -> Optional[str]:
-    _, files = _own_paths(root)
     for target in found.targets:
         hit = write.protected_state(root, target)
         if hit:
             return hit
-        if _glob_hits(target, files) or _glob_tail_hits(target):
+        if _glob_state_hit(target):
             return _STATE + "/"
     for removed in found.removed:
         hit = write.protected_state(root, removed)
@@ -988,7 +1027,7 @@ def _protected_hit(root, command: str, found: WriteTargets) -> Optional[str]:
         hit = _copy_hit(root, sources, dest, raws)
         if hit:
             return hit
-    # A link made to a protected file, or to a directory holding one, is a
+    # A link made to gatekit's state, or to a directory holding it, is a
     # second name for it that the rest of the command (or the next) can write.
     for source in found.linked:
         hit = write.protected_state(root, source)
@@ -996,12 +1035,13 @@ def _protected_hit(root, command: str, found: WriteTargets) -> Optional[str]:
             return hit
         if _contains_protected(root, source):
             return _STATE + "/"
-    # git restores a protected file named directly or by its directory.
-    for spec in found.pathspecs:
-        hit = write.protected_state(root, spec)
+    # Paths whose contents the command rewrites: git pathspecs, an archive's
+    # extraction directory, the start points of `find -exec/-delete`.
+    for tree in found.subtrees:
+        hit = write.protected_state(root, tree)
         if hit:
             return hit
-        if _is_state_dir(spec) or _glob_hits(spec, files) or _glob_tail_hits(spec):
+        if _is_state_dir(tree) or _glob_state_hit(tree, whole=True):
             return _STATE + "/"
     # A path built from a variable assigned a .gatekit directory earlier.
     for raw in found.dollar:
@@ -1010,14 +1050,16 @@ def _protected_hit(root, command: str, found: WriteTargets) -> Optional[str]:
                     r"\$\{?%s(?![A-Za-z0-9_])" % re.escape(var), raw):
                 return _STATE + "/"
     # A cwd we may have misread (a conditional `cd`, an unknown one): a
-    # target named like a protected file counts when .gatekit is in play.
+    # target named like a file gatekit writes counts when .gatekit is in play.
     for target in list(found.targets) + list(found.unresolved) + list(found.removed):
-        if _base(target) in write.PROTECTED_NAMES and _in_state_cwd(command, found):
+        if _base(target) in write.PROTECTED_NAMES and _in_state_cwd(root, command, found):
             return _STATE + "/" + _base(target)
     if found.opaque:
-        match = _PROTECTED_MENTION_RE.search(command)
-        if match:
-            return match.group(0)
+        mention = _mentions_state(command)
+        if mention:
+            return mention
+        if _gatekit_cwd(root, found):
+            return _STATE + "/"
     return None
 
 

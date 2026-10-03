@@ -30,7 +30,10 @@ gatekit을 쓰다 보면 **막히는 일이 자주 생긴다.** 그게 이 도�
 | `approve check`가 `unverified` | 승인 기록 자체가 없음 | `/gatekit:gate`를 처음부터 실행 |
 | Stop 게이트·`contract run`이 `gate_not_approved` | `05-gate.md` 승인이 없거나 맞지 않음(파일 또는 `approvals.json`이 바뀜) | 바뀐 것을 되돌리고 승인된 기준대로 코드를 고친다. 게이트를 바꿔야 하면 `/gatekit:gate`로 새로 승인 (ADR-0027) |
 | Stop 게이트·`contract run`이 `contract_mismatch` | `contract.json`이 `05-gate.md`에서 파생한 내용과 다름(직접 수정됨) | `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract derive`로 복원 후 코드를 고친다. 기준을 바꿔야 하면 `/gatekit:gate` (ADR-0027) |
-| `.gatekit/approvals.json`·`contract.json` 쓰기가 거부됨 | 두 파일은 gatekit CLI(`approve`, `contract derive`)만 쓴다 | 직접 고치지 말고 `/gatekit:gate`를 다시 실행 (ADR-0027) |
+| `.gatekit/` 아래 쓰기·삭제가 거부됨(`approvals.json`, `contract.json`, `runs/`, `jobs/`, `attempts.json`, `baseline.json` 등) | `config.json`과 `eval/` 외의 `.gatekit/`은 gatekit 자신(훅과 CLI)만 쓴다 | 직접 고치지 말고 `/gatekit:gate`를 다시 실행. 설정은 `config.json`, 오래된 잡은 `jobs clean` (ADR-0027) |
+| 세션에서 `rm -rf .gatekit`이 거부됨 | 훅이 켜져 있는 동안 gatekit은 자기 상태를 지우는 명령을 거부한다 | 플러그인을 먼저 제거하고 터미널에서 직접 지운다 (`UNINSTALL.md`) |
+| `enforce_spec_before_code: false`인데 Stop 게이트가 `gate_not_approved` | 그 설정은 쓰기 규칙 (a)만 끈다. Stop 게이트는 승인된 기준만 판정한다 | `/gatekit:gate`로 `05-gate.md`를 승인한다 (ADR-0027) |
+| `python3 <<PY`·`echo … \| python3`가 승인 전에 거부됨(`script on stdin`) | 표준 입력으로 받은 스크립트가 무엇을 쓰는지 알 수 없다 | 스크립트를 파일로 쓰고 `python3 script.py`로 실행하거나, Write/Edit 도구를 쓴다 |
 | `approve check`가 `fail`이고 stderr에 `grading files changed` | 승인한 기준의 테스트 파일이 바뀐 채 다시 derive됨 (`grading_unapproved`) | 의도한 변경이면 `/gatekit:gate`로 재승인, 아니면 테스트 변경을 되돌린다 (ADR-0023) |
 | 워커 없음 (`workers check`가 `fail`) | 기본 백엔드 바이너리가 PATH에 없음 | 해당 CLI 설치, 또는 `workers set-default <name>`으로 다른 백엔드 지정 |
 | codex가 비활성 | 기본값이 `"enabled": false` | `/gatekit:setup codex` 실행. 설명을 읽고 확인해야 켜진다 |
