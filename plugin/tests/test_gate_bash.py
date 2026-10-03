@@ -378,6 +378,39 @@ class TestTaskScope(BashGateProject):
         self.assertIsNotNone(bash_gate.handle(self.event("cat > /tmp/escape.ts")))
 
 
+class TestEvaluatorScratch(BashGateProject):
+    """ADR-0026 (0.16.2): the evaluator's Bash may write `.gatekit/eval/**`."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.approve()
+        edir = self.root / ".gatekit" / "jobs" / "job-eval" / "evaluate"
+        edir.mkdir(parents=True)
+        (edir / "task.json").write_text(
+            json.dumps({"id": "evaluate", "write_scope": "read-only"}))
+        os.environ["GATEKIT_TASK_ID"] = "evaluate"
+        os.environ["GATEKIT_JOB_ID"] = "job-eval"
+
+    def test_scratch_writes_allowed(self) -> None:
+        self.assertIsNone(bash_gate.handle(self.event(
+            "mkdir -p .gatekit/eval && npx playwright test > .gatekit/eval/run.log 2>&1")))
+        self.assertIsNone(bash_gate.handle(self.event("cat > .gatekit/eval/drive.mjs")))
+
+    def test_other_writes_denied(self) -> None:
+        self.assertIsNotNone(bash_gate.handle(self.event("echo x > .gatekit/approvals.json")))
+        self.assertIsNotNone(bash_gate.handle(self.event("cat > src/app.ts")))
+        self.assertIsNotNone(bash_gate.handle(self.event("mkdir -p /tmp/gkeval")))
+        self.assertIsNotNone(bash_gate.handle(
+            self.event("cat > .gatekit/eval/a && cat > src/app.ts")))
+
+    def test_other_task_ids_unaffected(self) -> None:
+        task_dir = self.root / ".gatekit" / "jobs" / "job-eval" / "tasks" / "auth"
+        task_dir.mkdir(parents=True)
+        (task_dir / "task.json").write_text(json.dumps({"id": "auth", "write_scope": "read-only"}))
+        os.environ["GATEKIT_TASK_ID"] = "auth"
+        self.assertIsNotNone(bash_gate.handle(self.event("cat > .gatekit/eval/x")))
+
+
 class TestWorkerNeverApproves(BashGateProject):
     """ADR-0023: inside a worker session no command may run ``gatekit approve``."""
 

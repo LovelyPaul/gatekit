@@ -115,3 +115,26 @@ This is prose. It is not enforcement, and no new mechanism is built:
   The detail names that process.
 - `docs/ARCHITECTURE.md` §3 (prompt), §4 (ledger `lang_source`), §8, §12 and
   §14 (`lang.from_spec`) are updated to match.
+
+## Amendment, 0.16.2 (2026-10-03, owner approval in session)
+
+A review of 0.16.1 found that some of the above did not hold. Each change
+below replaces the matching part of the decision.
+
+### A1. The evaluator's scratch directory is writable, and only for it
+
+Decision 4 described the `agent` evaluator only. A CLI evaluator (`jobs
+evaluate`, e.g. Codex) runs with `GATEKIT_TASK_ID=evaluate`, and under a task
+id rule (b) of the write gate denies every path outside the task's scope and
+every path outside the project root. Its scope is `read-only`, so the brief's
+own instruction, scratch files under `.gatekit/eval/`, could not be followed:
+Write and Bash were both denied there.
+
+Rule (b) now allows `.gatekit/eval/**` inside the project root for the
+evaluator only: task id `evaluate` *and* the evaluator's job layout
+(`.gatekit/jobs/<job>/evaluate/task.json` with `"id": "evaluate"`), so a plan
+task that happens to be called `evaluate` gains nothing. The Write gate,
+`apply_patch` and the Bash gate share this path (`write.decide_path`). Every
+other path stays denied for the evaluator, including anything outside the
+root; every other task id is unchanged. For the `agent` evaluator, which runs
+under no task id, the bullet is still an instruction only.

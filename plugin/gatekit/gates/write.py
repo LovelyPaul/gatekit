@@ -248,6 +248,26 @@ def load_task_scope(root: pathlib.Path, job_id: str, task_id: str):
     return None
 
 
+#: ADR-0026: the one place the independent evaluator may write — a driver
+#: script, a server log, its own screenshots. Inside the project root only.
+EVAL_TASK_ID = "evaluate"
+EVAL_SCRATCH = ".gatekit/eval/**"
+
+
+def is_evaluator(root: pathlib.Path, job_id: str, task_id: str) -> bool:
+    """True for the `jobs evaluate` worker: task id ``evaluate`` *and* the
+    evaluator's job layout (``jobs/<job>/evaluate/task.json``), so a plan
+    task that happens to be called ``evaluate`` gains nothing."""
+    if task_id != EVAL_TASK_ID or not job_id:
+        return False
+    task_file = paths.jobs_dir(root) / str(job_id) / EVAL_TASK_ID / "task.json"
+    try:
+        data = json.loads(task_file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(data, dict) and data.get("id") == EVAL_TASK_ID
+
+
 def restrictions_active(root: pathlib.Path) -> bool:
     """True when at least one of the two rules can currently deny a write.
 
@@ -280,6 +300,8 @@ def decide_path(root: pathlib.Path, raw_path: str, lang: str) -> Optional[Dict[s
             return hookio.deny(
                 _message(lang, "outside_root", task=task_id, path=raw_path)
             )
+        if is_evaluator(root, job_id, task_id) and matches(relpath, EVAL_SCRATCH):
+            return hookio.allow()
         scope = load_task_scope(root, job_id, task_id)
         if scope is None:
             return hookio.deny(

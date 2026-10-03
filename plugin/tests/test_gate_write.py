@@ -285,6 +285,59 @@ class TestTaskWriteScope(WriteGateProject):
         self.assertIsNone(write_gate.handle(self.event(str(self.root / "src" / "billing" / "x.ts"))))
 
 
+class TestEvaluatorScratch(WriteGateProject):
+    """ADR-0026 (0.16.2): the `evaluate` task may write `.gatekit/eval/**`
+    inside the project root and nothing else; other task ids are unaffected."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        approval.approve(self.root, "spec/05-gate.md")  # isolate rule (b)
+        self.job_id = "job-eval"
+        edir = self.root / ".gatekit" / "jobs" / self.job_id / "evaluate"
+        edir.mkdir(parents=True)
+        (edir / "task.json").write_text(
+            json.dumps({"id": "evaluate", "write_scope": "read-only"}), encoding="utf-8")
+        os.environ["GATEKIT_TASK_ID"] = "evaluate"
+        os.environ["GATEKIT_JOB_ID"] = self.job_id
+
+    def denied(self, path: str) -> bool:
+        result = write_gate.handle(self.event(path))
+        return result is not None and (
+            result["hookSpecificOutput"]["permissionDecision"] == "deny")
+
+    def test_scratch_file_allowed(self) -> None:
+        self.assertIsNone(write_gate.handle(
+            self.event(str(self.root / ".gatekit" / "eval" / "drive.mjs"))))
+        self.assertIsNone(write_gate.handle(self.event(".gatekit/eval/shots/a.png")))
+
+    def test_everything_else_denied(self) -> None:
+        self.assertTrue(self.denied(str(self.root / ".gatekit" / "approvals.json")))
+        self.assertTrue(self.denied(str(self.root / "src" / "app.ts")))
+        self.assertTrue(self.denied(str(self.root / ".gatekit" / "evaluation.txt")))
+        self.assertTrue(self.denied(".gatekit/eval/../approvals.json"))
+        outside = pathlib.Path(os.path.realpath(tempfile.gettempdir())) / "gkeval" / "x.mjs"
+        self.assertTrue(self.denied(str(outside)))
+
+    def test_other_task_ids_unaffected(self) -> None:
+        task_dir = self.root / ".gatekit" / "jobs" / self.job_id / "tasks" / "auth"
+        task_dir.mkdir(parents=True)
+        (task_dir / "task.json").write_text(
+            json.dumps({"id": "auth", "write_scope": "read-only"}), encoding="utf-8")
+        os.environ["GATEKIT_TASK_ID"] = "auth"
+        self.assertTrue(self.denied(str(self.root / ".gatekit" / "eval" / "x")))
+
+    def test_build_task_named_evaluate_unaffected(self) -> None:
+        # A plan task that happens to be called `evaluate` is not the
+        # evaluator: its job has no `evaluate/task.json`.
+        os.environ["GATEKIT_JOB_ID"] = "job-build"
+        task_dir = self.root / ".gatekit" / "jobs" / "job-build" / "tasks" / "evaluate"
+        task_dir.mkdir(parents=True)
+        (task_dir / "task.json").write_text(
+            json.dumps({"id": "evaluate", "write_scope": ["src/**"]}), encoding="utf-8")
+        self.assertTrue(self.denied(str(self.root / ".gatekit" / "eval" / "x")))
+        self.assertIsNone(write_gate.handle(self.event(str(self.root / "src" / "a.ts"))))
+
+
 class TestSubprocessInvocation(WriteGateProject):
     """The gate must run as a standalone script with no PYTHONPATH help."""
 

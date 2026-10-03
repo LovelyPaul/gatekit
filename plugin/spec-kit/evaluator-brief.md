@@ -63,11 +63,14 @@ without it:
 ```
 ````
 
-The scratch-directory bullet below is an instruction, not enforcement
-(ADR-0026): the write gate allows paths outside the project (ADR-0018) and a
-`read-only` scope does not sandbox the evaluator's Bash. A Codex evaluator's
-`workspace-write` sandbox confines it to the workspace plus Codex's own
-temporary directories.
+Where the scratch-directory bullet below is enforced depends on the
+evaluator (ADR-0026). A CLI evaluator (`jobs evaluate`, e.g. Codex) runs with
+`GATEKIT_TASK_ID=evaluate`: its write gate allows `.gatekit/eval/**` inside
+the project root and denies every other path, including any outside the root.
+The `agent` evaluator runs under no task id, so for it the bullet is an
+instruction only: the write gate allows paths outside the project there
+(ADR-0018). Programs a Bash command starts (`npx playwright test`) write where
+they write either way.
 
 The rest of the evaluator's prompt says, in `output_lang`:
 
