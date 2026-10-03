@@ -20,7 +20,7 @@ directories) but contains no code copied from any other project.
 | Every hook exits 0 on any internal error and writes a one-line diagnostic to `.gatekit/runs/hook-errors.log` | a broken hook must never break the user's session |
 | Verdict vocabulary is exactly `ok / warn / fail / unverified` | "not checked" must never be rounded to pass or fail |
 | No absolute personal paths anywhere in the repo | CI gate `tools/gate_no_abs_paths.py` fails the build |
-| `SKILL.md` ≤ 40 lines: trigger shim only. `commands/*.md` is the execution instruction | prevents the command/skill split from becoming two products |
+| `SKILL.md` ≤ 40 lines: trigger shim only. `commands/*.md` is the execution instruction. A shim of a command carries `user-invocable: false` (ADR-0026 D2) | prevents the command/skill split from becoming two products, and keeps each command once in Claude Code's `/` menu; `tools/gate_skill_size.py` checks both |
 | Data (templates, heading maps, presets, schemas) lives in JSON/Markdown files, not in prompt prose | keeps prompts small and data diffable |
 | Any file > 1 MB fails CI | no committed corpora |
 | Output language follows `output_lang` (see §8); Korean is never a default | open-source posture |

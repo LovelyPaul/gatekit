@@ -197,6 +197,7 @@ only entry point, since Codex has no slash commands, so hiding them there
 would be wrong even if it were possible. The shims are left unchanged until
 it is confirmed that Codex ignores the key, or the plugin can ship it for
 Claude Code alone.
+Resolved in 0.16.7 by D2 below.
 
 ## Amendment, 0.16.3 (2026-10-03, owner approval in session)
 
@@ -372,3 +373,49 @@ its line, as in C1; a backtick one opens a template); a port computed from a
 variable, a function call or a spread (`...base`); a `webServer` key reached
 through a computed name (`[key]: { … }`); and a `/` that starts a regex
 literal containing `//` or `/*`, which is read as a comment.
+
+### D2. A command's shim is hidden from the slash menu
+
+This settles the open question under the 0.16.2 amendment. Every shim in
+`plugin/skills/gatekit-<name>/SKILL.md` now carries `user-invocable: false`
+in its frontmatter, and `tools/gate_skill_size.py` fails a shim whose folder
+is named after a command (alone or after a `<prefix>-`) without it, so
+Claude Code's `/` menu lists `/gatekit:build` once instead of also listing
+`/gatekit:gatekit-build`.
+
+Evidence, checked 2026-10-04:
+
+- **Claude Code.** <https://code.claude.com/docs/en/skills>, frontmatter
+  table: "`user-invocable` … Set to `false` when only Claude should invoke the
+  skill: Claude Code hides it from the `/` menu and doesn't run it when you
+  type `/name`." The invocation table gives `user-invocable: false` as "You
+  can invoke: No, Claude can invoke: Yes — description always in context". So
+  a shim still triggers from its description ("빌드 시작해줘", "build it"),
+  and the user types the command, which stays in the menu. Its contrast,
+  `disable-model-invocation: true`, would remove the description from
+  context and is not used.
+- **Codex reads the same files.** ADR-0019 decision 2 installs `plugin/` as a
+  Codex plugin; Codex finds `.claude-plugin/plugin.json`
+  (`DISCOVERABLE_PLUGIN_MANIFEST_PATHS` in
+  `codex-rs/exec-server-protocol/src/protocol.rs`) and loads the manifest's
+  `skills` path (`plugin_skill_roots`, `codex-rs/core-plugins/src/loader.rs`).
+  ADR-0019 observed all ten shims listed as `gatekit:gatekit-<name>`.
+- **Codex ignores the key.** `codex-rs/skills/src/parser.rs` (openai/codex
+  `main` at `58ae3ba6`) deserialises frontmatter into `SkillFrontmatter
+  { name, description, metadata }` with `#[serde(default)]` fields and no
+  `deny_unknown_fields`, so serde ignores any other key. The skill is dropped
+  only when the YAML does not parse or `description` is empty
+  (`parse_skill_frontmatter_metadata`; the caller in
+  `codex-rs/ext/skills/src/loader/host.rs` records the error and skips the
+  skill). `user-invocable: false` is a plain YAML boolean. The only
+  visibility switch Codex honours is `policy.allow_implicit_invocation` in an
+  optional `agents/openai.yaml` (<https://developers.openai.com/codex/skills>),
+  which hides a skill from the model, not from the user; the shims ship no
+  such file, so under Codex `$gatekit-<name>` and the implicit triggers work
+  as before.
+
+The skills that `gatekit install --host codex` generates under
+`.agents/skills/` (`hosts.skill_shim`) are for Codex only and are unchanged.
+Not yet observed in a live session: the change follows the documentation and
+the Codex source above, and a real Claude Code `/` menu and a real Codex
+session should still confirm it.

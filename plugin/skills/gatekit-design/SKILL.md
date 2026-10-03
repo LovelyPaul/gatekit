@@ -1,6 +1,7 @@
 ---
 name: gatekit-design
 description: Read a Figma file, screenshots, HTML files, a live site URL, a design preset, or a user pattern file and derive a design specification with patterns, components, and design tokens, recording everything the source does not show as an assumption. Korean triggers — "이 사이트처럼 만들어줘", "디자인 패턴 정리해줘", "레퍼런스 사이트에서 뽑아줘", "디자인 프리셋 적용해줘". English triggers — "make it look like this site", "extract design patterns from this reference", "apply this design preset". NOT for a mockup's screen list and flows — use gatekit-mockup for that.
+user-invocable: false
 ---
 
 # gatekit-design

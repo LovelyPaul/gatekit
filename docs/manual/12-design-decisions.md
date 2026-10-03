@@ -60,7 +60,7 @@ gatekit은 **클린룸 구현**이다. 훅 강제 게이트, 가정 원장, 해�
 |---|---|
 | `gate_no_abs_paths.py` | 커밋된 파일에 `/Users/<이름>` 같은 개인 홈 경로가 들어가 다른 기여자에게서 깨지는 것 |
 | `gate_blob_size.py` | 1MB 초과 파일. 데이터셋·미디어·벤더링 아카이브가 모든 클론을 부풀리는 것 |
-| `gate_skill_size.py` | `SKILL.md`가 40줄, 커맨드가 160줄을 넘어 커맨드/스킬 분리가 중복 산출물 두 개로 되돌아가는 것. 그리고 프론트매터의 `allowed-tools`에 `AskUserQuestion`이 들어가 확인 없이 자동 승인 실행되는 것 |
+| `gate_skill_size.py` | `SKILL.md`가 40줄, 커맨드가 160줄을 넘어 커맨드/스킬 분리가 중복 산출물 두 개로 되돌아가는 것. 프론트매터의 `allowed-tools`에 `AskUserQuestion`이 들어가 확인 없이 자동 승인 실행되는 것. 그리고 커맨드의 스킬 심에 `user-invocable: false`가 빠져 `/` 메뉴에 같은 커맨드가 두 번 보이는 것(ADR-0026 D2) |
 | `gate_forbidden_phrases.py` | 스킬에 "Step 1:", "EXECUTE IMMEDIATELY" 같은 명령형 실행 단계가 들어가 스킬이 조용히 두 번째 실행 경로가 되는 것 |
 | `gate_manifest.py` | `marketplace.json`과 `plugin.json`이 디스크의 실제 파일과 어긋나는 것. 이름이 바뀐 훅 스크립트, `CHANGELOG.md`에 닿지 않은 버전 범프, `plugin.json`에 `hooks.json`을 중복 참조해 플러그인 로드가 실패하는 것 |
 | `gate_readme_sync.py` | `README.md`와 `README.ko.md`의 커맨드 목록이 `plugin/commands/*.md`와 어긋나, 한국어 문서를 읽는 사용자가 다른 그림을 보게 되는 것 |

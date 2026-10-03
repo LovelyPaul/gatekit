@@ -16,6 +16,14 @@ turn waiting on it); the call either hangs or silently no-ops. Interactive
 questions belong in the command's own scripted flow (see policy/), never in
 a static allowed-tools grant.
 
+Why a shim that duplicates a command must say `user-invocable: false`
+(ADR-0026 D2): Claude Code lists every command and every skill in the `/`
+menu, so each command appeared twice (`/gatekit:build` and
+`/gatekit:gatekit-build`). The key hides the shim from the menu while the
+model can still invoke it; Codex ignores the key and still loads the skill.
+A shim duplicates a command when its folder is named after the command,
+alone or after a `<prefix>-`.
+
 Usage:
     python3 tools/gate_skill_size.py [--root PATH] [--json]
 
@@ -42,6 +50,7 @@ ALLOWED_TOOLS_INLINE_RE = re.compile(r"(?im)^allowed-tools:\s*(.+)$")
 ALLOWED_TOOLS_BLOCK_RE = re.compile(
     r"(?im)^allowed-tools:\s*\n((?:^[ \t]*-.*\n?)+)"
 )
+USER_INVOCABLE_FALSE_RE = re.compile(r"(?m)^user-invocable:\s*false\s*$")
 
 
 def repo_root() -> pathlib.Path:
@@ -87,8 +96,13 @@ def count_lines(path: pathlib.Path) -> int:
     return len(text.splitlines())
 
 
+def duplicates_a_command(skill_dir: str, commands: set[str]) -> bool:
+    return skill_dir in commands or any(skill_dir.endswith("-" + c) for c in commands)
+
+
 def scan(root: pathlib.Path) -> list[dict]:
     findings: list[dict] = []
+    commands = {p.stem for p in (root / "plugin" / "commands").glob("*.md")}
 
     for skill_md in sorted((root / "plugin" / "skills").glob("*/SKILL.md")):
         rel = skill_md.relative_to(root).as_posix()
@@ -110,6 +124,18 @@ def scan(root: pathlib.Path) -> list[dict]:
                     "message": (
                         "allowed-tools lists AskUserQuestion: auto-approved "
                         "tool grants never render the question UI"
+                    ),
+                }
+            )
+        if duplicates_a_command(skill_md.parent.name, commands) and not \
+                USER_INVOCABLE_FALSE_RE.search(extract_frontmatter(text)):
+            findings.append(
+                {
+                    "path": rel,
+                    "line": 1,
+                    "message": (
+                        "shim of a command lacks `user-invocable: false`: "
+                        "the / menu would list the command twice (ADR-0026 D2)"
                     ),
                 }
             )

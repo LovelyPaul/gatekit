@@ -1,6 +1,7 @@
 ---
 name: gatekit-gate
 description: Turn acceptance criteria and tasks into executable completion criteria, then pin them with a hash-anchored approval so the build gate opens and Stop enforces them. Korean triggers — "완료 기준 정해줘", "게이트 만들어줘", "언제 끝난 건지 정의해줘", "DoD 만들어줘". English triggers — "define done", "set the completion gate", "write the acceptance gate", "definition of done". NOT for running the criteria after the fact — that is /gatekit:verify — and NOT for approving on the user's behalf.
+user-invocable: false
 ---
 
 # gatekit-gate

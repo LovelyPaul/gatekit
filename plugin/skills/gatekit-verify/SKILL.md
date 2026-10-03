@@ -1,6 +1,7 @@
 ---
 name: gatekit-verify
 description: Verify the build against the completion contract using an independent read-only evaluator, then report a verdict per criterion and per E2E step. Korean triggers — "검증해줘", "다 됐는지 확인해줘", "완료 기준 통과했는지 봐줘", "E2E 돌려줘". English triggers — "verify it", "check if it is done", "run the completion contract", "did it pass the gate". NOT for fixing what the verification finds — route failures back to /gatekit:build — and NOT for grading code this same session just wrote without spawning the evaluator.
+user-invocable: false
 ---
 
 # gatekit-verify

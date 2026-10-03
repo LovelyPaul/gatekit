@@ -1,6 +1,7 @@
 ---
 name: gatekit-setup
 description: Initialize .gatekit/config.json and check worker backends, including the optional sandboxed Codex backend which stays disabled until the user confirms. Korean triggers — "셋업 해줘", "초기 설정", "워커 확인해줘", "코덱스 켜줘", "백엔드 설정". English triggers — "set up gatekit", "check my workers", "enable codex", "configure the backend". NOT for diagnosing a broken install — that is /gatekit:doctor — and NOT for enabling a bypass or unsandboxed backend, which gatekit refuses.
+user-invocable: false
 ---
 
 # gatekit-setup

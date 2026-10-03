@@ -64,7 +64,7 @@ def minimal_clean_repo(root: pathlib.Path) -> None:
         "# /gatekit:build\n\nSee policy/verification.md. Output follows output_lang.\n"
     ))
     write(root / "plugin" / "skills" / "build" / "SKILL.md", (
-        "---\nallowed-tools: Read\n---\n# build trigger\nSee the build command.\n"
+        "---\nallowed-tools: Read\nuser-invocable: false\n---\n# build trigger\nSee the build command.\n"
     ))
     write(root / "CHANGELOG.md", "# Changelog\n\n## 0.1.0 — 2026-09-10\n\n- initial\n")
     write(root / "README.md", "# gatekit\n\nCommands: /gatekit:build\n")
@@ -159,6 +159,39 @@ class TestSkillSize(unittest.TestCase):
             self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
             payload = json.loads(proc.stdout)
             self.assertTrue(any("AskUserQuestion" in f["message"] for f in payload["findings"]))
+
+
+    def test_shim_duplicating_a_command_without_user_invocable_false_is_detected(self) -> None:
+        # ADR-0026 D2: a shim shown next to its command doubles the slash menu.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            minimal_clean_repo(root)
+            write(root / "plugin" / "commands" / "verify.md", "---\nallowed-tools: Read\n---\n# verify\n")
+            write(root / "plugin" / "skills" / "gatekit-verify" / "SKILL.md",
+                  "---\nname: gatekit-verify\ndescription: x\n---\n# trigger\n")
+            proc = run_gate("gate_skill_size.py", root)
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+            payload = json.loads(proc.stdout)
+            self.assertTrue(any("gatekit-verify/SKILL.md" in f["path"]
+                                and "user-invocable" in f["message"] for f in payload["findings"]))
+
+    def test_user_invocable_outside_the_frontmatter_does_not_count(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            minimal_clean_repo(root)
+            write(root / "plugin" / "skills" / "build" / "SKILL.md",
+                  "---\nname: build\n---\nuser-invocable: false\n")
+            proc = run_gate("gate_skill_size.py", root)
+            self.assertEqual(proc.returncode, 1, proc.stdout + proc.stderr)
+
+    def test_skill_without_a_command_may_stay_in_the_menu(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            minimal_clean_repo(root)
+            write(root / "plugin" / "skills" / "helper" / "SKILL.md",
+                  "---\nname: helper\ndescription: x\n---\n# helper\n")
+            proc = run_gate("gate_skill_size.py", root)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
 
 
 class TestBlobSize(unittest.TestCase):

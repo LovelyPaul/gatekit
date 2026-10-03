@@ -1,6 +1,7 @@
 ---
 name: gatekit-interview
 description: Turn a rough product idea into a validated PRD and architecture spec with a labelled assumption ledger. Korean triggers — "기획해줘", "PRD 써줘", "요구사항 정리해줘", "뭘 만들지 정리하자", "스펙 만들어줘". English triggers — "write a PRD", "spec this out", "turn this idea into requirements", "plan what to build". NOT for writing code, and NOT for reading an existing design file — use gatekit-mockup for a Figma or HTML mockup.
+user-invocable: false
 ---
 
 # gatekit-interview
