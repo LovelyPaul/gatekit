@@ -24,6 +24,12 @@ no execution — and it is deliberately conservative:
   (ADR-0023), because ``env -u GATEKIT_TASK_ID`` would otherwise hide the
   worker from the refusal in :func:`gatekit.approval.approve`. ``approve
   check`` and ``approve list`` stay allowed; they record nothing.
+* ``.gatekit/approvals.json`` and ``.gatekit/contract.json`` are protected
+  always (ADR-0027), so every command is read for them, also when nothing
+  else could be denied: a write target, a removed path (``rm``, ``mv``
+  sources) that is or contains one, a copy into ``.gatekit/`` of a file with
+  a protected name, or an opaque command whose text names one is denied.
+  Everything else keeps the fast path.
 
 Denial reasons are written in the session's ``output_lang``.
 """
@@ -120,10 +126,14 @@ def _message(lang: str, key: str, **fields: Any) -> str:
 class WriteTargets:
     """Result of :func:`extract_write_targets`."""
 
-    __slots__ = ("targets", "opaque", "why")
+    __slots__ = ("targets", "opaque", "why", "removed", "copies")
 
     def __init__(self) -> None:
         self.targets: List[str] = []
+        #: ADR-0027: paths a command deletes or moves away (``rm``, ``mv`` sources).
+        self.removed: List[str] = []
+        #: ADR-0027: ``(sources, destination)`` of ``cp``/``mv``/``ln``/``install``/``rsync``.
+        self.copies: List[Tuple[List[str], str]] = []
         self.opaque: bool = False
         self.why: str = ""
 
@@ -406,6 +416,8 @@ def _analyze(words: List[str], result: WriteTargets, cwd: Optional[str]) -> Opti
             script = rest[rest.index("-c") + 1] if rest.index("-c") + 1 < len(rest) else ""
             nested = extract_write_targets(script, cwd)
             result.targets.extend(t for t in nested.targets if t not in result.targets)
+            result.removed.extend(nested.removed)
+            result.copies.extend(nested.copies)
             if nested.opaque:
                 result.mark_opaque(nested.why)
         return cwd
@@ -482,6 +494,12 @@ def _analyze(words: List[str], result: WriteTargets, cwd: Optional[str]) -> Opti
         positional = _positional(rest, consuming=("-t", "--target-directory", "-m", "-o", "-g"))
         if len(positional) >= 2:
             _add(result, positional[-1], cwd, "variable in destination")
+            sources = [r for r in (_resolve(a, cwd) for a in positional[:-1]) if r]
+            dest = _resolve(positional[-1], cwd)
+            if dest:
+                result.copies.append((sources, dest))
+            if name == "mv":
+                result.removed.extend(sources)
         elif any(a.startswith("-t") or a.startswith("--target-directory") for a in rest):
             result.mark_opaque("%s target directory" % name)
         return cwd
@@ -493,6 +511,10 @@ def _analyze(words: List[str], result: WriteTargets, cwd: Optional[str]) -> Opti
             positional = positional[1:]  # first positional is the mode/owner
         for target in positional:
             _add(result, target, cwd, "variable in %s target" % name)
+            if name in ("rm", "rmdir", "unlink"):
+                resolved = _resolve(target, cwd)
+                if resolved:
+                    result.removed.append(resolved)
         return cwd
 
     if name == "dd":
@@ -592,6 +614,62 @@ def invokes_gatekit_approve(command: str, depth: int = 0) -> bool:
 
 
 # --------------------------------------------------------------------------
+# protected state (ADR-0027)
+# --------------------------------------------------------------------------
+#: An opaque command whose text names a protected file.
+_PROTECTED_MENTION_RE = re.compile(
+    r"\.gatekit[\\/]+(?:approvals|contract)\.json", re.IGNORECASE)
+
+
+def _lower_abs(path: str) -> str:
+    return os.path.normpath(write._canonical(path)).replace("\\", "/").lower().rstrip("/")
+
+
+def _contains_protected(root, removed: str) -> bool:
+    """True when deleting or moving *removed* takes a protected file with it:
+    it is a ``.gatekit`` directory, or an ancestor of this project's own."""
+    try:
+        for candidate in {_lower_abs(removed), _lower_abs(os.path.realpath(removed))}:
+            if candidate.rsplit("/", 1)[-1] == ".gatekit":
+                return True
+            for own in write.protected_files(root):
+                mine = _lower_abs(os.path.realpath(str(own)))
+                if mine.startswith(candidate + "/") or candidate in ("", "/"):
+                    return True
+    except (OSError, ValueError, TypeError):
+        return False
+    return False
+
+
+def protected_hit(root, command: str, found: WriteTargets) -> Optional[str]:
+    """The protected file this command would write, remove or replace, else
+    ``None``. A copy or move into a ``.gatekit`` directory counts when a
+    source's base name is a protected name."""
+    for target in found.targets:
+        hit = write.protected_state(root, target)
+        if hit:
+            return hit
+    for removed in found.removed:
+        hit = write.protected_state(root, removed)
+        if hit:
+            return hit
+        if _contains_protected(root, removed):
+            return ".gatekit/"
+    for sources, dest in found.copies:
+        if _lower_abs(dest).rsplit("/", 1)[-1] != ".gatekit":
+            continue
+        for source in sources:
+            name = _lower_abs(source).rsplit("/", 1)[-1]
+            if name in write.PROTECTED_NAMES:
+                return ".gatekit/" + name
+    if found.opaque:
+        match = _PROTECTED_MENTION_RE.search(command)
+        if match:
+            return match.group(0)
+    return None
+
+
+# --------------------------------------------------------------------------
 # the gate
 # --------------------------------------------------------------------------
 def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -609,12 +687,16 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         return hookio.deny(_message(
             write.session_lang(root, event), "approve", task=task_id, cmd=_shown(command)))
 
+    cwd = event.get("cwd") if isinstance(event.get("cwd"), str) else None
+    found = extract_write_targets(command, cwd or str(root))
+    hit = protected_hit(root, command, found)
+    if hit:
+        return write.deny_protected(hit, write.session_lang(root, event))
+
     if not write.restrictions_active(root):
         return hookio.allow()
 
     lang = write.session_lang(root, event)
-    cwd = event.get("cwd") if isinstance(event.get("cwd"), str) else None
-    found = extract_write_targets(command, cwd or str(root))
 
     for target in found.targets:
         decision = write.decide_path(root, target, lang)

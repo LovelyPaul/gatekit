@@ -23,6 +23,12 @@ workers from editing each other's files. Rule (b) is deliberately stricter than
 rule (a): a scoped worker gets no documentation allowlist, because a worker
 assigned ``src/auth/**`` has no business rewriting the PRD.
 
+**(c) protected state** (ADR-0027). ``.gatekit/approvals.json`` and
+``.gatekit/contract.json`` are written only by gatekit's own CLI (``approve``,
+``contract derive``). Every other write to them is denied, always — before
+and after approval, in any session — checked before (a) and (b). See
+:func:`protected_state` for how a path is matched.
+
 Denial reasons are written in the session's ``output_lang``.
 """
 from __future__ import annotations
@@ -87,6 +93,12 @@ _MESSAGES = {
             "gatekit: task '{task}' may not write outside the project root. "
             "Blocked path: {path}"
         ),
+        "protected": (
+            "gatekit: {path} is gatekit's own record (ADR-0027) and is written "
+            "only by gatekit itself — `approve` and `contract derive`, run through "
+            "/gatekit:gate. Editing it directly would void the approval it holds. "
+            "To change the gate or its criteria, re-run /gatekit:gate."
+        ),
         "patch_opaque": (
             "gatekit: cannot determine which files this patch touches (no "
             "*** Add/Update/Delete File lines), and writes are currently "
@@ -114,6 +126,12 @@ _MESSAGES = {
         "outside_root": (
             "gatekit: '{task}' 작업은 프로젝트 루트 밖에 쓸 수 없습니다. "
             "차단된 경로: {path}"
+        ),
+        "protected": (
+            "gatekit: {path} 는 gatekit 자체 기록(ADR-0027)이며 gatekit 만 씁니다 — "
+            "/gatekit:gate 가 실행하는 `approve` 와 `contract derive`. 직접 수정하면 "
+            "그 안의 승인이 무효가 됩니다. 게이트나 기준을 바꾸려면 /gatekit:gate 를 "
+            "다시 실행하세요."
         ),
         "patch_opaque": (
             "gatekit: 이 패치가 어떤 파일을 건드리는지 판별할 수 없고(*** Add/Update/"
@@ -164,6 +182,78 @@ def relative_target(root: pathlib.Path, raw_path: str) -> Optional[str]:
     if not candidate.is_absolute():
         candidate = pathlib.Path(root) / candidate
     return paths.relative_to_root(root, candidate)
+
+
+#: ADR-0027: the two state files only gatekit's CLI writes, by base name.
+PROTECTED_NAMES = ("approvals.json", "contract.json")
+_DRIVE_RE = re.compile(r"^[A-Za-z]:$")
+
+
+def _canonical(raw: str) -> str:
+    """*raw* with Windows-only spellings removed: ``\\`` as ``/``, an NTFS
+    stream suffix (``::$DATA``, ``:name``) and trailing dots and spaces cut
+    from every segment, a drive letter kept. Case is left alone."""
+    text = paths.from_msys(str(raw)).replace("\\", "/")
+    out = []
+    for index, seg in enumerate(text.split("/")):
+        if index == 0 and _DRIVE_RE.match(seg):
+            out.append(seg)
+            continue
+        if ":" in seg:
+            seg = seg.split(":", 1)[0]
+        if seg not in (".", ".."):
+            seg = seg.rstrip(" .")
+        out.append(seg)
+    return "/".join(out)
+
+
+def _protected_tail(path: str) -> Optional[str]:
+    """``.gatekit/<name>`` when *path* (already absolute and canonical) ends
+    in a protected file, compared case-insensitively."""
+    parts = [p for p in os.path.normpath(path).replace("\\", "/").lower().split("/") if p]
+    if len(parts) >= 2 and parts[-2] == paths.STATE_DIRNAME and parts[-1] in PROTECTED_NAMES:
+        return "%s/%s" % (paths.STATE_DIRNAME, parts[-1])
+    return None
+
+
+def protected_files(root: pathlib.Path) -> List[pathlib.Path]:
+    """This project's protected files, as paths (they may not exist)."""
+    return [paths.state_dir(root) / name for name in PROTECTED_NAMES]
+
+
+def protected_state(root: pathlib.Path, raw_path: str) -> Optional[str]:
+    """``.gatekit/approvals.json`` / ``.gatekit/contract.json`` when *raw_path*
+    names one of them, else ``None`` (ADR-0027).
+
+    Matched on the path as written (joined to *root* when relative) and on
+    its realpath, so a symlinked file or directory is followed; when the
+    target exists, ``samefile`` against this project's two files also
+    catches a hard link or a short name. A protected file of another project
+    is still protected. Never raises.
+    """
+    try:
+        text = _canonical(raw_path)
+        if not text.strip():
+            return None
+        candidate = text if os.path.isabs(text) else os.path.join(str(root), text)
+        found = _protected_tail(candidate)
+        if found:
+            return found
+        found = _protected_tail(os.path.realpath(candidate))
+        if found:
+            return found
+        if os.path.exists(candidate):
+            for own in protected_files(root):
+                if own.exists() and os.path.samefile(candidate, str(own)):
+                    return "%s/%s" % (paths.STATE_DIRNAME, own.name)
+    except (OSError, ValueError, TypeError):
+        return None
+    return None
+
+
+def deny_protected(found: str, lang: str) -> Dict[str, Any]:
+    """The rule (c) deny payload for *found* (a :func:`protected_state` value)."""
+    return hookio.deny(_message(lang, "protected", path=found))
 
 
 def matches(relpath: str, pattern: str) -> bool:
@@ -289,7 +379,11 @@ def decide_path(root: pathlib.Path, raw_path: str, lang: str) -> Optional[Dict[s
 
     Returns a deny payload, or ``None`` to allow. Shared by the Write gate and
     the Bash gate so a shell redirect is judged exactly like a Write call.
+    Rule (c), protected state (ADR-0027), comes first and holds always.
     """
+    found = protected_state(root, raw_path)
+    if found:
+        return deny_protected(found, lang)
     relpath = relative_target(root, raw_path)
 
     # -- rule (b): task write scope, checked first because it is stricter ----
@@ -353,11 +447,16 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     tool_input = event.get("tool_input") or {}
 
     if event.get("tool_name") == PATCH_TOOL:
+        text = tool_input.get("command") if isinstance(tool_input, dict) else ""
+        targets = patch_targets(text if isinstance(text, str) else "")
+        # ADR-0027: protected state is checked whether or not a rule is active.
+        for target in targets:
+            found = protected_state(root, target)
+            if found:
+                return deny_protected(found, session_lang(root, event))
         if not restrictions_active(root):
             return hookio.allow()
         lang = session_lang(root, event)
-        text = tool_input.get("command") if isinstance(tool_input, dict) else ""
-        targets = patch_targets(text if isinstance(text, str) else "")
         if not targets:
             return hookio.deny(_message(lang, "patch_opaque"))
         for target in targets:
