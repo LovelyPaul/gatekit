@@ -12,26 +12,47 @@ is blocked: refining a gate or a test mid-build keeps working.
 ### Changed
 
 - **A criterion whose test file changed since approval is `unverified`.**
-  `contract derive` hashes the files each criterion's argv names inside the
-  project (a script, a spec file, a pytest node id's file). If one of them
-  changes or disappears afterwards, a criterion that would pass is
-  `unverified` with "grading file changed since approval: <path> —
-  re-derive and re-approve 05-gate if the change is intended". A failing
-  criterion stays `fail`. A command that names no file (`npm test`) is not
-  covered; name the spec file in argv to cover it.
+  `contract derive` hashes each criterion's grading files: argv[0] when it is
+  a script path, and every argv file that looks like a test (under `test/`,
+  `tests/`, `__tests__/`, `spec/` or `e2e/`, or named `test_*`, `*_test.*`,
+  `*.test.*`, `*.spec.*`, `*_spec.*`, `conftest.py`; the lists are in
+  `plugin/spec-kit/grading-patterns.json`). Source files a check inspects
+  (`grep -q print src/app.py`, `sqlite3 app.db`), build output and installed
+  dependencies never count. `--opt=path` values count; pytest `[param]` and
+  `file:line` suffixes are dropped. If a grading file changes or disappears
+  afterwards, a criterion that would pass is `unverified` with "grading file
+  changed since approval (if intended, re-run /gatekit:gate to re-approve;
+  otherwise revert it): <paths>". A failing criterion stays `fail`. A command
+  that names no file (`npm test`) or only a directory or glob is not
+  covered; name the test file in argv to cover it.
+- **Approving `05-gate.md` also pins those files.** Re-deriving after a test
+  edit does not clear the hold: `contract run` and the Stop gate report
+  `grading_unapproved`, and `approve check spec/05-gate.md` prints `fail`
+  and names the paths, until `/gatekit:gate` re-approves. A test written
+  after approval is not held back. The write gate still looks at the file
+  hash alone, so no write is blocked.
+- **A worker cannot approve.** `approve` exits 1 when `GATEKIT_TASK_ID` is
+  set; `approve check` and `list` still work.
 
 ### Added
 
 - **Tasks that pass only after their own test changed are flagged.** Each
-  gate in `gates.json` records the hashes of the files its argv names. When
-  a task passes after a failed attempt in the same job, and a file of a gate
-  that failed has changed since, `status.json` records
-  `grading_changed_after_failure`. `jobs status` appends `(grading changed
-  after failure: <paths>)` and `results --compact` appends
-  `grading-changed=<paths>`, and `/gatekit:verify` reports it as a warning:
-  "passed only after its own test changed — review the diff of <paths>".
-  The task stays `passed`. This works the same for worker attempts,
-  `redelegate`, `jobs complete` and `jobs recheck`.
+  gate in `gates.json` records the hashes of its grading files. A failing
+  gate's hashes are kept per task in `.gatekit/attempts.json`, from any job
+  and from preflight, until a pass or `--force-retry`. When the task passes
+  and a file of a gate that failed has changed since, that job's
+  `status.json` records `grading_changed_after_failure`. `jobs status`
+  appends `(grading changed after failure: <paths>)` and `results --compact`
+  appends `grading-changed=<paths>`, and `/gatekit:verify` reports it as a
+  warning: "passed only after its own test changed — review the diff of
+  <paths>". The task stays `passed`. This works the same for worker
+  attempts, `redelegate`, `jobs complete`, `jobs recheck` and preflight.
+- **`jobs status --all` and `jobs results --all`** show every job, oldest
+  first (`--json`: `{"jobs": [...]}`); `/gatekit:verify` reads them so a
+  flag from an earlier job is not missed.
+- The Stop gate adds a hint line in `output_lang` naming every changed
+  grading file in full, since its reason lines are cut at 120 characters.
+  `/gatekit:gate` and `/gatekit:build` say what to do when one changed.
 
 ## 0.14.0 — 2026-10-03
 
