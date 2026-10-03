@@ -219,3 +219,56 @@ write; §13 the tests; §14 `write.protected_state`, `contract.integrity`,
   `stop.stood_down`) need the same protection: a forged record or a cleared
   pipeline would let a Stop pass without a run.
 - An opaque command after approval that does not spell the path (above).
+
+## Amendment (2026-10-04): what a security review of the Bash reading found
+
+Status: accepted 2026-10-04 (owner approval in session), before the 0.16.5
+release.
+
+A review probed the Bash gate with the forms below; each reached a protected
+file unseen, before or after approval.
+
+### A. Four shell forms
+
+1. **An interpreter fed its script on stdin was not opaque.** Only `-c`,
+   `-e`, `-E` and `-` counted as inline code, so `python3 <<PY … PY`, `node
+   <<'JS' … JS`, `echo '…' | python3` and `python3 < script.py` were allowed
+   before approval, and after approval `python3 <<PY` with
+   `json.dump({}, open('.gatekit/contract.json','w'))` in the body passed
+   although the body spells the path. **Decision:** an interpreter (the
+   existing list, `perl` included) with no script operand whose stdin is fed —
+   a here-document or here-string, a `<` redirect, or the right side of a
+   pipe — is opaque. A file operand or `-m module` keeps today's reading
+   (`python3 script.py < in.txt`, `python3 -m json.tool …` stay allowed);
+   `python3 --version` without stdin is not affected. The opaque-text check
+   reads the raw command, here-document bodies included, so a body that names
+   a protected file is denied after approval too.
+2. **A link made and written in one command.** `ln -s .gatekit/approvals.json
+   l && echo x > l`, `ln -s ../.gatekit/approvals.json sub/l; cp x sub/l` and
+   `ln .gatekit/approvals.json h2; echo x >> h2` wrote through a name the
+   realpath check could not yet follow (the link does not exist when the hook
+   runs). **Decision:** an `ln` with any flags — and `cp -l`, `cp -s`,
+   `--link`, `--symbolic-link` — whose source is a protected file or a
+   directory that contains one is denied. A relative source is resolved
+   against the cwd and, as a symlink's own rule, against the directory the
+   link lands in.
+3. **Variable-built paths.** `d=.gatekit; echo x > $d/approvals.json` and
+   `d=.gatekit; cp sub/approvals.json $d/` were opaque, so only the
+   pre-approval rule saw them. **Decision:** a target whose earlier segment
+   holds a variable but whose last segment is literal goes to the base-name
+   check (the name is protected and the text names `.gatekit`), and a target
+   or removed path that uses a variable assigned, earlier in the same command,
+   a value spelling a `.gatekit` directory (`d=.gatekit`, `export d=…`,
+   `D="$PWD/.gatekit"`) counts.
+4. **git restores by directory pathspec.** `git checkout -- .gatekit`, `git
+   restore .gatekit`, `git checkout HEAD~1 -- .gatekit`, `git restore
+   --source=X .gatekit` name the directory, not the file. **Decision:** the
+   pathspec operands of `git checkout`, `restore`, `reset` and `stash push`
+   (options that take an operand skipped; after `git -C dir`, resolved there)
+   are denied when one is or lies inside a protected path or is a `.gatekit`
+   directory. `git -C dir` is now read as an option, so the subcommand behind
+   it is known — before approval `git -C src checkout …` is `opaque` like any
+   other `git checkout`. `git checkout -- .`, `git reset --hard` and `git
+   stash pop` stay a trust boundary: they restore what is committed, which
+   includes the user's own approval, and refusing them would refuse ordinary
+   work.

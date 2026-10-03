@@ -11,10 +11,13 @@ one to :func:`write.decide_path`. It is a static reading of the command text —
 no execution — and it is deliberately conservative:
 
 * When nothing could be denied anyway (no active task scope, spec gate
-  approved or absent) the command is allowed without parsing.
+  approved or absent) only the protected-state check below acts on the
+  parse; nothing else is judged.
 * When a write's target **cannot be determined** — a variable in the path,
   ``eval``, ``xargs``, ``git apply``, inline interpreter code such as
-  ``python3 -c`` — and a restriction is active, the command is **denied**.
+  ``python3 -c``, an interpreter reading its script from stdin
+  (``python3 <<PY``, ``echo … | node``) — and a restriction is active, the
+  command is **denied**.
   "Could not tell" is not rounded to "allowed", by the same rule that keeps
   ``unverified`` from being rounded to ``ok``.
 * Programs invoked by name (``npm run build``, ``python3 script.py``) are
@@ -28,8 +31,11 @@ no execution — and it is deliberately conservative:
   always (ADR-0027), so every command is read for them, also when nothing
   else could be denied: a write target, a removed path (``rm``, ``mv``
   sources) that is or contains one, a copy into ``.gatekit/`` of a file with
-  a protected name, or an opaque command whose text names one is denied.
-  Everything else keeps the fast path.
+  a protected name, a link to one (``ln``, ``cp -l``/``-s``), a path built
+  from a variable assigned a ``.gatekit`` directory, a ``git checkout`` /
+  ``restore`` / ``reset`` / ``stash push`` pathspec that is or holds one, or an
+  opaque command whose text names one is denied. Nothing else is judged
+  while no restriction is active.
 
 Denial reasons are written in the session's ``output_lang``.
 """
@@ -127,7 +133,8 @@ def _message(lang: str, key: str, **fields: Any) -> str:
 class WriteTargets:
     """Result of :func:`extract_write_targets`."""
 
-    __slots__ = ("targets", "opaque", "why", "removed", "copies", "cwds", "unresolved")
+    __slots__ = ("targets", "opaque", "why", "removed", "copies", "cwds", "unresolved",
+                 "linked", "pathspecs", "dollar", "assigns")
 
     def __init__(self) -> None:
         self.targets: List[str] = []
@@ -138,8 +145,17 @@ class WriteTargets:
         self.copies: List[Tuple[List[str], str, List[str]]] = []
         #: ADR-0027: every working directory the command may write from.
         self.cwds: List[str] = []
-        #: ADR-0027: literal targets left unresolved because the cwd was unknown.
+        #: ADR-0027: targets left unresolved (unknown cwd, or a variable in an
+        #: earlier segment) whose last segment is literal.
         self.unresolved: List[str] = []
+        #: ADR-0027 amendment: what ``ln`` (or ``cp -l``/``-s``) links to.
+        self.linked: List[str] = []
+        #: ADR-0027 amendment: pathspecs of ``git checkout/restore/reset/stash``.
+        self.pathspecs: List[str] = []
+        #: ADR-0027 amendment: raw targets that contain a variable, and the
+        #: ``VAR=value`` assignments seen earlier in the command.
+        self.dollar: List[str] = []
+        self.assigns: Dict[str, str] = {}
         self.opaque: bool = False
         self.why: str = ""
 
@@ -211,19 +227,29 @@ def _is_operator(token: str) -> bool:
     return bool(token) and all(ch in "();<>|&" for ch in token)
 
 
-def _split_simple(tokens: List[str]) -> List[List[str]]:
-    """Split a token stream into simple commands at control operators."""
+def _split_simple(tokens: List[str], piped: Optional[List[bool]] = None) -> List[List[str]]:
+    """Split a token stream into simple commands at control operators.
+
+    When *piped* is given it receives, per command, whether the command
+    reads the output of a pipe (the operator before it was ``|`` or ``|&``).
+    """
     commands: List[List[str]] = []
     current: List[str] = []
+    after_pipe = False
     for token in tokens:
         if _is_operator(token) and ">" not in token and "<" not in token:
             if current:
                 commands.append(current)
+                if piped is not None:
+                    piped.append(after_pipe)
                 current = []
+            after_pipe = token in ("|", "|&")
             continue
         current.append(token)
     if current:
         commands.append(current)
+        if piped is not None:
+            piped.append(after_pipe)
     return commands
 
 
@@ -253,7 +279,10 @@ def _add(result: WriteTargets, raw: str, cwd: Optional[str], why: str) -> None:
         return
     resolved = _resolve(raw, cwd)
     if resolved is None:
-        if "$" not in raw and "`" not in raw:
+        if "$" in raw or "`" in raw:
+            result.dollar.append(raw)
+        last = raw.replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+        if last and "$" not in last and "`" not in last:
             result.unresolved.append(raw)
         result.mark_opaque(why)
         return
@@ -302,6 +331,25 @@ def _pull_redirects(words: List[str], result: WriteTargets, cwd: Optional[str]) 
 #: Reserved words that may precede a simple command (``{ cd x; }``, ``then cd x``).
 _KEYWORDS = {"{", "}", "!", "if", "then", "else", "elif", "fi", "do", "done",
              "while", "until"}
+
+
+#: Builtins whose operands may be ``VAR=value`` assignments.
+_DECLARERS = {"export", "local", "declare", "typeset", "readonly"}
+_ASSIGN_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$", re.DOTALL)
+
+
+def _record_assignments(words: List[str], result: WriteTargets) -> None:
+    """Remember ``VAR=value`` words (prefix assignments and ``export`` & co.)."""
+    index = 0
+    while index < len(words) and words[index] in _KEYWORDS:
+        index += 1
+    declaring = index < len(words) and words[index] in _DECLARERS
+    for word in words[index + 1:] if declaring else words[index:]:
+        match = _ASSIGN_RE.match(word)
+        if match:
+            result.assigns[match.group(1)] = match.group(2)
+        elif not declaring and not word.startswith("-"):
+            break
 
 
 def _strip_wrappers(words: List[str]) -> List[str]:
@@ -426,8 +474,112 @@ def _target_directory(args: List[str]) -> Optional[str]:
     return None
 
 
-def _analyze(words: List[str], result: WriteTargets, cwd: Optional[str]) -> Optional[str]:
+#: Interpreter options that take an operand (``-W ignore``, ``-r module``).
+_INTERPRETER_OPERAND_OPTIONS = {"-W", "-X", "-Q", "-r", "--require", "-I", "--import",
+                                "--loader", "--experimental-loader"}
+
+
+def _script_operand(args: List[str]) -> bool:
+    """True when an interpreter's arguments name its script: a file operand,
+    or a module (``-m mod``, ``-mmod``)."""
+    skip = False
+    for arg in args:
+        if skip:
+            skip = False
+            continue
+        if arg == "--":
+            return True
+        if arg.startswith("-m"):
+            return True
+        if arg in _INTERPRETER_OPERAND_OPTIONS:
+            skip = True
+            continue
+        if arg.startswith("-"):
+            continue
+        return True
+    return False
+
+
+def _cp_links(args: List[str]) -> bool:
+    """``cp -l``/``-s`` (and clusters such as ``-al``) make links, not copies."""
+    for arg in args:
+        if arg in ("--link", "--symbolic-link"):
+            return True
+        if arg.startswith("-") and not arg.startswith("--") and re.search(r"[ls]", arg[1:]):
+            return True
+    return False
+
+
+#: ``git`` options before the subcommand that take an operand.
+_GIT_OPERAND_OPTIONS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace",
+                        "--super-prefix", "--config-env"}
+#: Subcommands whose pathspec operands rewrite those paths.
+_GIT_PATHSPEC = {
+    "checkout": ("-b", "-B", "--orphan"),
+    "restore": ("-s", "--source"),
+    "reset": (),
+    "stash": ("-m", "--message", "--pathspec-from-file"),
+}
+_STASH_NO_PATHS = {"pop", "apply", "list", "show", "drop", "clear", "branch", "create",
+                   "store"}
+
+
+def _git(rest: List[str], result: WriteTargets, cwd: Optional[str]) -> None:
+    index = 0
+    while index < len(rest) and rest[index].startswith("-"):
+        option = rest[index]
+        if option in _GIT_OPERAND_OPTIONS:
+            if option == "-C" and index + 1 < len(rest):
+                cwd = _resolve(rest[index + 1], cwd)
+            index += 2
+            continue
+        index += 1
+    sub = rest[index] if index < len(rest) else ""
+    args = rest[index + 1:]
+    if sub in _GIT_OPAQUE:
+        result.mark_opaque("git %s" % sub)
+    if sub not in _GIT_PATHSPEC:
+        return
+    if sub == "stash":
+        if args and args[0] in _STASH_NO_PATHS:
+            return
+        if args and args[0] in ("push", "save"):
+            args = args[1:]
+    for spec in _positional(args, consuming=_GIT_PATHSPEC[sub]):
+        resolved = _resolve(spec, cwd)
+        if resolved:
+            result.pathspecs.append(resolved)
+        elif "$" in spec or "`" in spec:
+            result.dollar.append(spec)
+
+
+def _linked(positional: List[str], target_dir: Optional[str], result: WriteTargets,
+            cwd: Optional[str]) -> None:
+    """Record what a link points to: relative to the cwd, and (a symlink's
+    own rule) relative to the directory the link lands in."""
+    if target_dir is not None:
+        sources, dest = positional, target_dir
+    elif len(positional) == 1:
+        sources, dest = positional, "."
+    else:
+        sources, dest = positional[:-1], positional[-1]
+    dest_abs = _resolve(dest, cwd)
+    for raw in sources:
+        candidates = [_resolve(raw, cwd)]
+        if dest_abs and not posixpath.isabs(raw) and "$" not in raw:
+            candidates.append(posixpath.normpath(posixpath.join(dest_abs, raw)))
+            candidates.append(posixpath.normpath(
+                posixpath.join(posixpath.dirname(dest_abs), raw)))
+        result.linked.extend(c for c in candidates if c)
+
+
+def _analyze(words: List[str], result: WriteTargets, cwd: Optional[str],
+             piped: bool = False) -> Optional[str]:
     """Inspect one simple command. Returns the new cwd (or ``None`` = unknown)."""
+    # ADR-0027 amendment: stdin is fed by a pipe, a here-document or here-string,
+    # or an input redirect.
+    stdin = piped or any(_is_operator(t) and "<" in t and ">" not in t for t in words)
+    _record_assignments(words, result)
     args = _pull_redirects(words, result, cwd)
     args = _strip_wrappers(args)
     if not args:
@@ -455,6 +607,10 @@ def _analyze(words: List[str], result: WriteTargets, cwd: Optional[str]) -> Opti
             result.copies.extend(nested.copies)
             result.cwds.extend(nested.cwds)
             result.unresolved.extend(nested.unresolved)
+            result.linked.extend(nested.linked)
+            result.pathspecs.extend(nested.pathspecs)
+            result.dollar.extend(nested.dollar)
+            result.assigns.update(nested.assigns)
             if nested.opaque:
                 result.mark_opaque(nested.why)
         return cwd
@@ -492,9 +648,7 @@ def _analyze(words: List[str], result: WriteTargets, cwd: Optional[str]) -> Opti
         return cwd
 
     if name == "git":
-        sub = next((a for a in rest if not a.startswith("-")), "")
-        if sub in _GIT_OPAQUE:
-            result.mark_opaque("git %s" % sub)
+        _git(rest, result, cwd)
         return cwd
 
     if name == "tee":
@@ -520,16 +674,22 @@ def _analyze(words: List[str], result: WriteTargets, cwd: Optional[str]) -> Opti
                 _add(result, target, cwd, "variable in perl target")
         elif script_flags or "-" in rest:
             result.mark_opaque("inline perl code")
+        elif stdin and not _script_operand(rest):
+            result.mark_opaque("perl script on stdin")
         return cwd
 
     if name in _INTERPRETERS or re.match(r"^python\d", name):
         if any(a in _INLINE_FLAGS for a in rest):
             result.mark_opaque("inline %s code" % name)
+        elif stdin and not _script_operand(rest):
+            result.mark_opaque("%s script on stdin" % name)
         return cwd
 
     if name in ("cp", "mv", "ln", "install", "rsync"):
         positional = _positional(rest, consuming=("-t", "--target-directory", "-m", "-o", "-g"))
         target_dir = _target_directory(rest)
+        if name == "ln" or (name == "cp" and _cp_links(rest)):
+            _linked(positional, target_dir, result, cwd)
         if target_dir is None and len(positional) >= 2:
             _add(result, positional[-1], cwd, "variable in destination")
             dest_raw, source_raws = positional[-1], positional[:-1]
@@ -582,8 +742,9 @@ def extract_write_targets(command: str, cwd: Optional[str]) -> WriteTargets:
     current = cwd
     if cwd:
         result.cwds.append(cwd)
-    for simple in _split_simple(tokens):
-        current = _analyze(simple, result, current)
+    piped: List[bool] = []
+    for simple, after_pipe in zip(_split_simple(tokens, piped), piped):
+        current = _analyze(simple, result, current, after_pipe)
     return result
 
 
@@ -740,6 +901,25 @@ def _contains_protected(root, removed: str) -> bool:
     return False
 
 
+def _is_state_dir(path: str) -> bool:
+    """True when *path* (absolute) is a ``.gatekit`` directory, as written or
+    after realpath."""
+    for candidate in (_lower_abs(path), _lower_abs(os.path.realpath(path))):
+        if candidate.rsplit("/", 1)[-1] == _STATE:
+            return True
+    return False
+
+
+def _state_dir_text(text: str) -> bool:
+    """True when *text* (a variable's value, possibly with variables in it)
+    spells a ``.gatekit`` directory or a protected file."""
+    segs = [s for s in write._canonical(text).lower().split("/") if s and s != "."]
+    if not segs:
+        return False
+    return segs[-1] == _STATE or (
+        len(segs) >= 2 and segs[-2] == _STATE and segs[-1] in write.PROTECTED_NAMES)
+
+
 def _dir_holds(path: str, names) -> bool:
     """True when directory *path* has an entry named one of *names* (any case)."""
     try:
@@ -808,6 +988,27 @@ def _protected_hit(root, command: str, found: WriteTargets) -> Optional[str]:
         hit = _copy_hit(root, sources, dest, raws)
         if hit:
             return hit
+    # A link made to a protected file, or to a directory holding one, is a
+    # second name for it that the rest of the command (or the next) can write.
+    for source in found.linked:
+        hit = write.protected_state(root, source)
+        if hit:
+            return hit
+        if _contains_protected(root, source):
+            return _STATE + "/"
+    # git restores a protected file named directly or by its directory.
+    for spec in found.pathspecs:
+        hit = write.protected_state(root, spec)
+        if hit:
+            return hit
+        if _is_state_dir(spec) or _glob_hits(spec, files) or _glob_tail_hits(spec):
+            return _STATE + "/"
+    # A path built from a variable assigned a .gatekit directory earlier.
+    for raw in found.dollar:
+        for var, value in found.assigns.items():
+            if _state_dir_text(value) and re.search(
+                    r"\$\{?%s(?![A-Za-z0-9_])" % re.escape(var), raw):
+                return _STATE + "/"
     # A cwd we may have misread (a conditional `cd`, an unknown one): a
     # target named like a protected file counts when .gatekit is in play.
     for target in list(found.targets) + list(found.unresolved) + list(found.removed):
