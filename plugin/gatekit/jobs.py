@@ -160,11 +160,16 @@ def job_dir(root, job_id: str):
     return jobs_dir(root) / job_id
 
 
-def latest_job_id(root) -> Optional[str]:
+def all_job_ids(root) -> list:
+    """Every job id under `.gatekit/jobs/`, oldest first."""
     base = jobs_dir(root)
     if not base.is_dir():
-        return None
-    names = sorted(p.name for p in base.iterdir() if (p / "job.json").is_file())
+        return []
+    return sorted(p.name for p in base.iterdir() if (p / "job.json").is_file())
+
+
+def latest_job_id(root) -> Optional[str]:
+    names = all_job_ids(root)
     return names[-1] if names else None
 
 
@@ -551,37 +556,57 @@ def _set_status(jdir, task_id: str, **fields) -> dict:
     return status
 
 
-def note_grading(jdir, task_id: str, gates, passed: bool) -> list:
+def note_grading(root, jdir, task_id: str, gates, passed: bool) -> list:
     """ADR-0023 decision 3: remember the grading files of each gate that
-    failed, and on a pass report those that changed since. Returns the task's
-    `grading_changed_after_failure` list. A report only: it never changes a
-    verdict, and it never raises."""
+    failed, and on a pass report those that changed since. Returns this job's
+    `grading_changed_after_failure` list for the task. A report only: it
+    never changes a verdict, and it never raises.
+
+    The failed hashes live in the task's attempt-ledger entry
+    (`.gatekit/attempts.json`, `failed_grading`), so a failure in one job and
+    a pass in the next are compared; a pass and `--force-retry` clear them
+    with the rest of the entry. Call it before `record_attempt`, whose pass
+    resets the entry. The flag itself stays per job, in `status.json`.
+    """
     try:
-        path = _task_dir(jdir, task_id) / "status.json"
-        st = read_json(path, {}) or {}
-        failed = st.get("failed_grading")
-        failed = dict(failed) if isinstance(failed, dict) else {}
-        flagged = st.get("grading_changed_after_failure")
-        flagged = set(flagged) if isinstance(flagged, list) else set()
         rows = gates.get("gates") if isinstance(gates, dict) else None
-        current = {}
+        current, failing = {}, {}
         for gate in rows if isinstance(rows, list) else []:
             if not isinstance(gate, dict) or not isinstance(gate.get("name"), str):
                 continue
             grading = gate.get("grading") if isinstance(gate.get("grading"), dict) else {}
             current[gate["name"]] = grading
             if gate.get("verdict") == verdict.FAIL and grading:
-                failed[gate["name"]] = grading
-        if passed and failed:
-            for name, before in failed.items():
-                after = current.get(name, {})
-                for rel, digest in (before.items() if isinstance(before, dict) else []):
-                    if after.get(rel) != digest:
-                        flagged.add(str(rel))
-            failed = {}
-        result = sorted(flagged)
-        _set_status(jdir, task_id, failed_grading=failed or None,
-                    grading_changed_after_failure=result)
+                failing[gate["name"]] = grading
+        changed = set()
+        with _ATTEMPTS_LOCK:
+            data = read_attempts(root)
+            tasks = data.setdefault("tasks", {})
+            entry = tasks.get(str(task_id))
+            entry = entry if isinstance(entry, dict) else {}
+            failed = entry.get("failed_grading")
+            failed = dict(failed) if isinstance(failed, dict) else {}
+            failed.update(failing)
+            if passed and failed:
+                for name, before in failed.items():
+                    after = current.get(name, {})
+                    for rel, digest in (before.items() if isinstance(before, dict) else []):
+                        if after.get(rel) != digest:
+                            changed.add(str(rel))
+                failed = {}
+            if failed != (entry.get("failed_grading") or {}):
+                if failed:
+                    entry["failed_grading"] = failed
+                else:
+                    entry.pop("failed_grading", None)
+                tasks[str(task_id)] = entry
+                data["version"] = 1
+                write_json(_attempts_path(root), data)
+        st = read_json(_task_dir(jdir, task_id) / "status.json", {}) or {}
+        flagged = st.get("grading_changed_after_failure")
+        flagged = set(flagged) if isinstance(flagged, list) else set()
+        result = sorted(flagged | changed)
+        _set_status(jdir, task_id, grading_changed_after_failure=result)
         return result
     except (OSError, ValueError, TypeError, AttributeError):
         return []
@@ -822,7 +847,11 @@ def preflight(root, jdir, tasks: list) -> dict:
         result = run_gates(root, task)
         write_json(_task_dir(jdir, task_id) / "preflight.json", result)
         gates = result.get("gates") or []
-        if result.get("total", 0) > 0 and result.get("verdict") == verdict.OK:
+        preflight_ok = result.get("total", 0) > 0 and result.get("verdict") == verdict.OK
+        # ADR-0023: a test that exists and fails here is a failure to compare
+        # a later pass with; one not written yet hashes to nothing.
+        note_grading(root, jdir, task_id, result, preflight_ok)
+        if preflight_ok:
             detail = "gates passed at preflight; no worker spawned"
             if not _scope_has_files(root, task):
                 note = ("warn: gate passed before any work existed in the write scope "
@@ -1005,9 +1034,9 @@ def execute_task(root, jdir, job_id: str, task: dict, backend: dict, timeout_s: 
         detail = "worker exited 0 and %d/%d gates ok" % (gates["passed"], gates["total"])
 
     # ADR-0014: the count follows the task across jobs.
+    note_grading(root, jdir, task_id, gates, state == "passed")  # before a pass resets the entry
     record_attempt(root, task_id, state, job_id=job_id,
                    gate=_first_failing_gate(gates), gates=gates)
-    note_grading(jdir, task_id, gates, state == "passed")
     return _set_status(
         jdir,
         task_id,
@@ -1842,9 +1871,9 @@ def complete_task(root, task_id: str, job_id: Optional[str] = None) -> dict:
     write_json(_task_dir(jdir, task_id) / "gates.json", gates)
     passed = gates["total"] > 0 and gates["verdict"] == verdict.OK
     # A host attempt is an attempt: it must count exactly as a worker's does.
+    note_grading(root, jdir, task_id, gates, passed)  # before a pass resets the entry
     record_attempt(root, task_id, "passed" if passed else "failed",
                    job_id=job_id, gate=_first_failing_gate(gates), gates=gates)
-    note_grading(jdir, task_id, gates, passed)
     return _set_status(
         jdir,
         task_id,
@@ -1894,7 +1923,7 @@ def recheck(root, task_ids=None, job_id: Optional[str] = None) -> dict:
         gates = run_gates(root, task)
         write_json(_task_dir(jdir, task_id) / "gates.json", gates)
         passed = gates["total"] > 0 and gates["verdict"] == verdict.OK
-        note_grading(jdir, task_id, gates, passed)
+        note_grading(root, jdir, task_id, gates, passed)
         _set_status(
             jdir,
             task_id,
@@ -2288,10 +2317,10 @@ def redelegate(root, task_id: str, job_id: Optional[str] = None) -> dict:
     detail = "redelegated after attempt %d" % attempt
     if reread_note:
         detail += "; " + reread_note
-    # ADR-0023: the old status moved to the archive; keep what it knew about
-    # grading files so the next attempt's pass is compared with this failure.
+    # ADR-0023: the old status moved to the archive; keep this job's flag.
+    # The failed hashes themselves live in the attempt ledger.
     _set_status(jdir, task_id, state="queued", attempt=attempt + 1, created_at=_now(),
-                detail=detail, failed_grading=st.get("failed_grading"),
+                detail=detail,
                 grading_changed_after_failure=st.get("grading_changed_after_failure") or [])
 
     backend = workers.resolve(root, (job.get("backend") or {}).get("name"))
@@ -2327,9 +2356,9 @@ def _usage() -> str:
     return (
         "usage: python3 -m gatekit jobs <command>\n"
         "  start [--tasks id,id] [--backend name] [--parallel N] [--dry-run] [--no-preflight]\n"
-        "  status [--job ID] [--json]\n"
+        "  status [--job ID | --all] [--json]\n"
         "  wait [--job ID] [--timeout S]\n"
-        "  results [--job ID] [--compact|--json]\n"
+        "  results [--job ID | --all] [--compact|--json]\n"
         "  complete <task_id> [--job ID]\n"
         "                         run a host-implemented task's gates and record\n"
         "                         the verdict (build.execution=host, ADR-0013)\n"
@@ -2491,6 +2520,18 @@ def run(argv: list) -> int:
                 if result["missing"]:
                     print("  warn: not in spec/04-tasks.md: %s" % ", ".join(result["missing"]))
             return 0 if payload["verdict"] != verdict.FAIL else 1
+
+        if cmd in ("status", "results") and "--all" in rest:
+            # Every job, oldest first: a flag (ADR-0023) or a failure recorded
+            # in an earlier job of the build is not in the latest one.
+            payloads = [status(root, jid) for jid in all_job_ids(root)]
+            if "--json" in rest:
+                print(json.dumps({"jobs": payloads}, indent=2))
+            else:
+                for payload in payloads:
+                    (_print_compact if "--compact" in rest else _print_table)(payload)
+            latest = payloads[-1] if payloads else {"verdict": verdict.UNVERIFIED}
+            return 0 if latest["verdict"] != verdict.FAIL else 1
 
         if cmd in ("status", "results"):
             payload = status(root, job_id)

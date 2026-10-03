@@ -3105,6 +3105,9 @@ class TestGradingChangedAfterFailure(JobTestCase):
     def st(self, job_id) -> dict:
         return json.loads((self.task_dir(job_id, "t") / "status.json").read_text())
 
+    def ledger_entry(self) -> dict:
+        return (jobs.read_attempts(self.root).get("tasks") or {}).get("t") or {}
+
     def test_gates_json_records_the_hashes(self) -> None:
         import hashlib
         self.check(self.LOOSE)
@@ -3118,12 +3121,12 @@ class TestGradingChangedAfterFailure(JobTestCase):
         self.write_tasks(self.task())
         job = jobs.start(self.root)
         self.assertEqual(jobs.complete_task(self.root, "t", job["job_id"])["state"], "failed")
-        self.assertIn("check", self.st(job["job_id"])["failed_grading"])
+        self.assertIn("check", self.ledger_entry()["failed_grading"])
         self.check(self.LOOSE)
         final = jobs.complete_task(self.root, "t", job["job_id"])
         self.assertEqual(final["state"], "passed")
         self.assertEqual(final["grading_changed_after_failure"], ["tests/check.py"])
-        self.assertNotIn("failed_grading", {k for k, v in self.st(job["job_id"]).items() if v})
+        self.assertNotIn("failed_grading", self.ledger_entry())
         payload = jobs.status(self.root, job["job_id"])
         self.assertEqual(payload["tasks"][0]["grading_changed_after_failure"], ["tests/check.py"])
         import contextlib, io
@@ -3150,14 +3153,99 @@ class TestGradingChangedAfterFailure(JobTestCase):
         self.assertEqual(payload["tasks"][0]["grading_changed_after_failure"], [])
 
     def test_a_first_time_pass_is_not_flagged(self) -> None:
+        # Greenfield: the test does not exist at preflight, so nothing is
+        # hashed there and writing it is the work itself.
+        self.host_config()
+        self.write_tasks(self.task())
+        job = jobs.start(self.root)
+        self.check(self.LOOSE)
+        final = jobs.complete_task(self.root, "t", job["job_id"])
+        self.assertEqual(final["state"], "passed")
+        self.assertFalse(final.get("grading_changed_after_failure"))
+        self.assertNotIn("failed_grading", self.ledger_entry())
+
+    def test_a_preflight_failure_counts(self) -> None:
+        # F4: an existing test that fails at preflight and is loosened before
+        # the first real attempt is flagged when it passes.
         self.host_config()
         self.check(self.STRICT)
         self.write_tasks(self.task())
         job = jobs.start(self.root)
-        self.check(self.LOOSE)  # written before any failed attempt: normal work
+        self.assertIn("check", self.ledger_entry()["failed_grading"])
+        self.check(self.LOOSE)
         final = jobs.complete_task(self.root, "t", job["job_id"])
         self.assertEqual(final["state"], "passed")
+        self.assertEqual(final["grading_changed_after_failure"], ["tests/check.py"])
+
+    def test_a_failure_in_one_job_and_a_pass_in_the_next(self) -> None:
+        # F5: the failed grading follows the task across jobs.
+        self.host_config()
+        self.check(self.STRICT)
+        self.write_tasks(self.task())
+        first = jobs.start(self.root, no_preflight=True)
+        self.assertEqual(jobs.complete_task(self.root, "t", first["job_id"])["state"], "failed")
+        self.check(self.LOOSE)
+        second = jobs.start(self.root, no_preflight=True)
+        self.assertNotEqual(first["job_id"], second["job_id"])
+        final = jobs.complete_task(self.root, "t", second["job_id"])
+        self.assertEqual(final["state"], "passed")
+        self.assertEqual(final["grading_changed_after_failure"], ["tests/check.py"])
+        self.assertNotIn("failed_grading", self.ledger_entry())
+
+    def test_a_pass_at_the_next_jobs_preflight_is_flagged(self) -> None:
+        self.host_config()
+        self.check(self.STRICT)
+        self.write_tasks(self.task())
+        first = jobs.start(self.root, no_preflight=True)
+        jobs.complete_task(self.root, "t", first["job_id"])
+        self.check(self.LOOSE)
+        second = jobs.start(self.root)
+        self.assertIn("t", second["preflight_passed"])
+        self.assertEqual(self.st(second["job_id"])["grading_changed_after_failure"],
+                         ["tests/check.py"])
+
+    def test_force_retry_clears_the_failed_grading(self) -> None:
+        self.host_config()
+        self.check(self.STRICT)
+        self.write_tasks(self.task())
+        first = jobs.start(self.root, no_preflight=True)
+        jobs.complete_task(self.root, "t", first["job_id"])
+        self.check(self.LOOSE)
+        import contextlib, io
+        with contextlib.redirect_stdout(io.StringIO()):
+            jobs.run(["start", "--root", str(self.root), "--no-preflight",
+                      "--force-retry", "t"])
+        self.assertEqual(self.ledger_entry(), {})
+        final = jobs.complete_task(self.root, "t", jobs.latest_job_id(self.root))
+        self.assertEqual(final["state"], "passed")
         self.assertFalse(final.get("grading_changed_after_failure"))
+
+    def test_status_all_covers_every_job(self) -> None:
+        self.host_config()
+        self.check(self.STRICT)
+        self.write_tasks(self.task())
+        first = jobs.start(self.root, no_preflight=True)
+        jobs.complete_task(self.root, "t", first["job_id"])
+        self.check(self.LOOSE)
+        second = jobs.start(self.root, no_preflight=True)
+        jobs.complete_task(self.root, "t", second["job_id"])
+        self.write_tasks(self.task(), self.simple_task(task_id="u", target="src/**", gates=[
+            {"name": "g", "argv": [sys.executable, "-c", "pass"]}]))
+        third = jobs.start(self.root, task_ids=["u"])
+        import contextlib, io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            jobs.run(["status", "--root", str(self.root), "--all", "--json"])
+        payload = json.loads(out.getvalue())
+        self.assertEqual([j["job_id"] for j in payload["jobs"]],
+                         sorted([first["job_id"], second["job_id"], third["job_id"]]))
+        flagged = [(j["job_id"], r["id"]) for j in payload["jobs"] for r in j["tasks"]
+                   if r["grading_changed_after_failure"]]
+        self.assertEqual(flagged, [(second["job_id"], "t")])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            jobs.run(["results", "--root", str(self.root), "--all", "--compact"])
+        self.assertIn("grading-changed=tests/check.py", out.getvalue())
 
     def test_recheck_flags_it(self) -> None:
         self.host_config()
@@ -3202,7 +3290,8 @@ class TestGradingChangedAfterFailure(JobTestCase):
         (jdir / "tasks" / "t").mkdir(parents=True)
         for gates in (None, {}, {"gates": "x"}, {"gates": [None, {"name": 3, "grading": 5}]}):
             with self.subTest(gates=gates):
-                self.assertEqual(jobs.note_grading(jdir, "t", gates, True), [])
+                self.assertEqual(jobs.note_grading(self.root, jdir, "t", gates, True), [])
+                self.assertEqual(jobs.note_grading(self.root, jdir, "t", gates, False), [])
 
 
 class TestZeroTestsIsNotAPass(JobTestCase):
