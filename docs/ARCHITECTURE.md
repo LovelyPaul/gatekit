@@ -39,7 +39,7 @@ gatekit/
 │   │   ├── design.md      /gatekit:design      → spec/02-design.md, spec/tokens.json, spec/design/, gap entries in ledger
 │   │   ├── tasks.md       /gatekit:tasks       → spec/04-tasks.md
 │   │   ├── gate.md        /gatekit:gate        → spec/05-gate.md, .gatekit/contract.json, approvals
-│   │   ├── build.md       /gatekit:build       → worker jobs over spec/04-tasks.md
+│   │   ├── build.md       /gatekit:build       → a job over spec/04-tasks.md (host default, workers optional)
 │   │   ├── verify.md      /gatekit:verify      → independent E2E + report check
 │   │   ├── doctor.md      /gatekit:doctor
 │   │   └── setup.md       /gatekit:setup       → optional Codex backend, config

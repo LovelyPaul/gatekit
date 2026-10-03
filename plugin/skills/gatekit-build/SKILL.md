@@ -1,18 +1,19 @@
 ---
 name: gatekit-build
-description: Run the tasks in spec/04-tasks.md as gated worker jobs — spawn a worker per task, let the gates decide pass or fail, redelegate failures up to the retry budget, then hand off to verify. Korean triggers — "빌드 시작해줘", "작업 실행해줘", "워커 돌려줘", "태스크 자동으로 만들어줘". English triggers — "build it", "run the tasks", "start the workers", "execute the task list". NOT for writing code directly in this session, NOT for judging whether the result is done — that is /gatekit:verify.
+description: Build the tasks in spec/04-tasks.md behind the gates — by default this session implements each task and `jobs complete` runs its gates; on request (--backend, execution=worker) workers run the tasks and failures are redelegated up to the retry budget. The gates decide pass or fail, then hand off to verify. Korean triggers — "빌드 시작해줘", "작업 실행해줘", "태스크 자동으로 만들어줘", "워커로 돌려줘". English triggers — "build it", "run the tasks", "execute the task list", "run the tasks on workers". NOT for coding outside the task list or past the gates, and NOT for judging whether the result is done — that is /gatekit:verify.
 ---
 
 # gatekit-build
 
 Invoke `/gatekit:build`, passing any task ids the user named as the argument.
 
-Do not implement tasks here. `plugin/commands/build.md` is the execution
-instruction; this file only routes to it.
+Do not implement tasks from this file. `plugin/commands/build.md` is the
+execution instruction; this file only routes to it.
 
-Two things the command enforces and this shim must not undercut: the main
-session never edits a task's files while its job runs, and a worker's own
-report never decides a verdict. The gates decide.
+Two things the command enforces and this shim must not undercut: under
+`execution: worker` the main session never edits a task's files while its job
+runs (under the default `host` it implements them and `jobs complete` judges),
+and nobody's own report decides a verdict. The gates decide.
 
 Under a host without slash commands (Codex), `/gatekit:build` does not exist:
 read `commands/build.md` two directories above this skill's folder and follow

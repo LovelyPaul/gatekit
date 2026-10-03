@@ -1,6 +1,6 @@
 ---
 name: build
-description: Run spec/04-tasks.md as worker jobs behind the gates — spawn workers per task, let the gates decide pass or fail, redelegate failures, and hand off to verify.
+description: Build spec/04-tasks.md behind the gates — by default this session implements each task and `jobs complete` runs its gates; with --backend or execution=worker, workers run the tasks and failures are redelegated. The gates decide pass or fail, then hand off to verify.
 argument-hint: "[optional: task ids to build, comma-separated]"
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 ---

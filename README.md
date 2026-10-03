@@ -167,7 +167,7 @@ change:
 | `/gatekit:design` | `spec/02-design.md`, `spec/tokens.json`, ledger gap entries |
 | `/gatekit:tasks` | `spec/04-tasks.md` |
 | `/gatekit:gate` | `spec/05-gate.md`, `.gatekit/contract.json`, approvals |
-| `/gatekit:build` | worker jobs run against `spec/04-tasks.md` |
+| `/gatekit:build` | a job over `spec/04-tasks.md`: this session implements each task by default, workers on request; the gates judge |
 | `/gatekit:verify` | independent end-to-end check against the completion contract |
 | `/gatekit:doctor` | an 8-axis health report on the install itself |
 | `/gatekit:setup` | optional Codex backend, other configuration |

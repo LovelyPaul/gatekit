@@ -160,7 +160,7 @@ gatekit은 아이디어에서 검증된 변경까지 가는 세 가지 경로를
 | `/gatekit:design` | `spec/02-design.md`, `spec/tokens.json`, 원장 갭 항목 |
 | `/gatekit:tasks` | `spec/04-tasks.md` |
 | `/gatekit:gate` | `spec/05-gate.md`, `.gatekit/contract.json`, 승인 기록 |
-| `/gatekit:build` | `spec/04-tasks.md` 기준 워커 작업 실행 |
+| `/gatekit:build` | `spec/04-tasks.md` 기준 잡 실행: 기본은 이 세션이 태스크를 구현, 요청 시 워커. 판정은 게이트가 |
 | `/gatekit:verify` | 완료 계약 기준 독립 종단 간(E2E) 검증 |
 | `/gatekit:doctor` | 설치 상태 8축 진단 리포트 |
 | `/gatekit:setup` | 선택적 Codex 백엔드, 기타 설정 |
