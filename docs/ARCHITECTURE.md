@@ -77,6 +77,7 @@ gatekit/
 ├── README.md, README.ko.md, CHANGELOG.md, CONTRIBUTING.md, SECURITY.md, LICENSE, CLAUDE.md
 ├── CODE_OF_CONDUCT.md                   # Contributor Covenant 2.1, adopted by reference
 ├── ROADMAP.md                           # public roadmap: now / next / later / non-goals, items linked to ADRs
+├── UNINSTALL.md                         # removing the plugin and cleaning up project state
 ```
 
 ## 2. Project state layout (inside the user's project)

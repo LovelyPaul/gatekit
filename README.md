@@ -252,6 +252,7 @@ defaults.
 - `docs/retros/` — retrospectives from real trial builds (Korean); each
   lists the tool defects and friction found, with evidence paths.
 - [`ROADMAP.md`](ROADMAP.md) — what is being worked on now, next and later, and the non-goals.
+- [`UNINSTALL.md`](UNINSTALL.md) — removing the plugin (Claude Code and Codex) and what stays in your projects.
 
 ## Status
 

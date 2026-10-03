@@ -242,6 +242,7 @@ spec/
 - `docs/retros/` — 실제 시험 빌드의 회고. 각 회고는 발견된 도구 결함과
   마찰을 근거 경로와 함께 나열합니다.
 - [`ROADMAP.md`](ROADMAP.md) — 지금·다음·나중에 할 일과 하지 않을 일(영문, 한국어 요약 포함).
+- [`UNINSTALL.md`](UNINSTALL.md) — 플러그인 제거(Claude Code·Codex)와 프로젝트에 남는 파일 정리.
 
 ## 상태
 
