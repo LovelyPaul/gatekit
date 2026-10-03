@@ -40,8 +40,8 @@ Render one row per axis, in order, in `output_lang`:
 | # | axis | verdict | what it means |
 |---|------|---------|---------------|
 
-The seven axes are: plugin files, hooks registered, project state, spec set,
-contract freshness, workers, python.
+The eight axes are: plugin files, hooks registered, project state, spec set,
+contract freshness, workers, python, host layer (Codex).
 
 Reading the verdicts:
 

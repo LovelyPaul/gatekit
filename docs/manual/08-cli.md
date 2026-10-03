@@ -40,7 +40,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" <subcommand> [args]
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" doctor [--root PATH] [--json]
 ```
 
-7개 축을 각각 판정하고 축마다 `fix` 문자열을 낸다.
+8개 축(플러그인 파일, 훅 등록, 프로젝트 상태, 스펙 세트, 계약 신선도, 워커, 파이썬, Codex 호스트 층)을 각각 판정하고 축마다 `fix` 문자열을 낸다.
 
 | 종료 코드 | 뜻 |
 |---|---|

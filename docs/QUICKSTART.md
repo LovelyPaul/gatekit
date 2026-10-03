@@ -84,8 +84,9 @@ rounded to a pass.
 /gatekit:doctor
 ```
 
-Runs a 7-axis diagnosis (plugin files, hook registration, project state,
-spec validity, contract freshness, worker availability, Python version)
+Runs an 8-axis diagnosis (plugin files, hook registration, project state,
+spec validity, contract freshness, worker availability, Python version,
+Codex host layer)
 and prints a copy-pasteable fix for anything that isn't `ok`.
 
 ## Where things end up
