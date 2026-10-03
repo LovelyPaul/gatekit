@@ -109,7 +109,35 @@ gatekit/
     └── jobs/<job_id>/          # ignored. see §10
 ```
 
-`paths.project_root(cwd)` = nearest ancestor containing `.gatekit/` or `.git/`, else cwd.
+`paths.project_root(cwd)` = nearest ancestor containing `.gatebound/`, `.gatekit/` or `.git/`, else cwd.
+
+**Names (ADR-0029).** `gatekit/names.py` is the single source of truth for
+the plugin's name (`CURRENT = "gatekit"`, `FUTURE = "gatebound"`, `LEGACY =
+()`; the rename flips `CURRENT` and moves `gatekit` into `LEGACY`). Both names
+are read wherever the name is an on-disk contract:
+
+- `paths.state_dir(root)` is `.gatebound/` if present, else `.gatekit/` if
+  present, else `.<CURRENT>/` (`.gatekit/` today). With both present, the one
+  holding `approvals.json` wins (newest name among ties) and doctor axis 3
+  fails. Protected state (ADR-0027), the write allowlist, the evaluator
+  scratch (`<state>/eval/**`) and the Bash gate's state checks treat both
+  names alike. `gatekit migrate` (dry run unless `--apply`) renames the
+  directory, rewrites `.gitignore` lines and regenerates the Codex layer;
+  it never touches `spec/` and refuses when both exist.
+- Fences: `gatebound-task/criterion/budget/discovery/scope` are read as
+  aliases of `gatekit-*` by every parser (`spec`, `contract`, `jobs`,
+  `design`, the spawn gate). Templates still write `gatekit-*`; nothing
+  rewrites `spec/` (its hash is pinned by approvals).
+- argv: `paths.expand_argv` maps a non-existent absolute token ending in
+  `<name>/gates/<gate>.py` (a gate this plugin has) or `bin/<name>.py`, for
+  either name, to this plugin's file — run time only, so grading hashes and
+  the contract's source hash are unchanged.
+- Env: workers get `GATEKIT_TASK_ID`/`GATEKIT_JOB_ID` and
+  `GATEBOUND_TASK_ID`/`GATEBOUND_JOB_ID`; every inherited variable with
+  either prefix is stripped; gates read the current name first
+  (`names.task_id()`, `names.job_id()`).
+- `.gatekit` read-through and the env alias are removed in 1.0; fence and
+  argv aliases, approve-guard and prompt matching are permanent.
 
 **Design preview (ADR-0011).** When `/gatekit:mockup` runs with no design
 source, its one `AskUserQuestion` offers a preview instead of a gap question
@@ -192,7 +220,21 @@ plugin installs globally, so these hooks fire in every project the user
 opens; a project with no `.gatekit/` has never run a gatekit command and
 never asked to be governed. Such a gate allows without reading further and
 **creates no state there** — no ledger, no `.gatekit/`, and no error log: a gate that fails there logs nothing, since creating `.gatekit/runs/` would make every later gate treat the project as managed. The one exception is
-`compact`, which already writes nothing when no job exists.
+`compact`, which already writes nothing when no job exists. "The state
+directory" is `paths.state_dir`: `.gatebound/` counts exactly like `.gatekit/`
+(ADR-0029, §2).
+
+**Coexistence (ADR-0029).** When a plugin named in `names.LEGACY` is enabled
+in Claude Code (`enabledPlugins` true in `~/.claude/settings.json`, the
+project's `.claude/settings.json` or `.claude/settings.local.json`, a later
+file's `false` winning), the **stop** and **question** gates stand down
+(allow, record nothing) and **prompt** puts one line naming the other plugin
+first in its context, once per session (`coexistence_warned` in the ledger).
+The write, Bash and spawn gates keep running. `LEGACY` is empty until the
+rename, so the check returns before reading any file. Prompt arming
+recognises `/gatekit:<cmd>`, `/gatebound:<cmd>`, `$gatekit-<cmd>` and
+`$gatebound-<cmd>`; the Bash gate's worker approve guard recognises
+`gatekit.py`, `gatekit`, `gatebound.py` and `gatebound` — permanently.
 
 - **prompt**: ensure ledger exists for `session_id`; detect `output_lang` from `prompt` (§8) and store it — for a slash command only the `<command-args>` content is the user's words, and empty args keep the stored language — except that while no prompt in the session has carried a signal (`lang_source` is not `"prompt"`), the language comes from the spec, `lang.from_spec(root)` (ADR-0026), so a bare `/gatekit:build` in a Korean project is `ko`; **set `active_pipeline`** when the prompt invokes `/gatekit:<pipeline>`. Claude Code delivers a slash command as the tagged body `<command-message>…</command-message>` / `<command-name>/gatekit:<name></command-name>` / `<command-args>…</command-args>`; that tag, a bare `/gatekit:<name>` at the start of the prompt, and the `# /gatekit:<name>` title line of an expanded command body are recognised within the first 12 lines. A mid-sentence mention is not an invocation. `doctor` and `setup` clear it; an unknown name leaves it alone; a plain prompt keeps it. Entering a different pipeline resets `questions` to its defaults. Invoking `build` or `verify` — the same pipeline again included — also re-arms the Stop gate (ADR-0024): `stop` is reset to `{"block_count": 0, "final_verdict": null, "last_reasons": [], "stood_down": null, "deferred": []}` with a `stop_rearmed` event. This is the **only** production writer of `active_pipeline` — commands never set it by prose. Inject `additionalContext` (≤ 600 chars) with `output_lang`, question budget state, active pipeline, and unresolved gate count, plus `build=<job> n/m passed, next: <task>` while a job is unfinished — followed, while any of its tasks is `queued`, by ``; build job unfinished: N tasks queued — `jobs stop` ends judging`` in `output_lang` (ADR-0024 review: such a job never settles, so the Stop gate keeps judging) — and — while a Stop-gate stand-down applies (ADR-0024, `stop.stand_down_applies`) — one line in `output_lang`, placed right after `pipeline=` so the 600-char cut never drops it, naming what was judged (`turn-tier <verdict>` under `build`, `contract <verdict>` under `verify`), how many `verify`-tier criteria wait (`N deferred to /gatekit:verify`, when any), and that follow-up edits are not gated and `/gatekit:verify` re-checks the contract; while no stand-down applies and `stop.deferred` holds `budget` deferrals, the same slot names those ids as unjudged, run first at the next turn end; under `build` with a contract that has no `turn` criterion it says turn ends judge nothing and `/gatekit:verify` runs them (`stop.stand_down_line`) (ADR-0013 decision 1a: the session that returns from a compaction is told a build is live and reads `spec/PROGRESS.md` for the rest). The `contract=` field adds the last run's scope when the last recorded result (`runs/contract-last.json`) is for this contract and this tree (`contract.same_tree_record`), carries a `scope` list (ADR-0024), and did not judge every criterion (ADR-0026, 0.16.2 amendment; the record's `scope` is checked first and the tree fingerprint is computed only when something is unjudged, 0.16.3 amendment): `contract=ok (last run: turn tier, N deferred to /gatekit:verify)` for unjudged `verify`-tier criteria and `M unjudged` for any other, joined by `; `, in `output_lang` (`마지막 실행: turn 등급만, N개는 /gatekit:verify 로 미룸`, `M개 미판정`). `contract=ok` stays the freshness flag; the suffix states scope, never the run's verdict. The question field is `questions=<asked>/<max>`, followed by the ADR-0012 signals when any is non-zero — `questions=6/2 (2 unjustified, 1 repeat, impl-choice)` — printing only what is set so the 600-char budget holds. Never blocks.
 - **write**: for `apply_patch`, apply the rules below to every file the patch header names (a patch naming no file is denied while a rule is active). **Protected state (ADR-0027 and its amendment), always and first:** deny any target below a `.gatekit` directory except `config.json` directly in it and anything under its `eval/` — before and after approval, in any session, with or without `GATEKIT_TASK_ID`, whatever `enforce_spec_before_code` says, also for `apply_patch` when no other rule is active (`write.protected_state`): segments compared case-insensitively after `\` → `/`, Git Bash `/c/…` → `C:/…`, NTFS stream suffixes (`::$DATA`, `:name`) and trailing dots/spaces cut from each segment, `.`/`..` resolved; on the path as written (joined to the root when relative) and on its realpath (symlinked file or directory); and, when the target exists, `os.path.samefile` against the project's key state files (`approvals.json`, `contract.json`, `baseline.json`, `attempts.json`, `runs/contract-last.json`; hard link, short name). Only gatekit writes them — its hooks and CLI, in process, never through a tool call — so `ledger.save`, `contract.save_last`, the job runner, `attempts.json`, `baseline.json`, `hook-errors.log` and `/gatekit:setup` (through `workers set-default`) are unaffected. Otherwise deny when (a) `config.enforce_spec_before_code` is true, `spec/` exists, `.gatekit/approvals.json` has no valid approval for `spec/05-gate.md`, the target lies inside the project root (after realpath; a target outside the root is not this project's code and rule (a) allows it, ADR-0018), and the target path is outside the allowlist `spec/**, .gatekit/**, docs/**, README*, *.md at root`; or (b) env `GATEKIT_TASK_ID` is set and the target is outside that task's `write_scope` (from the job's `task.json`) — except that the `jobs evaluate` worker (task id `evaluate` with the job's `evaluate/task.json`) may write `.gatekit/eval/**` inside the project root, its scratch directory (ADR-0026); under a task id a target outside the root is always denied. Reason text is in `output_lang`.
@@ -959,8 +1001,8 @@ runs `check` and the user confirms.
 ## 12. Doctor (`doctor.py`) — 8 axes
 
 1 plugin files present (plugin.json, hooks.json, all gate scripts exist and are non-empty);
-2 hooks registered in the running install (compare `~/.claude/plugins/…` cache when present, else `unverified`);
-3 project state (`.gatekit/config.json` valid, approvals valid JSON; an out-of-range `stop.budget_s` is `warn` (ADR-0024); the detail names a Stop-gate stand-down recorded in the most recently updated session ledger; **port probe** (ADR-0026): the `webServer` ports in `playwright.config.{ts,js,mjs,cjs}` at the root and under `spec/design/e2e/` — `port: <n>` and `url: '…://host:<n>'`, also as the fallback after `||`/`??` (`process.env.PORT || 3000`), inside each `webServer:` (key quoted or not; a `webServer` inside a string literal is not a key; a `'…'`/`"…"` literal ends at a line break, a template literal may span lines) or `webServer =` value (also `const webServer: <type> = <value>`, the annotation skipped — brackets, braces, parentheses and `<>` nest, `=>` is part of it, a line break continues it after `:`/`|`/`&` or before `|`/`&`/`=`; ADR-0026 0.16.4 amendment) from its first `{`/`[` (searched up to the value's end — `,`/`;`, a closing bracket at depth 0, or a line break no operator continues — when it opens otherwise, e.g. `process.env.CI ? undefined : { … }`) up to its balanced closing brace or bracket (strings respected, at most 8000 characters; a `webServer` inside a value already read is skipped, ADR-0026 0.16.3 amendment), with `//` and `/* */` comments removed first — a scan, not a parser — are probed with a TCP connect to `127.0.0.1`; a listener is `warn` naming the port and, on POSIX with `lsof` on `PATH`, its PID, command and cwd and whether that cwd is inside the project; the fix says to stop it or change the port; doctor never kills a process; a probe error is skipped);
+2 hooks registered in the running install (compare `~/.claude/plugins/…` cache when present, else `unverified`); `fail` when plugins of more than one of the plugin's names are enabled in Claude Code (user or project `enabledPlugins`, and listed in `installed_plugins.json`) or cached by Codex (`plugins/cache/<name>/<name>`), with `/plugin disable <key>` for every one but the current name as the fix (ADR-0029; `~/.claude` and `~/.codex` are only read);
+3 project state (`fail` when both `.gatebound/` and `.gatekit/` exist, naming the one hooks use, ADR-0029; `.gatekit/config.json` valid, approvals valid JSON; an out-of-range `stop.budget_s` is `warn` (ADR-0024); the detail names a Stop-gate stand-down recorded in the most recently updated session ledger; **port probe** (ADR-0026): the `webServer` ports in `playwright.config.{ts,js,mjs,cjs}` at the root and under `spec/design/e2e/` — `port: <n>` and `url: '…://host:<n>'`, also as the fallback after `||`/`??` (`process.env.PORT || 3000`), inside each `webServer:` (key quoted or not; a `webServer` inside a string literal is not a key; a `'…'`/`"…"` literal ends at a line break, a template literal may span lines) or `webServer =` value (also `const webServer: <type> = <value>`, the annotation skipped — brackets, braces, parentheses and `<>` nest, `=>` is part of it, a line break continues it after `:`/`|`/`&` or before `|`/`&`/`=`; ADR-0026 0.16.4 amendment) from its first `{`/`[` (searched up to the value's end — `,`/`;`, a closing bracket at depth 0, or a line break no operator continues — when it opens otherwise, e.g. `process.env.CI ? undefined : { … }`) up to its balanced closing brace or bracket (strings respected, at most 8000 characters; a `webServer` inside a value already read is skipped, ADR-0026 0.16.3 amendment), with `//` and `/* */` comments removed first — a scan, not a parser — are probed with a TCP connect to `127.0.0.1`; a listener is `warn` naming the port and, on POSIX with `lsof` on `PATH`, its PID, command and cwd and whether that cwd is inside the project; the fix says to stop it or change the port; doctor never kills a process; a probe error is skipped);
 4 spec set (`spec.validate` verdict, or `unverified` when no `spec/`);
 5 contract freshness (`source_sha256` matches);
 6 workers (default backend `check`);
@@ -984,7 +1026,9 @@ project instead — `.codex/hooks.json`, `.agents/skills/<name>/SKILL.md`,
   `command.md` is the command body with `${CLAUDE_PLUGIN_ROOT}` replaced by
   the checkout path and `/gatekit:<name>` rewritten to `$gatekit-<name>`.
 - `AGENTS.md`: a managed block between `<!-- gatekit:begin -->` and
-  `<!-- gatekit:end -->`; text outside it is never touched.
+  `<!-- gatekit:end -->`; text outside it is never touched. A block between
+  `<!-- gatebound:begin … -->` and `<!-- gatebound:end -->` is replaced the
+  same way; the current name's markers are written (ADR-0029).
 
 Writes are atomic, reinstalling is idempotent, `--dry-run` lists without
 writing. `hosts.status` is `unverified` when absent, `fail` when a
@@ -1099,12 +1143,38 @@ unrelated `*-preview.html` capture do not.
 ## 14. Module interfaces (exact signatures other modules may import)
 
 ```python
+# names.py (ADR-0029) — the one place the plugin's name is stated
+CURRENT: str                                          # "gatekit"
+FUTURE: str                                           # "gatebound"
+LEGACY: tuple[str, ...]                               # () until the rename
+def all_names() -> tuple[str, ...]                     # newest first, each once
+def fence_names(name: str) -> tuple[str, ...]          # "gatekit-task" → every prefix
+def state_dirnames() -> tuple[str, ...]                # (".gatebound", ".gatekit")
+def resolve_state_dir(root) -> pathlib.Path            # see §2
+def launcher_names() -> tuple[str, ...]                # gatekit.py, gatekit, gatebound.py, gatebound
+def names_pattern() -> str                             # regex alternation of all_names()
+def env_names(suffix: str) -> tuple[str, ...]          # current name first
+def task_id(environ=None) -> str | None                # GATEKIT_TASK_ID, then GATEBOUND_TASK_ID
+def job_id(environ=None) -> str | None
+def worker_env(task: str, job: str) -> dict[str, str]  # both names
+def enabled_plugins(root=None, home=None, candidates=None) -> dict[str, list[str]]  # read-only
+def legacy_plugin_enabled(root=None, home=None) -> list[str]   # [] without reading when LEGACY is empty
+def agents_markers(name: str | None = None) -> tuple[str, str]
+
+# migrate.py (ADR-0029)
+def plan(root: pathlib.Path, to: str) -> dict          # {"from","to","actions","refused","detail"}
+def apply(root: pathlib.Path, report: dict) -> None
+def run(argv: list[str]) -> int                        # --root, --to, --apply, --json; exit 1 when refused
+
 # paths.py
 def project_root(cwd: str | None = None) -> pathlib.Path
-def state_dir(root: pathlib.Path) -> pathlib.Path      # root / ".gatekit"
+def state_dir(root: pathlib.Path) -> pathlib.Path      # names.resolve_state_dir: .gatebound/ | .gatekit/ (ADR-0029)
+STATE_DIRNAME: str                                     # ".gatekit": what a new project gets
+STATE_DIRNAMES: tuple[str, ...]                        # every name; protected-state rules use these
+def alias_path(token: str) -> str                      # ADR-0029 argv alias; non-matching tokens unchanged
 def spec_dir(root: pathlib.Path) -> pathlib.Path       # root / "spec"
 def plugin_root() -> pathlib.Path                      # directory containing plugin.json (parent of gatekit/)
-def expand_argv(argv: list[str]) -> list[str]           # copy with "${CLAUDE_PLUGIN_ROOT}" → plugin_root() (ADR-0018); bare argv[0] via shutil.which (ADR-0019)
+def expand_argv(argv: list[str]) -> list[str]           # copy with "${CLAUDE_PLUGIN_ROOT}" → plugin_root() (ADR-0018), then alias_path per token (ADR-0029); bare argv[0] via shutil.which (ADR-0019)
 def from_msys(path: str, windows: bool | None = None) -> str   # "/c/x" → "C:/x" on Windows (ADR-0019)
 
 # config.py
