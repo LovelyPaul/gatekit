@@ -432,6 +432,8 @@ class TestAxisProjectStatePortProbe(DoctorTestCase):
         self.write_config(self.free_port())
         self.assertEqual(doctor.axis_project_state(self.root)["verdict"], verdict.OK)
 
+    @unittest.skipUnless(os.name == "posix",
+                         "lsof identification is POSIX-only; Windows: socket probe alone")
     def test_lsof_names_pid_command_and_cwd_inside_the_project(self) -> None:
         make_python_stub(self.bindir, "lsof", (
             "import sys\n"
@@ -446,6 +448,8 @@ class TestAxisProjectStatePortProbe(DoctorTestCase):
         self.assertIn("node", detail)
         self.assertIn("inside this project", detail)
 
+    @unittest.skipUnless(os.name == "posix",
+                         "lsof identification is POSIX-only; Windows: socket probe alone")
     def test_lsof_cwd_outside_the_project_is_said(self) -> None:
         other = tempfile.TemporaryDirectory()
         self.addCleanup(other.cleanup)
@@ -459,6 +463,15 @@ class TestAxisProjectStatePortProbe(DoctorTestCase):
         self.write_config(self.port)
         detail = doctor.axis_project_state(self.root)["detail"]
         self.assertIn("outside this project", detail)
+
+    @unittest.skipUnless(os.name == "nt", "the Windows path of the port probe")
+    def test_windows_never_runs_lsof_and_still_warns(self) -> None:
+        make_python_stub(self.bindir, "lsof", "print('p4242'); print('cnode')\n")
+        self.write_config(self.port)
+        result = doctor.axis_project_state(self.root)
+        self.assertEqual(result["verdict"], verdict.WARN)
+        self.assertNotIn("pid 4242", result["detail"])
+        self.assertIn(str(self.port), result["detail"])
 
     def test_real_lsof_when_present_names_this_process(self) -> None:
         real = shutil.which("lsof", path=self._old_path)
