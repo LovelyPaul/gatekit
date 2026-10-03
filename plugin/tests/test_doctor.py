@@ -456,6 +456,22 @@ class TestAxisProjectStatePortProbe(DoctorTestCase):
         self.assertEqual(self.ports_of(
             "export default { webServer: { port: f('a || 9267') } }"), [])
 
+    def test_regex_literal_in_a_template_expression_does_not_hide_the_port(self) -> None:
+        # Review of 0.16.7: a quote, `{` or `//` of a regex literal inside
+        # `${…}` was read as code and swallowed the template's backtick.
+        tail = "\nexport default defineConfig({ webServer: { port: 3000 } })\n"
+        for line in (
+                "const s = `${ s.replace(/'/g, '') }`;",
+                'const s = `${ s.replace(/"/g, "") }`;',
+                "const s = `${ name.replace(/{/g, '') }`;",
+                "const s = `id-${ v.split(/[{]/)[0] }`;",
+                "const s = `${ /a{2,/.test(x) }`;",
+                "const s = `${ u.replace(/\\/\\//, '') }`;",
+        ):
+            self.assertEqual(self.ports_of(line + tail), [3000], line)
+        # An expression that does end on its line is still followed.
+        self.assertEqual(self.ports_of('const s = `${"`"}\n`;' + tail), [3000])
+
     def test_long_template_expressions_stay_linear(self) -> None:
         import time
 

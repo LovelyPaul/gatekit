@@ -350,10 +350,24 @@ both of equal length. A template literal ends at its own closing backtick:
 each `${…}` in it is followed to its matching `}` — braces counted, the
 strings, nested templates and comments inside read as such — and blanked with
 the template, so a `webServer` inside a template expression is not a key.
-`'…'`/`"…"` still end at a line break (C1). Every character is read once; the
-pass uses `re` only to skip runs that cannot change state, so it stays linear
-(1.2 MB in about 0.1 s; a test bounds 20 000 `${…}` templates and 5 000
-nested ones).
+`'…'`/`"…"` still end at a line break (C1).
+
+A `${…}` must close on the line it opened on. Inside one, a regex literal is
+read as code, so its quote, `{` or `//` (`` `${ s.replace(/'/g, '') }` ``,
+`` `${ /a{2,/.test(x) }` ``) keeps the expression open; an earlier draft of
+this addendum then swallowed the template's closing backtick and blanked the
+rest of the file. Now, when a line ends inside a `${…}` (in code, a string, a
+comment or a nested template), the outermost template is read again
+plainly — from its backtick to the next unescaped one, as before 0.16.7 —
+and so is every template that opens on the rest of that line. An
+expression wrapped over several lines is therefore read plainly too. The
+damage of an unread regex literal is bounded by that one template, as before
+0.16.7, and the multi-line `` `${"`"}\n` `` still reads correctly because its
+expression closes on its own line. Each character is read at most three
+times (once, then again by the plain re-read, then once more if the plain
+template ended before the line did), and the pass uses `re` only to skip
+runs that cannot change state, so it stays linear (1.2 MB in about 0.1 s; a
+test bounds 20 000 `${…}` templates and 5 000 nested ones).
 
 A `webServer:` key counts only where an object key can stand: after `{` or
 `,` (spaces between) or at the start of the file. After `?`, `:` or anything
@@ -368,8 +382,11 @@ so a URL keeps its port, but a match counts only when its key — and for
 string.
 
 Still out of scope, because this stays a scan and not a parser: a regex
-literal holding a quote or backtick (a `'`/`"` one blanks at most the rest of
-its line, as in C1; a backtick one opens a template); a port computed from a
+literal holding a quote or backtick outside a template expression (a
+`'`/`"` one blanks at most the rest of its line, as in C1; a backtick one
+opens a template); inside a `${…}`, any regex literal or wrapped expression
+whose line ends before the `${…}` closes, which costs the plain reading of
+that template described above; a port computed from a
 variable, a function call or a spread (`...base`); a `webServer` key reached
 through a computed name (`[key]: { … }`); and a `/` that starts a regex
 literal containing `//` or `/*`, which is read as a comment.

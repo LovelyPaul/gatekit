@@ -257,8 +257,8 @@ def axis_project_state(root) -> dict:
 # `reuseExistingServer: true` the e2e tests run against whatever answers
 # there — in the 0.16.0 rehearsal, another project's app. The port is found
 # by a small scan, not by parsing JS/TS: one pass drops comments and blanks
-# string literals (a template literal's `${…}` expressions are followed, so a
-# quote inside one does not end it); then the value after each `webServer:`
+# string literals (a template literal's `${…}` expressions are followed while
+# they close on their own line, so a quote inside one does not end it); then the value after each `webServer:`
 # key (quoted or not, after `{` or `,`) or `webServer =` (also
 # `const webServer: <type> =`, the annotation skipped) is taken from its first
 # `{` or `[` up to the balanced closing brace or bracket, and in it
@@ -328,9 +328,11 @@ _QUOTED_RE = {
 }
 #: Template text up to its closing backtick or a ``${``.
 _TEMPLATE_TEXT_RE = re.compile(r"(?:[^`\\$]|\\.|\$(?!\{))*", re.S)
+#: A whole template read plainly, to the first unescaped backtick.
+_PLAIN_TEMPLATE_RE = re.compile(r"`(?:[^`\\]|\\.)*`?", re.S)
 #: The next character that changes state, outside and inside a ``${…}``.
 _CODE_STOP_RE = re.compile(r"['\"`]|//|/\*")
-_EXPR_STOP_RE = re.compile(r"['\"`{}]|//|/\*")
+_EXPR_STOP_RE = re.compile(r"['\"`{}\n]|//|/\*")
 _NOT_NEWLINE_RE = re.compile(r"[^\n]")
 
 
@@ -341,10 +343,17 @@ def _scan_js(text: str) -> tuple:
     *code* with every string literal blanked after its opening quote (line
     breaks kept), so that ``webServer`` or ``port:`` in a message is not
     taken for a key. A literal that is exactly ``webServer`` in matching
-    quotes (a quoted key) is kept. A template literal ends at its own closing
-    backtick: each ``${…}`` in it is followed to its matching ``}``, with the
-    strings, templates and comments inside, and blanked with the template.
-    One pass, each character read once."""
+    quotes (a quoted key) is kept.
+
+    A template literal ends at its own closing backtick: each ``${…}`` in it
+    is followed to its matching ``}``, with the strings, templates and
+    comments inside, and blanked with the template. A ``${…}`` must close on
+    the line it opened on. When a line ends inside one — a regex literal's
+    quote, ``{`` or ``//`` read as code, or an expression wrapped over lines
+    — the outermost template is read again plainly, from its backtick to the
+    next one, and so is every template opening on the rest of that line. So
+    an unread regex literal costs at most that template, never the rest of
+    the file, and each character is read at most three times."""
     code: list = []
     blanked: list = []
 
@@ -354,64 +363,97 @@ def _scan_js(text: str) -> tuple:
 
     depths: list = []  # one brace depth per open `${`, innermost last
     in_text = False    # inside template text (not in a `${…}`)
+    opened_at = opened_out = 0  # the outermost template: text index, output chunks
+    plain_until = -1   # templates opening before this index are read plainly
     i, n = 0, len(text)
     while i < n:
-        inside = in_text or bool(depths)
+        line_end = -1
         if in_text:
             end = _TEMPLATE_TEXT_RE.match(text, i).end()
-            emit(text[i:end], True)
-            i = end
-            if i >= n:
+            if depths:
+                line_end = text.find("\n", i, end)
+            if line_end < 0:
+                emit(text[i:end], True)
+                i = end
+                if i >= n:
+                    break
+                if text[i] == "`":
+                    emit("`", True)
+                    i += 1
+                else:  # `${`
+                    emit("${", True)
+                    i += 2
+                    depths.append(0)
+                in_text = False
+                continue
+        else:
+            inside = bool(depths)
+            found = (_EXPR_STOP_RE if depths else _CODE_STOP_RE).search(text, i)
+            if not found:
+                emit(text[i:], inside)
                 break
-            if text[i] == "`":
-                emit("`", True)
-                i += 1
-            else:  # `${`
-                emit("${", True)
-                i += 2
-                depths.append(0)
-            in_text = False
-            continue
-        found = (_EXPR_STOP_RE if depths else _CODE_STOP_RE).search(text, i)
-        if not found:
-            emit(text[i:], inside)
-            break
-        emit(text[i:found.start()], inside)
-        i = found.start()
-        token = found.group(0)
-        if token == "//":
-            end = text.find("\n", i)
-            i = n if end < 0 else end
-        elif token == "/*":
-            end = text.find("*/", i + 2)
-            emit(" ", inside)
-            i = n if end < 0 else end + 2
-        elif token in _QUOTED_RE:
-            literal = _QUOTED_RE[token].match(text, i).group(0)
-            if inside:
-                emit(literal, True)
-            elif literal[1:-1] == "webServer" and literal[-1] == literal[0]:
-                emit(literal, False)
-            else:
-                emit(literal[0], False)
-                emit(literal[1:], True)
-            i += len(literal)
-        elif token == "`":
-            emit("`", inside)
-            in_text = True
-            i += 1
-        elif token == "{":
-            depths[-1] += 1
-            emit("{", True)
-            i += 1
-        else:  # "}" inside `${…}`
-            if depths[-1]:
-                depths[-1] -= 1
-            else:
-                depths.pop()
+            emit(text[i:found.start()], inside)
+            i = found.start()
+            token = found.group(0)
+            if token == "\n":
+                line_end = i
+            elif token == "//":
+                end = text.find("\n", i)
+                i = n if end < 0 else end
+            elif token == "/*":
+                end = text.find("*/", i + 2)
+                end = n if end < 0 else end + 2
+                if inside:
+                    line_end = text.find("\n", i, end)
+                if line_end < 0:
+                    emit(" ", inside)
+                    i = end
+            elif token in _QUOTED_RE:
+                literal = _QUOTED_RE[token].match(text, i).group(0)
+                if inside:
+                    line_end = text.find("\n", i, i + len(literal))
+                    if line_end < 0:
+                        emit(literal, True)
+                elif literal[1:-1] == "webServer" and literal[-1] == literal[0]:
+                    emit(literal, False)
+                else:
+                    emit(literal[0], False)
+                    emit(literal[1:], True)
+                if line_end < 0:
+                    i += len(literal)
+            elif token == "`":
+                if not inside and i < plain_until:
+                    literal = _PLAIN_TEMPLATE_RE.match(text, i).group(0)
+                    emit("`", False)
+                    emit(literal[1:], True)
+                    i += len(literal)
+                    continue
+                if not inside:
+                    opened_at, opened_out = i, len(code)
+                emit("`", inside)
                 in_text = True
-            emit("}", True)
-            i += 1
+                i += 1
+            elif token == "{":
+                depths[-1] += 1
+                emit("{", True)
+                i += 1
+            else:  # "}" inside `${…}`
+                if depths[-1]:
+                    depths[-1] -= 1
+                else:
+                    depths.pop()
+                    in_text = True
+                emit("}", True)
+                i += 1
+        if line_end >= 0:
+            # A line ended inside a `${…}`: read the template plainly.
+            del code[opened_out:], blanked[opened_out:]
+            literal = _PLAIN_TEMPLATE_RE.match(text, opened_at).group(0)
+            emit("`", False)
+            emit(literal[1:], True)
+            i = opened_at + len(literal)
+            depths, in_text = [], False
+            plain_until = line_end + 1
     return "".join(code), "".join(blanked)
 
 
