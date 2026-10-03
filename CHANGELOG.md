@@ -4,6 +4,44 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.16.1 — 2026-10-03
+
+Fixes from a real rehearsal of 0.16.0: one `/gatekit:build` on a small Korean
+project, three follow-up turns, one `/gatekit:verify` (ADR-0026).
+
+### Fixed
+
+- **A bare `/gatekit:build` no longer leaves a Korean project in English.**
+  A slash command with no arguments carries no language signal, so the ledger
+  kept its blank `en`, and build reports and Stop-gate messages came out in
+  English. While no prompt in the session has carried a signal, the prompt
+  hook now takes the language from the spec: the first 40 lines of
+  `spec/01-prd.md`, else `spec/00-discovery.md`. A prompt that does carry a
+  signal still wins, and the session keeps it. The ledger records where the
+  language came from (`lang_source`).
+- **Doctor warns when the Playwright port is taken.** In the rehearsal
+  another project's long-running server held the `webServer` port. With
+  `reuseExistingServer: true` the e2e tests ran against that app and failed
+  confusingly. Axis 3 (project state) now reads the `webServer` `port:` and
+  `url:` values from `playwright.config.{ts,js,mjs,cjs}` (at the root and
+  under `spec/design/e2e/`) and probes each port on the loopback interface. A
+  listener is `warn`, naming the port and, on POSIX with `lsof`, the
+  listener's PID, command and working directory, and whether that directory
+  is inside this project. Doctor never stops a process. On Windows only the
+  socket probe runs.
+- **The context line says what the contract result covered.** The Korean
+  stand-down line now uses the manual's terms (`Stop 게이트 물러남`) instead
+  of `stop 게이트 해제`. When the last recorded result did not judge every
+  criterion, `contract=` adds the scope: `contract=ok (turn tier; 1 deferred
+  to /gatekit:verify)`, or `N unjudged` after a Stop-budget cut, in
+  `output_lang`. On its own, `contract=ok` only means the contract matches
+  the approved gate file.
+- **The evaluator keeps its scratch files in the project.** The verify
+  evaluator wrote a driver script, a server log and screenshots to `/tmp`.
+  The evaluator brief now says scratch files go only under `.gatekit/eval/`
+  and nothing is written outside the project. This is an instruction, not an
+  enforcement mechanism.
+
 ## 0.16.0 — 2026-10-03
 
 The Stop gate stops costing the session after the build is over (ADR-0024).

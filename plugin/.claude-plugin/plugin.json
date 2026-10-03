@@ -1,6 +1,6 @@
 {
   "name": "gatekit",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "description": "Gate-enforced harness: interview → spec, mockup → spec, gated build, evidence-based verify.",
   "author": {
     "name": "Paul"
