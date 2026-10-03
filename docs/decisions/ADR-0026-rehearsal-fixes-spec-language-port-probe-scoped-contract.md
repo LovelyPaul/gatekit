@@ -197,3 +197,23 @@ only entry point, since Codex has no slash commands, so hiding them there
 would be wrong even if it were possible. The shims are left unchanged until
 it is confirmed that Codex ignores the key, or the plugin can ship it for
 Claude Code alone.
+
+## Amendment, 0.16.3 (2026-10-03, owner approval in session)
+
+A review of 0.16.2 found the following. Each change below replaces the
+matching part of the decision or of the 0.16.2 amendment.
+
+### B1. The port scan finds a `webServer` value that is not an object literal
+
+A5 read a `webServer:` value only when it opened with `{` or `[`, so two
+common shapes the 0.16.1 scan had found were missed:
+`webServer: process.env.CI ? undefined : { port: 3100 }` and
+`const webServer = { port: 3200 }; defineConfig({ webServer })`. The scan now
+also matches `webServer = <value>` (not `==`, `===` or `=>`), and when a value
+does not open with `{`/`[` it searches the value for the first one: up to a
+`,` or `;`, a closing brace, bracket or parenthesis at depth 0, or a line
+break at depth 0 that no operator (`?`, `:`, `||`, `&&`, `.` …) joins to the
+next line, strings respected, at most 8000 characters. The balanced value is
+read from there as before. A `webServer` match inside a value already read is
+skipped, so a file of nested matches costs one read per 8000-character
+window instead of one per match.

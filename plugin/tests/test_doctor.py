@@ -15,6 +15,7 @@ import stat
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 # Make the `gatekit` package importable however this suite is discovered:
 # `discover -s plugin/tests` loads tests as top-level modules and puts only
@@ -307,6 +308,45 @@ class TestAxisProjectStatePortProbe(DoctorTestCase):
         self.assertEqual(self.ports_of(
             "webServer: { command: 'node -e \"x}\" // not a comment', port: 3000 },\n"
             "other: { port: 9999 }\n"), [3000])
+
+    def test_ternary_webserver_value(self) -> None:
+        # Review of 0.16.2: a value that does not open with `{` was skipped.
+        self.assertEqual(self.ports_of(
+            "export default { webServer: process.env.CI ? undefined : "
+            "{ command: 'x', port: 3100 } }"), [3100])
+        self.assertEqual(self.ports_of(
+            "export default defineConfig({\n  webServer: process.env.CI\n"
+            "    ? undefined\n    : { command: 'x', port: 3101 },\n"
+            "  use: { port: 9229 },\n});\n"), [3101])
+
+    def test_webserver_declared_as_a_variable(self) -> None:
+        self.assertEqual(self.ports_of(
+            "const webServer = { command: 'x', port: 3200 };\n"
+            "export default defineConfig({ webServer });\n"), [3200])
+
+    def test_value_without_an_object_reads_nothing_after_it(self) -> None:
+        self.assertEqual(self.ports_of(
+            "export default { webServer: makeServer, use: { port: 9229 } }"), [])
+        self.assertEqual(self.ports_of(
+            "const webServer = makeServer()\n"
+            "export default { use: { baseURL: 'http://localhost:9230' } }\n"), [])
+        self.assertEqual(self.ports_of(
+            "if (webServer === undefined) { x = { port: 9231 } }"), [])
+
+    def test_matches_inside_a_scanned_value_are_not_rescanned(self) -> None:
+        # Review of 0.16.2: nested `webServer: {` matches each rescanned the
+        # whole window (seconds on a 120 KB file).
+        calls = []
+        real = doctor._balanced_value
+
+        def counting(text, start):
+            calls.append(start)
+            return real(text, start)
+
+        with mock.patch.object(doctor, "_balanced_value", counting):
+            self.ports_of("webServer: {" * 10000)
+        # One read per window of the unbalanced value, not one per match.
+        self.assertLessEqual(len(calls), len("webServer: {") * 10000 // doctor.WEBSERVER_WINDOW + 1)
 
     def test_no_config_no_ports(self) -> None:
         self.assertEqual(doctor.webserver_ports(self.root), [])

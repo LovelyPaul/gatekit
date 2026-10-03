@@ -209,16 +209,26 @@ def axis_project_state(root) -> dict:
 # `reuseExistingServer: true` the e2e tests run against whatever answers
 # there — in the 0.16.0 rehearsal, another project's app. The port is found
 # by a small scan, not by parsing JS/TS: comments are dropped, the value after
-# each `webServer:` is taken up to its balanced closing brace or bracket
-# (strings respected), and in it `port: <n>` / `url: '<scheme>://<host>:<n>'`
-# are read, also as the fallback after `||` or `??` (`process.env.PORT ||
-# 3000`). A port set only from a variable is not found.
+# each `webServer:` (or `webServer =`) is taken from its first `{` or `[` up
+# to the balanced closing brace or bracket (strings respected), and in it
+# `port: <n>` / `url: '<scheme>://<host>:<n>'` are read, also as the fallback
+# after `||` or `??` (`process.env.PORT || 3000`). A value that does not open
+# with `{`/`[` (`process.env.CI ? undefined : { … }`) is searched for one up
+# to its end; a `webServer` inside a value already read is not read again. A
+# port set only from a variable is not found.
 PLAYWRIGHT_CONFIGS = tuple("playwright.config." + ext for ext in ("ts", "js", "mjs", "cjs"))
 #: Also searched (recursively) for Playwright configs.
 E2E_CONFIG_DIR = ("spec", "design", "e2e")
 #: Most characters of one `webServer` value read; an unbalanced value stops here.
 WEBSERVER_WINDOW = 8000
-_WEBSERVER_RE = re.compile(r"\bwebServer\s*:\s*")
+#: `webServer: <value>` in an object, `webServer = <value>` in a declaration
+#: (not `==`, `===` or `=>`).
+_WEBSERVER_RE = re.compile(r"\bwebServer\s*(?::|=(?![=>]))\s*")
+#: A line break at depth 0 continues the value only next to these (a
+#: ternary or `||` chain split over lines); otherwise it ends it.
+_CONTINUES_BEFORE = frozenset("?:|&=(+-*/,")
+_CONTINUES_AFTER = frozenset("?:|&.")
+_NEXT_CHAR_RE = re.compile(r"\s*(\S)")
 _FALLBACK = r"(?:[^,;{}\[\]\n]*?(?:\|\||\?\?)\s*)?"
 _PORT_RE = re.compile(r"\bport\s*:\s*" + _FALLBACK + r"(\d{1,5})\b")
 _URL_PORT_RE = re.compile(
@@ -293,6 +303,49 @@ def _balanced_value(text: str, start: int) -> str:
     return text[start:limit]
 
 
+def _value_open(text: str, start: int) -> tuple:
+    """``(open, end)`` for the ``webServer`` value starting at *start*: the
+    index of the first ``{``/``[`` in it (-1 when there is none) and how far
+    the search read. The value ends at a ``,`` or ``;`` or a closing
+    brace, bracket or parenthesis at depth 0, or at a line break at depth 0
+    that no operator joins to the next line (strings respected); at most
+    :data:`WEBSERVER_WINDOW` characters are read."""
+    depth = 0
+    quote = None
+    last = ""
+    limit = min(len(text), start + WEBSERVER_WINDOW)
+    i = start
+    while i < limit:
+        ch = text[i]
+        if quote:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                quote = None
+        elif ch in "'\"`":
+            quote = ch
+        elif ch in "{[":
+            return i, i
+        elif ch == "(":
+            depth += 1
+        elif ch in ")}]":
+            if depth == 0:
+                return -1, i
+            depth -= 1
+        elif depth == 0 and ch in ",;":
+            return -1, i
+        elif depth == 0 and ch == "\n":
+            after = _NEXT_CHAR_RE.match(text, i)
+            if last not in _CONTINUES_BEFORE and not (
+                    after and after.group(1) in _CONTINUES_AFTER):
+                return -1, i
+        if not ch.isspace():
+            last = ch
+        i += 1
+    return -1, limit
+
+
 def _playwright_configs(root) -> list:
     found = [root / name for name in PLAYWRIGHT_CONFIGS if (root / name).is_file()]
     e2e = root.joinpath(*E2E_CONFIG_DIR)
@@ -312,8 +365,17 @@ def webserver_ports(root) -> list:
             text = _strip_js_comments(path.read_text(encoding="utf-8", errors="replace"))
         except OSError:
             continue
+        read_to = 0
         for match in _WEBSERVER_RE.finditer(text):
-            window = _balanced_value(text, match.end())
+            if match.start() < read_to:
+                # Inside a value already read: reading it again finds
+                # nothing new and, nested, costs a window per match.
+                continue
+            opened, read_to = _value_open(text, match.end())
+            if opened < 0:
+                continue
+            window = _balanced_value(text, opened)
+            read_to = opened + len(window)
             for regex in (_PORT_RE, _URL_PORT_RE):
                 for found in regex.findall(window):
                     port = int(found)
