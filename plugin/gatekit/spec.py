@@ -171,6 +171,8 @@ MESSAGES = {
         "crit_argv": "완료 기준 {id}의 argv는 비어 있지 않은 문자열 리스트여야 합니다.",
         "crit_expect": "완료 기준 {id}의 expect 가 잘못되었습니다: {detail}",
         "crit_tier": "완료 기준 {id}의 tier 는 \"turn\" 또는 \"verify\" 여야 합니다 (현재 {tier}).",
+        "crit_no_turn": "\"tier\": \"turn\" 인 완료 기준이 없습니다. 빌드 중 Stop 게이트가 턴 끝에서 아무것도 판정하지 않습니다. 배선(wiring)·스크린샷·단위 테스트·정적 검사 기준은 turn 에 두세요 (ADR-0024).",
+        "crit_screenshot_verify": "스크린샷 기준 {id} 가 \"tier\": \"verify\" 입니다. 빌드 중 화면 확인이 /gatekit:verify 까지 미뤄집니다. turn 에 두세요 (ADR-0024).",
         "crit_not_done_section": "\"완료로 보지 않는 조건\" 절이 없습니다.",
         "trace_missing": "작업 {id}를 참조하는 완료 기준이 없습니다.",
         "progress_stale": "PROGRESS.md 가 마지막 잡 결과({job} · {when})보다 오래되었습니다. 세션이 중간에 끊긴 흔적입니다. `jobs results` 로 확인하고 갱신하세요.",
@@ -238,6 +240,8 @@ MESSAGES = {
         "crit_argv": "Criterion {id} needs argv to be a non-empty list of strings.",
         "crit_expect": "Criterion {id} has an invalid expect: {detail}",
         "crit_tier": "Criterion {id} has tier {tier}; it must be \"turn\" or \"verify\".",
+        "crit_no_turn": "No criterion has \"tier\": \"turn\", so the Stop gate judges nothing at turn end during a build. Keep the wiring, screenshot, unit-test and static criteria in turn (ADR-0024).",
+        "crit_screenshot_verify": "Screenshot criterion {id} has \"tier\": \"verify\", so no screen is checked until /gatekit:verify. Keep it in turn (ADR-0024).",
         "crit_not_done_section": "The \"not counted as done\" section is missing.",
         "trace_missing": "No completion criterion references task {id}.",
         "progress_stale": "PROGRESS.md is older than the latest job result ({job} · {when}); a session was cut short. Check `jobs results` and update it.",
@@ -755,6 +759,11 @@ def _check_tasks(text: str, lang: str) -> List[dict]:
 # --------------------------------------------------------------------------
 
 
+#: The screenshot criterion is the one whose artifacts are the build
+#: screenshots (`spec-kit/gate-criteria.md`, ADR-0017 decision 9).
+_SCREENSHOT_ARTIFACT_RE = re.compile(r"(^|/)spec/design/build-[^/]+\.png$")
+
+
 def _check_criteria(text: str, lang: str) -> List[dict]:
     name = "05-gate.md"
     findings: List[dict] = []
@@ -810,6 +819,21 @@ def _check_criteria(text: str, lang: str) -> List[dict]:
             if contract_mod.validate_tier(crit["tier"], cid):
                 findings.append(_finding(name, V.FAIL, _msg(
                     lang, "crit_tier", id=cid, tier=json.dumps(crit["tier"], ensure_ascii=False))))
+
+    # Review of ADR-0024: tiers that switch the build's Stop gate off are a
+    # warning, not a failure — `/gatekit:verify` still judges everything.
+    if criteria:
+        def tier_of(crit: dict) -> str:
+            return crit.get("tier") if crit.get("tier") in ("turn", "verify") else "turn"
+
+        if not any(tier_of(c) == "turn" for _, c in criteria):
+            findings.append(_finding(name, V.WARN, _msg(lang, "crit_no_turn")))
+        for _, crit in criteria:
+            arts = crit.get("artifacts") if isinstance(crit.get("artifacts"), list) else []
+            if tier_of(crit) == "verify" and any(
+                    isinstance(a, str) and _SCREENSHOT_ARTIFACT_RE.search(a) for a in arts):
+                findings.append(_finding(name, V.WARN, _msg(
+                    lang, "crit_screenshot_verify", id=crit.get("id"))))
 
     not_done = _not_done_heading(lang)
     if not_done not in set(_present_headings(text)):

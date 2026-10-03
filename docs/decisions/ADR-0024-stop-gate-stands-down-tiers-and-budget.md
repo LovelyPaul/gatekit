@@ -212,6 +212,17 @@ changes.
    there is nothing left to run, so the gate records it and stands down. An
    allow under `stop_hook_active` with such tasks is never a recorded
    verdict.
+4. **An all-`verify` contract is said out loud.** Tiering every criterion
+   `verify` switched the build's Stop gate off without a word. `spec
+   validate` now warns (`warn`, not `fail`: `/gatekit:verify` still judges
+   everything) when no criterion is `turn`, and when the screenshot
+   criterion — the one whose `artifacts` are `spec/design/build-*.png` — is
+   `verify`. No field marks the wiring criterion, so it is not checked.
+   `/gatekit:gate` shows each criterion's tier in its approval table. While
+   the build has nothing in the turn tier, the prompt hook's context line
+   says turn ends judge nothing, and a Stop block message says so too.
+   The Stop gate's allow itself stays silent: it has no output channel both
+   hosts are known to show.
 
 ## Consequences
 

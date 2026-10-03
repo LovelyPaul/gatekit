@@ -1053,5 +1053,79 @@ class TestUnpassedTasksAreNotAHandoffOk(Project):
         self.assertIsNone(self.stop())
 
 
+class TestTurnTierWarnings(unittest.TestCase):
+    """Review of ADR-0024: tiering every criterion `verify` silently turns the
+    build's Stop gate off, so `spec validate` warns (never fails)."""
+
+    def setUp(self) -> None:
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = pathlib.Path(self._tmp.name) / "case"
+        shutil.copytree(FIXTURES / "valid-en", self.root)
+        self.gate = self.root / "spec" / "05-gate.md"
+
+    def tearDown(self) -> None:
+        self._tmp.cleanup()
+
+    def gate_findings(self, lang: str = "en") -> list:
+        return [f for f in spec.validate(self.root, lang)["findings"]
+                if f["file"] == "05-gate.md"]
+
+    def tier_all(self, tier: str) -> None:
+        text = self.gate.read_text(encoding="utf-8")
+        self.gate.write_text(text.replace('"argv":', '"tier": "%s", "argv":' % tier),
+                             encoding="utf-8")
+
+    def test_no_turn_criterion_warns(self) -> None:
+        self.tier_all("verify")
+        found = self.gate_findings()
+        self.assertTrue(any(f["verdict"] == "warn" and "turn" in f["message"] for f in found))
+        self.assertFalse(any(f["verdict"] == "fail" for f in found))
+
+    def test_korean_no_turn_warning(self) -> None:
+        self.tier_all("verify")
+        found = self.gate_findings("ko")
+        self.assertTrue(any(f["verdict"] == "warn" and "turn" in f["message"]
+                            and "기준" in f["message"] for f in found))
+
+    def test_a_turn_criterion_does_not_warn(self) -> None:
+        text = self.gate.read_text(encoding="utf-8")
+        self.gate.write_text(text.replace('"argv":', '"tier": "verify", "argv":', 1),
+                             encoding="utf-8")
+        self.assertFalse(any(f["verdict"] == "warn" and "turn" in f["message"]
+                             for f in self.gate_findings()))
+
+    def test_verify_tier_screenshot_criterion_warns(self) -> None:
+        text = self.gate.read_text(encoding="utf-8")
+        shot = ("```gatekit-criterion\n" + json.dumps(
+            {"id": "screenshots", "tier": "verify", "argv": ["npx", "playwright", "test"],
+             "artifacts": ["spec/design/build-t1.png"]}) + "\n```\n\n")
+        self.gate.write_text(text.replace("```gatekit-criterion", shot + "```gatekit-criterion", 1),
+                             encoding="utf-8")
+        found = self.gate_findings()
+        self.assertTrue(any(f["verdict"] == "warn" and "screenshots" in f["message"]
+                            for f in found))
+        self.assertFalse(any(f["verdict"] == "fail" for f in found))
+
+
+class TestNoTurnTierIsSaid(Project):
+    def test_context_line_says_nothing_is_judged(self) -> None:
+        self.write_contract(counting("suite", tier="verify"))
+        self.prompt(BUILD_PROMPT)
+        self.stop()
+        text = prompt_gate.build_context(self.root, self.led())
+        self.assertIn("no turn-tier criteria", text)
+
+    def test_block_message_says_nothing_is_judged(self) -> None:
+        self.write_contract(counting("suite", tier="verify"))
+        self.prompt(BUILD_PROMPT)
+        self.make_job({"t1": "failed"})
+        self.assertIn("no turn-tier criteria", self.stop()["reason"])
+
+    def test_no_line_with_a_turn_criterion(self) -> None:
+        self.write_contract(counting("fast"), counting("suite", tier="verify"))
+        self.prompt(BUILD_PROMPT)
+        self.assertNotIn("no turn-tier", prompt_gate.build_context(self.root, self.led()))
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

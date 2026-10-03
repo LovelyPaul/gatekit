@@ -96,9 +96,12 @@ approval. Everything else is information for the user, not a block.
 ## Step 5 — show the criteria
 
 Present every criterion to the user in `output_lang`, as a table: id, what it
-proves, the exact command, and its baseline class. Flag each `already_passes`
-as "passes before any work — confirm it tests new behaviour". Then state
-plainly what approval changes:
+proves, the exact command, its tier (`turn`: judged at every turn end during
+the build; `verify`: only in `/gatekit:verify`), and its baseline class. Flag
+each `already_passes` as "passes before any work — confirm it tests new
+behaviour". If `spec validate` warned that no criterion is `turn` or that the
+screenshot criterion is `verify`, say so: the build's turn ends would then
+check nothing, or no screen. Then state plainly what approval changes:
 
 > Approving pins the hash of this file. From that point the write gate stops
 > blocking edits outside `spec/`, so source files can be written. The Stop hook

@@ -97,6 +97,14 @@ _MESSAGES = {
         "stood_down_tier": "turn-tier",
         "stood_down_all": "contract",
         "stood_down_extra": ", {count} deferred to /gatekit:verify",
+        "no_turn_tier": (
+            "  no turn-tier criteria: the Stop gate judges nothing at turn end "
+            "during the build; /gatekit:verify runs them"
+        ),
+        "no_turn_tier_line": (
+            "stop gate: no turn-tier criteria — turn ends during the build judge "
+            "nothing; /gatekit:verify runs them"
+        ),
         "budget_pending": (
             "stop gate: Stop-gate budget left criteria unjudged (unverified, not ok): "
             "{ids} — the next turn end runs them first"
@@ -151,6 +159,14 @@ _MESSAGES = {
         "stood_down_tier": "turn 등급",
         "stood_down_all": "계약",
         "stood_down_extra": ", {count}개는 /gatekit:verify 로 미룸",
+        "no_turn_tier": (
+            "  turn 등급 기준 없음: 빌드 중 Stop 게이트는 턴 끝에서 아무것도 "
+            "판정하지 않음, /gatekit:verify 가 실행"
+        ),
+        "no_turn_tier_line": (
+            "stop 게이트: turn 등급 기준 없음 — 빌드 중 턴 끝은 아무것도 판정하지 "
+            "않음, /gatekit:verify 가 실행"
+        ),
         "budget_pending": (
             "stop 게이트: Stop 예산 소진으로 판정하지 못한 기준(미검증, ok 아님): "
             "{ids} — 다음 턴 끝에 먼저 실행"
@@ -266,6 +282,9 @@ def stand_down_line(root, led: "ledger.Ledger") -> str:
         pending = contract.budget_deferred_ids({"deferred": stop_state.get("deferred")})
         if pending and led.data.get("active_pipeline") in ENFORCED_PIPELINES:
             return _message(lang, "budget_pending", ids=", ".join(pending))
+        if (led.data.get("active_pipeline") == "build" and contract.tier_scope(root)
+                and not contract.tier_scope(root, BUILD_TIERS)):
+            return _message(lang, "no_turn_tier_line")
         return ""
     extra = ""
     if stood.get("pipeline") == "build":
@@ -305,6 +324,8 @@ def _only_budget_deferred(result: Dict[str, Any]) -> bool:
 
 def _deferred_lines(lang: str, result: Dict[str, Any], budget_s: Optional[float]) -> List[str]:
     lines = []
+    if _nothing_in_scope(result):
+        lines.append(_message(lang, "no_turn_tier"))
     deferred = result.get("deferred") or []
     by_tier = [str(d.get("id")) for d in deferred if d.get("reason") == "tier"]
     by_budget = [str(d.get("id")) for d in deferred if d.get("reason") == "budget"]
