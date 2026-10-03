@@ -70,7 +70,7 @@ UI가 있는 프로젝트는 `/gatekit:mockup`이 실제로 클릭 가능한 HTM
 
 `spec/05-gate.md`의 `gatekit-criterion` 펜스들을 `.gatekit/contract.json`으로 파생시킨 것이다. 각 기준은 셸 없이 실행되는 argv 리스트, 기대 종료 코드, 개별 타임아웃, 산출물 목록으로 이루어진다.
 
-`contract run`이 프로젝트 루트를 작업 디렉터리로 각 기준을 실행한다. 전체 예산은 기본 45초이며 `gatekit-budget` 펜스로 최대 600초까지 올릴 수 있다. 타임아웃이나 예산 소진은 `unverified`이고 절대 `ok`가 아니다. 테스트 러너가 테스트를 하나도 돌리지 않고 성공으로 끝난 경우도 `unverified`다(ADR-0022). 기준의 argv가 가리키는 채점 파일 — argv[0]로 실행하는 스크립트, 또는 테스트처럼 생긴 파일(`tests/`·`e2e/` 등의 디렉터리 안, `test_*`·`*.test.*`·`*.spec.*` 같은 이름) — 은 `contract derive` 때 해시를 남기고, `05-gate.md`를 승인할 때 그 해시도 함께 고정된다. 승인 뒤 그 파일이 바뀌거나 사라지면 통과했더라도 `unverified`이고, 다시 derive만 해서는 풀리지 않는다(`grading_unapproved`). 의도한 변경이면 `/gatekit:gate`를 다시 실행해 재승인하고, 아니면 변경을 되돌린다. `grep … src/app.py`처럼 검사 대상인 소스 파일, `dist/` 같은 빌드 산출물, `npm test`처럼 파일을 가리키지 않거나 디렉터리·글롭만 가리키는 명령은 이 확인을 받지 않으므로, 확인을 원하면 argv에 테스트 파일을 적는다(ADR-0023). 선언한 산출물이 없으면 `fail`이다.
+`contract run`이 프로젝트 루트를 작업 디렉터리로 각 기준을 실행한다. 전체 예산은 기본 45초이며 `gatekit-budget` 펜스로 최대 600초까지 올릴 수 있다. 타임아웃이나 예산 소진은 `unverified`이고 절대 `ok`가 아니다. 테스트 러너가 테스트를 하나도 돌리지 않고 성공으로 끝난 경우도 `unverified`다(ADR-0022). 기준의 argv가 가리키는 채점 파일 — argv[0]로 실행하는 스크립트, 또는 테스트처럼 생긴 파일(`tests/`·`e2e/` 등의 디렉터리 안, `test_*`·`*.test.*`·`*.spec.*` 같은 이름) — 은 `contract derive` 때 해시를 남기고, `05-gate.md`를 승인할 때 그 해시도 함께 고정된다. 승인 뒤 그 파일이 바뀌거나 사라지면 통과했더라도 `unverified`이고, 다시 derive만 해서는 풀리지 않는다(`grading_unapproved`). 의도한 변경이면 `/gatekit:gate`를 다시 실행해 재승인하고, 아니면 변경을 되돌린다. `grep … src/app.py`처럼 검사 대상인 소스 파일, `spec/tokens.json`·`spec/02-design.md`처럼 최상위 `spec/` 아래의 명세 파일(이 폴더에서는 `user_spec.rb`처럼 이름이 테스트 모양인 파일만 센다), `dist/` 같은 빌드 산출물, `npm test`처럼 파일을 가리키지 않거나 디렉터리·글롭만 가리키는 명령은 이 확인을 받지 않으므로, 확인을 원하면 argv에 테스트 파일을 적는다(ADR-0023). 선언한 산출물이 없으면 `fail`이다.
 
 **이게 없으면**: "완료"가 모델의 자기 보고로만 존재한다.
 

@@ -434,10 +434,21 @@ def grading_patterns() -> Dict[str, tuple]:
 
 
 def _test_shaped(rel: str, patterns: Dict[str, tuple]) -> bool:
+    """True when *rel* looks like a test file.
+
+    Under gatekit's own top-level ``spec/`` only a test-shaped basename counts
+    (``spec/models/user_spec.rb`` does, ``spec/tokens.json`` and
+    ``spec/02-design.md`` do not): that folder holds the specification, which
+    a design or token update legitimately changes after approval (ADR-0023
+    review F3). A nested ``spec/`` is still a test directory.
+    """
     parts = rel.lower().split("/")
+    by_name = any(fnmatch.fnmatchcase(parts[-1], glob) for glob in patterns["basenames"])
+    if len(parts) > 1 and parts[0] == paths.SPEC_DIRNAME.lower():
+        return by_name
     if any(part in patterns["dirs"] for part in parts[:-1]):
         return True
-    return any(fnmatch.fnmatchcase(parts[-1], glob) for glob in patterns["basenames"])
+    return by_name
 
 
 #: ``file:12`` / ``file:12:5`` (vitest, jest) and pytest's ``[param]`` suffix.

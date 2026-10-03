@@ -958,6 +958,24 @@ class TestGradingFilesChangedSinceApproval(TempProject):
         self.assertEqual(result["verdict"], "unverified")
         self.assertTrue(any("grading file changed" in r for r in result["reasons"]))
 
+    def test_a_design_or_token_update_in_spec_stays_ok(self) -> None:
+        # Review F3: gatekit's own spec/ folder is not a test directory, so
+        # updating spec/tokens.json after approval (and re-deriving, since it
+        # is a contract input) does not hold the criterion that reads it.
+        tokens = self.root / "spec" / "tokens.json"
+        tokens.write_text('{"color": "red"}\n', encoding="utf-8")
+        script = self.root / "scripts" / "read.py"
+        script.parent.mkdir()
+        script.write_text("import sys\nopen(sys.argv[1]).read()\n", encoding="utf-8")
+        self.write_gate({"id": "c", "argv": [PY, "scripts/read.py", "spec/tokens.json"]})
+        contract.derive(self.root)
+        self.assertEqual(contract.load(self.root)["criteria"][0]["grading"], {})
+        approval.approve(self.root, "spec/05-gate.md")
+        tokens.write_text('{"color": "blue"}\n', encoding="utf-8")
+        contract.derive(self.root)  # tokens.json is a contract input
+        self.assertEqual(contract.unapproved_grading(self.root), [])
+        self.assertEqual(self.only()["verdict"], "ok")
+
     def test_the_hint_survives_the_reason_cut(self) -> None:
         # F3: the instruction comes first, the paths last, so the 120-char
         # cut in `reasons` drops paths, never the instruction.

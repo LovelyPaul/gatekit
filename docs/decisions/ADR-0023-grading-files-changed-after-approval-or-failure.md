@@ -64,6 +64,13 @@ inside the project root **and** either
 - it looks like a test: a directory segment `test`, `tests`, `__tests__`,
   `spec` or `e2e`, or a basename matching `test_*`, `*_test.*`, `*.test.*`,
   `*.spec.*`, `*_spec.*` or `conftest.py` (case-insensitive).
+  *Amended after review:* under gatekit's own top-level `spec/` only the
+  basename counts. `spec` as a directory segment also matched the
+  specification folder, so `cat spec/tokens.json` or `node scripts/check.js
+  spec/02-design.md` named grading files, and a legitimate design or token
+  update after approval held those criteria `unverified`. RSpec-style
+  `spec/models/user_spec.rb` still counts by its name; a nested `spec/`
+  (`app/spec/helper.rb`) is still a test directory.
 
 Nothing under a build-output or dependency directory (`node_modules`,
 `.venv`, `venv`, `dist`, `build`, `out`, `.next`, `coverage`, `target`,

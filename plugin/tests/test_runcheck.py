@@ -465,6 +465,25 @@ class TestGradingFiles(unittest.TestCase):
             with self.subTest(rel=rel):
                 self.assertEqual(self.files(["runner", rel]), [rel])
 
+    def test_gatekit_spec_folder_counts_only_test_shaped_basenames(self) -> None:
+        # Review F3: `spec` as a test directory also matched gatekit's own
+        # top-level spec/, so a design or token update after approval held
+        # back the criteria that read those files.
+        for rel in ("spec/tokens.json", "spec/02-design.md", "spec/05-gate.md",
+                    "spec/e2e/flow.json", "spec/models/user_spec.rb",
+                    "spec/test_login.py", "app/spec/helper.rb", "scripts/check.js"):
+            self.write(rel)
+        self.assertEqual(self.files(["cat", "spec/tokens.json"]), [])
+        self.assertEqual(self.files(["node", "scripts/check.js", "spec/02-design.md"]), [])
+        self.assertEqual(self.files(["runner", "spec/05-gate.md", "spec/e2e/flow.json"]), [])
+        self.assertEqual(self.files(["rspec", "spec/models/user_spec.rb"]),
+                         ["spec/models/user_spec.rb"])
+        self.assertEqual(self.files(["pytest", "spec/test_login.py"]), ["spec/test_login.py"])
+        # A nested spec/ is still a test directory; argv[0] is still a script.
+        self.assertEqual(self.files(["ruby", "app/spec/helper.rb"]), ["app/spec/helper.rb"])
+        self.write("spec/check.sh")
+        self.assertEqual(self.files(["spec/check.sh"]), ["spec/check.sh"])
+
     def test_build_and_dependency_directories_never_count(self) -> None:
         for rel in ("dist/tests/app.test.js", "node_modules/.bin/vitest",
                     ".venv/bin/pytest", "build/test_x.py"):
