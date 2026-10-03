@@ -75,9 +75,10 @@ python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract derive
 
 `spec validate` must not be `fail` before you continue. `contract derive` writes `.gatekit/contract.json` with the source hash of `05-gate.md`.
 
-Then run every criterion once against the current tree (ADR-0022). Skip this
-only if you already ran it while measuring the budget and changed nothing but
-the `gatekit-budget` fence since:
+Then run every criterion once against the current tree (ADR-0022), every
+time, so `baseline.json` matches the `05-gate.md` you approve. The tree is the
+pre-work one, and anything a criterion creates there (build output, a database
+file) stays; say so to the user before running it:
 
 ```
 python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" contract baseline
