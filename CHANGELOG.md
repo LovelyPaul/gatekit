@@ -4,6 +4,35 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.15.0 — 2026-10-03
+
+gatekit notices when the files that grade the work change (ADR-0023). Nothing
+is blocked: refining a gate or a test mid-build keeps working.
+
+### Changed
+
+- **A criterion whose test file changed since approval is `unverified`.**
+  `contract derive` hashes the files each criterion's argv names inside the
+  project (a script, a spec file, a pytest node id's file). If one of them
+  changes or disappears afterwards, a criterion that would pass is
+  `unverified` with "grading file changed since approval: <path> —
+  re-derive and re-approve 05-gate if the change is intended". A failing
+  criterion stays `fail`. A command that names no file (`npm test`) is not
+  covered; name the spec file in argv to cover it.
+
+### Added
+
+- **Tasks that pass only after their own test changed are flagged.** Each
+  gate in `gates.json` records the hashes of the files its argv names. When
+  a task passes after a failed attempt in the same job, and a file of a gate
+  that failed has changed since, `status.json` records
+  `grading_changed_after_failure`. `jobs status` appends `(grading changed
+  after failure: <paths>)` and `results --compact` appends
+  `grading-changed=<paths>`, and `/gatekit:verify` reports it as a warning:
+  "passed only after its own test changed — review the diff of <paths>".
+  The task stays `passed`. This works the same for worker attempts,
+  `redelegate`, `jobs complete` and `jobs recheck`.
+
 ## 0.14.0 — 2026-10-03
 
 Gates that cannot run yet stop looking broken, a run of zero tests stops
