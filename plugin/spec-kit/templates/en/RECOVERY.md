@@ -30,7 +30,7 @@ One step at a time, in order. Do not skip ahead.
 |---|---|---|
 | Consecutive failures of one task | 3 (the first attempt plus `build.max_retries` retries, default 2) | `jobs redelegate` and `jobs complete` refuse a fourth attempt with exit 3; `jobs start` already refuses a task with 2. Stop and report to a human. |
 | The same failure twice in a row | 2 | Exit 3 even with retries left: identical gate output means retrying unchanged will not converge. Decide whether the gate or the instruction is wrong. |
-| Stop-hook blocks | 3 | Release the block and record `final_verdict`; for a finished job the hook then stands down until `/gatekit:build` or `/gatekit:verify`. Never loop forever. |
+| Stop-hook blocks | 3 | Release the block and record `final_verdict`; for a finished job the hook then stands down until `/gatekit:build` or `/gatekit:verify`. A job left with tasks `queued` is never finished, so the hook judges every turn: end it with `jobs stop`. Never loop forever. |
 | Re-testing the same hypothesis | 1 | If the same hypothesis fails twice, change the hypothesis. |
 
 The counts follow the task across jobs and are kept in `.gatekit/attempts.json`;

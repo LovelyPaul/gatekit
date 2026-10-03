@@ -223,6 +223,13 @@ changes.
    says turn ends judge nothing, and a Stop block message says so too.
    The Stop gate's allow itself stays silent: it has no output channel both
    hosts are known to show.
+5. **An unfinished host job says how to end it.** A host-execution job whose
+   tasks are left `queued` never settles, so the gate judges every turn, as
+   decision 1 intends for a live build. When that build was abandoned, the
+   prompt hook's context line now adds ``build job unfinished: N tasks queued
+   — `jobs stop` ends judging`` (Korean under `ko`), and `RECOVERY.md` and
+   the manual say the same. `jobs stop` marks those tasks `stopped`, the job
+   settles, and the handoff records `fail` and stands down (amendment 3).
 
 ## Consequences
 

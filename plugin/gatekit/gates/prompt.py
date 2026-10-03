@@ -165,7 +165,7 @@ def build_context(root, led: "ledger.Ledger") -> str:
     # so a compaction can take the narrative with it. Name the live job and the
     # next task; spec/PROGRESS.md holds the rest (written by the PreCompact
     # hook). An unfinished job is the only one worth reporting.
-    build = _live_build(root)
+    build = _live_build(root, led.output_lang)
     if build:
         parts.append(build)
 
@@ -182,7 +182,15 @@ def _stand_down_line(root, led: "ledger.Ledger") -> str:
         return ""
 
 
-def _live_build(root) -> str:
+#: Review of ADR-0024: a host job whose tasks stay `queued` never settles, so
+#: the Stop gate keeps judging every turn. Say how to end it.
+_UNFINISHED = {
+    "en": "build job unfinished: {count} tasks queued — `jobs stop` ends judging",
+    "ko": "빌드 잡 미완료: 대기 {count}개 — `jobs stop` 으로 판정 종료",
+}
+
+
+def _live_build(root, lang: str = "en") -> str:
     """``build=<job> n/m passed, next: <task>`` for an unfinished job, else ""."""
     try:
         from gatekit import jobs
@@ -197,7 +205,7 @@ def _live_build(root) -> str:
         task_ids = [str(t) for t in (job.get("tasks") or [])]
         if not task_ids:
             return ""
-        passed, next_task = 0, ""
+        passed, queued, next_task = 0, 0, ""
         for task_id in task_ids:
             state = str((jobs.read_json(
                 jdir / "tasks" / task_id / "status.json", {}) or {}).get("state", "queued"))
@@ -205,9 +213,13 @@ def _live_build(root) -> str:
                 passed += 1
             elif not next_task:
                 next_task = task_id
+            if state == "queued":
+                queued += 1
         line = "build=%s %d/%d passed" % (job_id, passed, len(task_ids))
         if next_task:
             line += ", next: %s" % next_task
+        if queued:
+            line += "; " + _UNFINISHED.get(lang, _UNFINISHED["en"]).format(count=queued)
         return line
     except Exception:
         # The context line is a convenience; never let it break the hook.

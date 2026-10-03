@@ -1127,5 +1127,35 @@ class TestNoTurnTierIsSaid(Project):
         self.assertNotIn("no turn-tier", prompt_gate.build_context(self.root, self.led()))
 
 
+class TestUnfinishedJobLine(Project):
+    """Review of ADR-0024: a host job left with queued tasks keeps the gate
+    judging every turn; the context line says how to end it."""
+
+    def test_english(self) -> None:
+        self.write_contract(counting("c"))
+        self.prompt(BUILD_PROMPT)
+        self.make_job({"t1": "passed", "t2": "queued", "t3": "queued"})
+        text = self.prompt("next?")["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("build job unfinished: 2 tasks queued", text)
+        self.assertIn("`jobs stop` ends judging", text)
+        self.assertLessEqual(len(text), hookio.MAX_CONTEXT_CHARS)
+
+    def test_korean(self) -> None:
+        self.write_contract(counting("c"))
+        self.prompt(BUILD_PROMPT)
+        self.set_lang("ko")
+        self.make_job({"t1": "queued"})
+        text = self.prompt("다음은 무엇인가요?")["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("`jobs stop`", text)
+        self.assertIn("대기 1개", text)
+        self.assertLessEqual(len(text), hookio.MAX_CONTEXT_CHARS)
+
+    def test_no_queued_task_no_line(self) -> None:
+        self.write_contract(counting("c"))
+        self.prompt(BUILD_PROMPT)
+        self.make_job({"t1": "passed", "t2": "running"})
+        self.assertNotIn("jobs stop", prompt_gate.build_context(self.root, self.led()))
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()
