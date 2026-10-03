@@ -4,6 +4,52 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.16.0 — 2026-10-03
+
+The Stop gate stops costing the session after the build is over (ADR-0024).
+Measured on a real 10-task build: coding took 50 minutes, then the session ran
+3 h 47 min more, 64% of it re-running the full completion contract at every
+turn end — Q&A turns and unplanned follow-up features included — because the
+build pipeline never ended.
+
+### Changed
+
+- **The Stop gate stands down after the build.** While a build job is
+  unfinished it judges as before; once the job's last task is settled it
+  judges one handoff, and when that verdict is recorded (a pass, or the
+  final verdict after three blocks) it stops running the contract for the rest
+  of the session. `/gatekit:build` or `/gatekit:verify` re-arms it. The prompt
+  context line says follow-up edits are not gated and `/gatekit:verify`
+  re-checks. A settled job with a failed or blocked task is not a handoff
+  pass; a job left with queued tasks keeps the gate judging, and the context
+  line names `jobs stop`.
+- **Criterion tiers.** A `gatekit-criterion` may set `"tier": "verify"` (default
+  `"turn"`). The Stop gate during a build runs only `turn` criteria and lists
+  `verify` ones as deferred, never as passed; `contract run`, `/gatekit:verify`
+  and `contract baseline` run every tier. The approval table shows the tier,
+  and `spec validate` warns when no criterion is `turn` or the screenshot
+  criterion is `verify`. Guidance: the full regression suite that repeats the
+  task gates belongs in `verify`.
+- **A Stop-gate budget, `stop.budget_s`** (default 120 s, at most 570 s). The
+  Stop gate starts no criterion past it. A run cut short is `unverified`,
+  never a pass, never stands the gate down and never blocks; the next turn end
+  runs the unjudged criteria first and, on an unchanged tree, keeps what was
+  already judged. A criterion that ran and failed, timed out or ran no tests
+  still blocks. A cut run's result is never reused as a full judgement.
+- **A worker cannot approve through the shell.** Inside a worker session (`GATEKIT_TASK_ID` set), the Bash gate denies any command that runs `gatekit approve`, including `env -u GATEKIT_TASK_ID python3 …/gatekit.py approve …`, quoted or `${CLAUDE_PLUGIN_ROOT}` paths, `-m gatekit`, `sh -c`, `eval` and `xargs`. `approve check` and `approve list` stay allowed (ADR-0023).
+- **`--force-retry` keeps the failed grading hashes.** It resets a task's failure count and repeats, but a task that fails, has its test loosened, is force-retried and then passes is still flagged `grading changed after failure`.
+- **gatekit's own `spec/` folder is not a test directory.** Under the top-level `spec/`, only test-shaped names (`*_spec.*`, `test_*`, …) count as grading files. Updating `spec/tokens.json` or `spec/02-design.md` after approval no longer holds back the criteria that read them.
+- **Host builds call `jobs complete` once.** `/gatekit:build` no longer pre-runs a task's gate commands before `jobs complete` runs them again (measured 24–62 s per task, paid twice).
+- **Cheaper e2e task gates.** Task-gate guidance now recommends running only the task's spec on one viewport (`--project mobile`) against one reused server (`reuseExistingServer`). Task e2e gates that ran every project cost about 299 s per full pass.
+- **A "tasks not passed" block names the right rerun:** `jobs complete <task>`
+  under host execution, `jobs redelegate <task>` under worker execution.
+
+### Fixed
+
+- **A ledger whose `stop` record is not an object no longer disables the Stop
+  gate.** It is replaced by a blank record instead of making every Stop fail
+  open silently.
+
 ## 0.15.0 — 2026-10-03
 
 gatekit notices when the files that grade the work change (ADR-0023). Nothing
