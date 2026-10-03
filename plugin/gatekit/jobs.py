@@ -854,7 +854,7 @@ def _missing_for_preflight(gate: dict, argv, root, tasks):
         if dep:
             return {"path": "%s (installed into %s from %s)" % (dep["path"], dep["dir"],
                                                                  dep["manifest"]),
-                    "owner": dep["owner"], "manifest": False, "argv_named": False}
+                    "owner": dep["owner"], "manifest": False, "argv_named": True}
         if rel is None:
             return None  # a bare name on PATH: the "could not run" tail says it
         return {"path": rel, "owner": owner, "manifest": False, "argv_named": True}

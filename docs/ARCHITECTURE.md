@@ -676,7 +676,8 @@ ADR-0009 adds four rules to the runner:
   token named → `command_error`; both refusal messages then name the missing
   path and say no task in this job writes it (`package.json` for the
   manifest case, whatever npm printed first). When the owned path is one of
-  the gate's own arguments, `jobs start` prints one `note: <task>: gate
+  the gate's own arguments (a dependency-directory program covered through
+  its manifest included), `jobs start` prints one `note: <task>: gate
   `<name>` runs <path>, which task <id> writes …` line per task and records
   it in `job.json.preflight_notices` (not a warning: a typo'd path inside a
   broad scope now starts and fails after that task). Otherwise ADR-0009's

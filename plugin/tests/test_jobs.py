@@ -3021,6 +3021,10 @@ class TestNotYetRunnableReview(JobTestCase):
                 self.assertEqual(pre["gates"][0]["preflight"], "not_yet_runnable")
                 self.assertIn("shell", pre["gates"][0]["preflight_detail"])
                 self.assertIn(manifest, pre["gates"][0]["preflight_detail"])
+                # The program is the gate's own argv[0]: a typo in it only
+                # shows after the manifest task runs, so the notice names it.
+                self.assertEqual(len(job["preflight_notices"]), 1)
+                self.assertIn(program.lstrip("./"), job["preflight_notices"][0])
                 self.assertEqual(job["preflight_warnings"], [])
 
     def test_an_uninstalled_dependency_program_without_one_warns_and_starts(self) -> None:

@@ -107,9 +107,10 @@ tasks, using the write gate's own matcher (`gates/write.py: matches`), so
   applies the same rule, so both agree, with one mapping: baseline has no
   `suspicious` class, and an uninstalled dependency program no task
   provides for is `unverified` there, since nothing was judged.
-- When the covered path is one of the gate's own arguments, `jobs start`
-  prints one `note:` line per task naming the path and the task that writes
-  it. It is a notice, not a warning, and is recorded as
+- When the covered path is one of the gate's own arguments — including a
+  program inside a dependency directory, covered through its manifest —
+  `jobs start` prints one `note:` line per task naming the path and the task
+  that writes it. It is a notice, not a warning, and is recorded as
   `preflight_notices` in `job.json`.
 
 Refusal is deliberately *not* extended to every uncovered path. ADR-0009's
