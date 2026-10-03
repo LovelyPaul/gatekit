@@ -669,6 +669,9 @@ class TestApproveDetectionEveryName(unittest.TestCase):
             "python bin/gatebound.`py approve spec/05-gate.md",
             "pwsh -enc " + encoded("python bin/gatebound.py approve spec/05-gate.md"),
             "Remove-Item Env:GATEBOUND_TASK_ID; python bin/GateBound.py approve x",
+            # unlexable: the fallback reading covers the approval module too
+            "python -m gatebound.approval 'spec/05-gate.md",
+            "python -m gatekit.approval 'spec/05-gate.md",
         ):
             with self.subTest(cmd=cmd):
                 self.assertTrue(pwsh.invokes_gatekit_approve(cmd))
@@ -679,6 +682,7 @@ class TestApproveDetectionEveryName(unittest.TestCase):
             "python bin\\gatebound.py approve list",
             "python3 -m gatebound.approval check spec/05-gate.md",
             "python3 -m gatebound.approval list",
+            "python3 -m gatekit.approval check 'spec/05-gate.md",
             "python bin/gatebound.py jobs status",
             "Select-String -Pattern gatekit.approval -Path src/a.ts",
         ):

@@ -1703,6 +1703,9 @@ def _flatten(text: str) -> str:
 #: The fallback reading: a launcher or module of any name (ADR-0029).
 _GATEKIT_RE = re.compile(r"(?i)(?:^|[\s\\/=:])(?:-m)?%s(?:\.py|\.cli|\.__main__)?(?=\s)"
                          % _names.names_pattern())
+#: The fallback reading of ``-m <name>.approval``, whose arguments are approve's.
+_APPROVAL_RE = re.compile(r"(?i)(?:^|\s)-[a-z]*m\s*%s\.approval(?=\s|$)"
+                          % _names.names_pattern())
 _APPROVE_OPERANDS = ("--root", "--note", "--by")
 
 
@@ -1726,6 +1729,10 @@ def invokes_gatekit_approve(command: str) -> bool:
         for match in _GATEKIT_RE.finditer(flat):
             tail = re.split(r"[;|&\n]", flat[match.end():match.end() + 400], maxsplit=1)[0]
             if _approves(tail.split()):
+                return True
+        for match in _APPROVAL_RE.finditer(flat):
+            tail = re.split(r"[;|&\n]", flat[match.end():match.end() + 400], maxsplit=1)[0]
+            if _approves(["approve"] + tail.split()):
                 return True
     return False
 
