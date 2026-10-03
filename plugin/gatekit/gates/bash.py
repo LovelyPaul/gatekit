@@ -772,17 +772,14 @@ def extract_write_targets(command: str, cwd: Optional[str]) -> WriteTargets:
 #: ``gatekit approve`` options that take an operand.
 _APPROVE_OPERAND_OPTIONS = ("--root", "--note", "--by")
 
-#: Fallback for text the lexer cannot split: ``gatekit… approve`` not followed
-#: by ``check`` or ``list``.
+#: Fallback for text the lexer cannot split: ``gatekit… approve`` (also the
+#: ``.cli``/``.__main__`` modules) or ``-m gatekit.approval``, not followed by
+#: ``check`` or ``list`` — under every name (ADR-0029).
 _APPROVE_RE = re.compile(
-    names.names_pattern() + r"(?:\.py)?['\"]?\s+approve\b(?!\s+(?:check|list)\b)")
-
-
-def _is_gatekit_entry(words: List[str], index: int) -> bool:
-    """True when ``words[index]`` names the gatekit CLI (script, binary or module)."""
-    word = words[index]
-    base = posixpath.basename(word.replace("\\", "/"))
-    return base in names.launcher_names()  # either name, permanently (ADR-0029)
+    r"(?:" + names.names_pattern()
+    + r"(?:\.py|\.cli|\.__main__)?['\"]?\s+approve\b"
+    + r"|-[A-Za-z]*m\s*['\"]?" + names.names_pattern() + r"\.approval\b['\"]?)"
+    + r"(?!\s+(?:check|list)\b)")
 
 
 def _approve_records(args: List[str]) -> bool:
@@ -803,13 +800,17 @@ def _approve_records(args: List[str]) -> bool:
 def _words_invoke_approve(words: List[str], depth: int) -> bool:
     for index, word in enumerate(words):
         # Strings handed to ``bash -c``, ``eval`` and the like are commands too.
-        if depth < 4 and "approve" in word and (" " in word or "\t" in word):
+        if depth < 4 and "approv" in word and (" " in word or "\t" in word):
             if invokes_gatekit_approve(word, depth + 1):
                 return True
-        if not _is_gatekit_entry(words, index):
+        # Either name, permanently (ADR-0029); ``-m <name>.approval`` too.
+        kind = names.entry_kind(word, words[index - 1] if index else None)
+        if kind is None:
             continue
         rest = [w for w in words[index + 1:] if not _is_operator(w)]
-        if rest and rest[0] == "approve" and _approve_records(rest[1:]):
+        if kind == "approval" and _approve_records(rest):
+            return True
+        if kind == "cli" and rest and rest[0] == "approve" and _approve_records(rest[1:]):
             return True
     return False
 
@@ -822,7 +823,7 @@ def invokes_gatekit_approve(command: str, depth: int = 0) -> bool:
     shell and ``eval`` strings, and falls back to a pattern match when the text
     cannot be lexed.
     """
-    if "approve" not in command or not any(n in command for n in names.all_names()):
+    if "approv" not in command or not any(n in command for n in names.all_names()):
         return False
     tokens = _tokens(command)
     if tokens is None:

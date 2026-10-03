@@ -452,6 +452,34 @@ class TestWorkerNeverApproves(BashGateProject):
         self.assertTrue(bash_gate.invokes_gatekit_approve(
             "python3 bin/gatekit.py approve 'spec/05-gate.md"))  # unlexable: pattern fallback
 
+    def test_module_forms_are_denied(self) -> None:
+        # The approval module and the CLI module approve too (ADR-0028 integration
+        # with ADR-0029): both names, both module spellings.
+        for command in ("python3 -m gatekit.approval spec/05-gate.md",
+                        "python -m gatekit.cli approve spec/05-gate.md",
+                        "python3 -m gatekit.__main__ approve spec/05-gate.md",
+                        "python3 -mgatekit.approval spec/05-gate.md",
+                        "python3 -m gatebound.approval spec/05-gate.md",
+                        "python3 -m gatebound.cli approve spec/05-gate.md",
+                        "env -u GATEKIT_TASK_ID python3 -m gatekit.approval --note x spec/05-gate.md",
+                        "bash -c 'python3 -m gatekit.approval spec/05-gate.md'",
+                        "python3 -m gatekit.approval 'spec/05-gate.md"):  # unlexable
+            with self.subTest(command=command):
+                self.assertTrue(bash_gate.invokes_gatekit_approve(command), command)
+        self.assert_denied("python3 -m gatekit.approval spec/05-gate.md")
+        self.assert_denied("python -m gatebound.cli approve spec/05-gate.md")
+
+    def test_module_check_and_list_are_allowed(self) -> None:
+        for command in ("python3 -m gatekit.approval check spec/05-gate.md",
+                        "python3 -m gatekit.approval list",
+                        "python3 -m gatebound.approval --root . check spec/05-gate.md",
+                        "python -m gatekit.cli approve check spec/05-gate.md",
+                        "python -m gatebound.cli approve list",
+                        "python3 -m gatekit.cli jobs status",
+                        "python3 -m gatekit.approvals spec/05-gate.md"):
+            with self.subTest(command=command):
+                self.assertFalse(bash_gate.invokes_gatekit_approve(command), command)
+
     def test_check_and_list_are_allowed(self) -> None:
         self.assertIsNone(bash_gate.handle(self.event(
             "python3 ${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py approve check spec/05-gate.md")))

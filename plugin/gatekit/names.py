@@ -110,6 +110,47 @@ def launcher_names() -> Tuple[str, ...]:
     return tuple(out)
 
 
+#: ``python -m`` (``-m``, or short options ending in it such as ``-Im``).
+_MODULE_FLAG = re.compile(r"^-[A-Za-z]*m$")
+
+
+def entry_kind(word: str, prev: Optional[str] = "-m") -> Optional[str]:
+    """What running *word* starts, for the approve guards of the Bash and
+    PowerShell gates (ADR-0023, ADR-0028), under every name:
+
+    * ``"cli"`` — the CLI, whose next argument is the subcommand: a launcher
+      (``bin/gatebound.py``, ``gatekit``) or the module ``<name>``,
+      ``<name>.cli``, ``<name>.__main__``;
+    * ``"approval"`` — the approval module itself (``-m <name>.approval``),
+      whose arguments are ``approve``'s;
+    * ``None`` — anything else.
+
+    A dotted module counts only after ``-m`` — attached (``-mgatekit.cli``),
+    as *prev*, or when *prev* is computed (holds ``$``) — so ``grep
+    gatekit.approval src`` is no approval. Case is ignored."""
+    base = word.replace("\\", "/").lower().rsplit("/", 1)[-1]
+    if base in launcher_names():
+        return "cli"
+    if base.startswith("-m"):
+        base = base[2:]
+    elif prev is None or not (_MODULE_FLAG.match(prev) or "$" in prev):
+        return None
+    for name in all_names():
+        if base in (name, name + ".cli", name + ".__main__"):
+            return "cli"
+        if base == name + ".approval":
+            return "approval"
+    return None
+
+
+# --------------------------------------------------------------- 8.3 names
+def state_short_names() -> Tuple[Tuple[str, str], ...]:
+    """``(stem, dirname)`` per state directory: Windows gives ``.gatebound``
+    the 8.3 short name ``GATEBO~1`` (``.gatekit``: ``GATEKI~1``) — the first
+    six characters without the dot, ``~`` and a digit."""
+    return tuple((d[1:7], d) for d in state_dirnames())
+
+
 def names_pattern() -> str:
     """A regex alternation of every name."""
     return "(?:%s)" % "|".join(re.escape(n) for n in all_names())
