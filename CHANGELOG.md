@@ -4,6 +4,76 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.16.6 — 2026-10-04
+
+The PowerShell tool meets the same gates as Bash (ADR-0028), and gatekit
+reads both its current and its coming name (ADR-0029), so the rename to
+gatebound after the study changes nothing a project has already written.
+The PowerShell idea comes from a study member's Windows fork,
+github.com/yeoul9703/gatekit-cc-windows; only the idea is taken, the code is
+written here (clean-room rule).
+
+### Security
+
+- **A PowerShell gate.** Claude Code's `PowerShell` tool — on by default on
+  Windows, and the only shell there without Git Bash — was matched by no
+  gate, so on Windows every shell rule was a convention. It now meets the
+  same rules as Bash: spec before code, a task's `write_scope`, the
+  evaluator's `.gatekit/eval/**`, protected `.gatekit/` state before and
+  after approval, and "a worker never approves". A new static reader
+  (`gatekit/pwsh.py`) covers quoting, here-strings, escapes, redirects,
+  write cmdlets and aliases with abbreviated, colon and positional
+  parameters, working-directory changes, Windows path spellings, `[IO.File]`
+  calls, nested `iex`, `-Command` and `-EncodedCommand`; native commands are
+  read by the Bash reader. What it cannot read is opaque and refused while
+  restrictions are active. Not yet observed in a live Windows session, so the
+  README host table marks it `unverified`.
+- **A worker cannot approve through a module form.** `python3 -m
+  gatekit.approval …` and `-m gatekit.cli approve` (and the `gatebound`
+  spellings) are refused in a worker in both shell gates; `approve check`
+  and `approve list` stay allowed.
+- **A state directory cannot be forged.** PowerShell `Rename-Item` and
+  `New-Item -ItemType SymbolicLink|Junction|HardLink` are judged like
+  `mv`/`ln`, and creating, linking, renaming or copying onto a state
+  directory name is gatekit's alone (a plain `mkdir` of the current name is
+  still allowed). The resolver ignores link, junction and out-of-root
+  candidates, and a usable current-named directory always wins; another name
+  is read only when no current one exists. When both directories hold
+  `approvals.json`, the Stop gate records `unverified` and points to doctor
+  and `migrate`.
+- **No input outlasts the hook.** Patterns in the shell readers that grew
+  quadratically on large here-strings are linear now (a 40 000-line
+  here-string: 7.3 s → 0.002 s), and commands over 64 KB are refused as
+  opaque while restrictions are active; after approval only the
+  protected-state mention scan reads them. A hook killed by its timeout lets
+  the call through, so this was a fail-open.
+
+### Added
+
+- **A compatibility layer for the rename (ADR-0029).** Nothing changes for
+  current users: same fences, same `.gatekit/`, same messages.
+  - `gatebound-task/criterion/budget/discovery/scope` fences are read as
+    aliases of `gatekit-*`, permanently; `spec/` is never rewritten.
+  - The state directory resolves to `.gatekit/` or `.gatebound/`, and
+    protected state covers both. Doctor fails when both exist.
+  - A criterion or task-gate argv pointing at a missing
+    `…/gatekit|gatebound/gates/<gate>.py` or `bin/gatekit|gatebound.py` (an
+    old checkout or a deleted cache) runs this plugin's file, at run time
+    only; approval hashes do not change.
+  - Workers get both `GATEKIT_*` and `GATEBOUND_*` variables; gates read
+    either. The worker approve guard and Stop-gate arming recognise the
+    `gatebound` launcher and `/gatebound:` / `$gatebound-` commands. The
+    AGENTS.md managed block is replaced under either marker pair.
+  - Doctor fails when gatekit and gatebound are both enabled or both cached.
+    After the rename, a newer plugin running beside an older one stands its
+    Stop and question gates down, warning once; only the user's own
+    settings and an installed cache count, decided once per session.
+- **`migrate`.** Renames the state directory (`git mv` when tracked),
+  updates `.gitignore` and regenerates the Codex layer; dry run by default,
+  `--apply`, `--json`, `--to`. It never touches `spec/` and refuses when both
+  directories exist. Until the rename it is a no-op; `--to gatebound`
+  rehearses.
+
 ## 0.16.5 — 2026-10-04
 
 gatekit's own state is protected, and the Stop gate checks the approval and
