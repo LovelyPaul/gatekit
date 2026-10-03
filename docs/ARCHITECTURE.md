@@ -117,12 +117,13 @@ the plugin's name (`CURRENT = "gatekit"`, `FUTURE = "gatebound"`, `LEGACY =
 ()`; the rename flips `CURRENT` and moves `gatekit` into `LEGACY`). Both names
 are read wherever the name is an on-disk contract:
 
-- `paths.state_dir(root)` is `.gatebound/` if present, else `.gatekit/` if
-  present, else `.<CURRENT>/` (`.gatekit/` today). With both present, the one
-  holding `approvals.json` wins, else one holding other gatekit-written state
+- `paths.state_dir(root)` is `.<CURRENT>/` (`.gatekit/` today) whenever a
+  usable directory of that name exists, whatever another holds; else the
+  other name's directory if present (the legacy read-through after the
+  rename, or a project moved with `migrate --to`) — among several such the
+  one holding `approvals.json`, else one holding other gatekit-written state
   (`contract.json`, `runs/`, `jobs/`, `attempts.json`, `baseline.json`), else
-  the current name — the user's `config.json`/`eval/` never count; on a tie
-  the current name, then the newest — and doctor axis 3 fails. A candidate
+  the newest; else `.<CURRENT>/`. With both present doctor axis 3 fails. A candidate
   that is a symlink, junction or other reparse point, or whose realpath is
   not directly in the project root, is ignored (a project whose only state
   directory is a link resolves to `.<CURRENT>/`). While **both** directories
@@ -1189,7 +1190,7 @@ LEGACY: tuple[str, ...]                               # () until the rename
 def all_names() -> tuple[str, ...]                     # newest first, each once
 def fence_names(name: str) -> tuple[str, ...]          # "gatekit-task" → every prefix
 def state_dirnames() -> tuple[str, ...]                # (".gatebound", ".gatekit")
-def resolve_state_dir(root) -> pathlib.Path            # see §2; link/reparse-point or out-of-root candidates ignored; tie → current name
+def resolve_state_dir(root) -> pathlib.Path            # see §2; link/reparse-point or out-of-root candidates ignored; a usable current-named dir always wins
 def approvals_in_several(root) -> list[pathlib.Path]   # state dirs holding approvals.json when more than one does, else []
 def launcher_names() -> tuple[str, ...]                # gatekit.py, gatekit, gatebound.py, gatebound
 def names_pattern() -> str                             # regex alternation of all_names()

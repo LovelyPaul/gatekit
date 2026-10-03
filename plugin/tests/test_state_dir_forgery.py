@@ -233,11 +233,41 @@ class TestResolveStateDir(Project):
         finally:
             names.CURRENT, names.LEGACY = saved
 
-    def test_approvals_still_win_over_the_current_name(self) -> None:
+    def test_the_current_name_wins_whatever_the_other_holds(self) -> None:
+        # before the first approval .gatekit/ has no approvals.json; a
+        # .gatebound/approvals.json laid down by a program the gates do not
+        # model (ditto, pax, an archive) must not capture the hooks
         (self.root / ".gatebound").mkdir()
         (self.root / ".gatebound" / "approvals.json").write_text("{}", encoding="utf-8")
+        self.assertEqual(names.resolve_state_dir(self.root), self.root / ".gatekit")
+        (self.root / ".gatekit" / "contract.json").unlink()  # empty current dir
+        self.assertEqual(names.resolve_state_dir(self.root), self.root / ".gatekit")
+
+    def test_the_other_name_is_read_only_without_a_current_dir(self) -> None:
         (self.root / ".gatekit" / "contract.json").unlink()
+        os.rmdir(str(self.root / ".gatekit"))
+        (self.root / ".gatebound").mkdir()
         self.assertEqual(names.resolve_state_dir(self.root), self.root / ".gatebound")
+
+    def test_after_the_flip_an_unmigrated_project_reads_legacy(self) -> None:
+        saved = (names.CURRENT, names.LEGACY)
+        names.CURRENT, names.LEGACY = "gatebound", ("gatekit",)
+        try:
+            self.assertEqual(names.resolve_state_dir(self.root), self.root / ".gatekit")
+            (self.root / ".gatebound").mkdir()  # the current name appears
+            self.assertEqual(names.resolve_state_dir(self.root), self.root / ".gatebound")
+        finally:
+            names.CURRENT, names.LEGACY = saved
+
+    def test_after_the_flip_creating_the_current_dir_beside_legacy_is_denied(self) -> None:
+        saved = (names.CURRENT, names.LEGACY)
+        names.CURRENT, names.LEGACY = "gatebound", ("gatekit",)
+        try:
+            self.approve()
+            result = bash_gate.handle(self.tool("Bash", {"command": "mkdir .gatebound"}))
+            self.assertIsNotNone(result)
+        finally:
+            names.CURRENT, names.LEGACY = saved
 
 
 class TestStopFailsClosedOnTwoApprovals(Project):

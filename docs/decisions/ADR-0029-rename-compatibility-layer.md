@@ -58,7 +58,7 @@ keys. The rename sets `CURRENT = "gatebound"` and `LEGACY = ("gatekit",)`.
 |---|---|---|---|
 | Fences `<name>-task/criterion/budget/discovery/scope` | either prefix, everywhere a fence is read (`spec`, `contract`, `jobs`, `design`, the spawn gate) | `gatekit-*` | **permanent** — approved specs are hash-pinned |
 | State directory | `.gatebound/` if present, else `.gatekit/` if present, else the current name | the resolved one; a new project gets `.<CURRENT>/` | `.gatekit` read-through removed in **1.0** |
-| Both state directories | hooks use the one holding `approvals.json`, else one holding other gatekit-written state (`contract.json`, `runs/`, `jobs/`, `attempts.json`, `baseline.json`), else the current name — never one that holds only the user's `config.json`/`eval/`, so a session cannot move the hooks off their ledgers; doctor axis 3 **fail** | — | — |
+| Both state directories | hooks use the **current** name's directory whenever a usable one exists (amendment below); another name is read only while no current one exists, and among several such the one holding `approvals.json`, else other gatekit-written state (`contract.json`, `runs/`, `jobs/`, `attempts.json`, `baseline.json`), else the newest; doctor axis 3 **fail** | — | — |
 | Protected state (ADR-0027), write allowlist, evaluator scratch, opaque-text mentions | `.gatekit/` and `.gatebound/` alike (`config.json`, `eval/**` the user's under both) | — | with the read-through |
 | argv `…/<name>/gates/<gate>.py`, `…/bin/<name>.py` that does not exist | mapped to this plugin's file at run time (`paths.expand_argv`) | — | **permanent** |
 | Env `GATEKIT_TASK_ID`, `GATEKIT_JOB_ID` | current name first, then the other | both names; every inherited `GATEKIT_*` and `GATEBOUND_*` stripped | alias removed in **1.0** |
@@ -161,10 +161,26 @@ forged one. Four layers, each sufficient for the reported forms:
    (`st_file_attributes & FILE_ATTRIBUTE_REPARSE_POINT` on Windows,
    `os.path.isjunction` on 3.12+), or whose realpath is not directly in the
    project root's realpath, is not a candidate: a project whose only state
-   directory is a link resolves to `.<CURRENT>/`. Among candidates of equal
-   rank the **current** name wins (`.gatekit/` today, `.gatebound/` after the
-   rename), then the newest. So with both holding `approvals.json`, the
-   hooks read `.<CURRENT>/`.
+   directory is a link resolves to `.<CURRENT>/`. **A usable directory of
+   the current name always wins, whatever another holds.** Ranking by
+   `approvals.json` first left a gap: before the first approval `.gatekit/`
+   has none, so a `.gatebound/approvals.json` laid down by a program the
+   gates do not model (`ditto`, `pax`, an archive) ranked first. A directory
+   of another name is read only while no current one exists — the legacy
+   read-through after the rename (an unmigrated project with only
+   `.gatekit/`), or a project rehearsed with `migrate --to gatebound`, which
+   removes `.gatekit/`. Among several such, the rank (approvals, other
+   gatekit-written state) then the newest decides. The earlier review case
+   (an empty `.gatebound/` with only `config.json` must not win) holds
+   trivially, and `migrate` still refuses while both exist.
+
+   After the rename (`CURRENT = "gatebound"`) the same rule means a
+   `.gatebound/` created later beside an unmigrated `.gatekit/` wins. The
+   gates deny creating it for the programs they model (layer 2: a plain
+   `mkdir` of the current name is allowed only while no other state
+   directory is beside it); a program they do not model remains the
+   boundary of layer 2. Should both then hold `approvals.json`, layer 4
+   fails the Stop gate closed, and doctor axis 3 reports both directories.
 4. **Two approvals files: the Stop gate judges neither.** When both state
    directories (links included) hold `approvals.json`
    (`names.approvals_in_several`), the Stop gate in `build`/`verify` records

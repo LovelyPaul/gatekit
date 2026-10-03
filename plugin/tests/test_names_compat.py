@@ -158,10 +158,12 @@ class TestStateDir(Temp):
         deep.mkdir(parents=True)
         self.assertEqual(paths.project_root(str(deep)), self.root)
 
-    def test_both_prefers_the_one_with_approvals(self) -> None:
+    def test_both_prefers_the_current_name(self) -> None:
+        # ADR-0029 amendment: a usable current-named dir always wins
         (self.root / ".gatekit").mkdir()
         (self.root / ".gatebound" / "runs").mkdir(parents=True)
-        self.assertEqual(paths.state_dir(self.root), self.root / ".gatebound")
+        (self.root / ".gatebound" / "approvals.json").write_text("{}", encoding="utf-8")
+        self.assertEqual(paths.state_dir(self.root), self.root / ".gatekit")
         (self.root / ".gatekit" / "approvals.json").write_text("{}", encoding="utf-8")
         self.assertEqual(paths.state_dir(self.root), self.root / ".gatekit")
 

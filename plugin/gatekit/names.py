@@ -120,20 +120,26 @@ def _usable_state_dir(root, candidate: pathlib.Path) -> bool:
 
 
 def resolve_state_dir(root) -> pathlib.Path:
-    """``<root>/.gatebound`` if present, else ``.gatekit`` if present, else the
-    current name. When several are present: the one holding
-    ``approvals.json``, else one holding other gatekit-written state, else
-    the current name — and on any tie the current name, then the newest.
-    A candidate that is a link, junction or reparse point, or whose realpath
-    is not directly in *root*, is ignored (ADR-0029 amendment)."""
+    """The state directory the hooks read (ADR-0029 and its amendment).
+
+    Only usable candidates count: a link, junction or reparse point, or a
+    directory whose realpath is not directly in *root*, is ignored. A usable
+    directory of the **current** name always wins, whatever another holds —
+    otherwise ``approvals.json`` laid down under the other name by a program
+    the gates do not model would capture the hooks before the first
+    approval. A directory of another name is read only while no current one
+    exists: the legacy read-through after the rename, or a project rehearsed
+    with ``migrate --to``. Among several such: the one holding
+    ``approvals.json``, else other gatekit-written state, else the newest.
+    With none, the current name."""
     found = [d for d in existing_state_dirs(root) if _usable_state_dir(root, d)]
+    current = state_dirname()
+    for candidate in found:
+        if candidate.name == current:
+            return candidate
     if not found:
-        return pathlib.Path(root) / state_dirname()
-    if len(found) > 1:
-        current = state_dirname()
-        # stable: among equal ranks the current name, then newest first
-        return min(found, key=lambda d: (_state_rank(d), d.name != current))
-    return found[0]
+        return pathlib.Path(root) / current
+    return min(found, key=_state_rank)  # stable: newest first among ties
 
 
 def approvals_in_several(root) -> List[pathlib.Path]:
