@@ -354,6 +354,18 @@ class TestAxisProjectStatePortProbe(DoctorTestCase):
         self.assertEqual(self.ports_of(
             "const t = `a\nwebServer: { port: 9243 }\n`;\n"), [])
 
+    def test_wrapped_type_annotation(self) -> None:
+        # Review of 0.16.4: a Prettier-wrapped annotation ended at its first
+        # line break.
+        self.assertEqual(self.ports_of(
+            "const webServer:\n  | A\n  | B = { command: 'x', port: 3820 };\n"), [3820])
+        self.assertEqual(self.ports_of(
+            "const webServer: Config\n  = { command: 'x', port: 3821 };\n"), [3821])
+        self.assertEqual(self.ports_of(
+            "const webServer: A &\n  B = { port: 3822 };\n"), [3822])
+        self.assertEqual(self.ports_of(
+            "let webServer: number\nif (a > b) { const c = { port: 9244 } }\n"), [])
+
     def test_typed_declaration_without_a_value_reads_nothing_after_it(self) -> None:
         self.assertEqual(self.ports_of(
             "let webServer: Config;\nconst other = { port: 9240 };\n"), [])

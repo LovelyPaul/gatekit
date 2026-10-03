@@ -260,8 +260,13 @@ value; no port was found. After `const`, `let` or `var` a `webServer:` now
 opens a type annotation: the scan skips it to the `=` that ends it (brackets,
 braces, parentheses and `<>` nest, so a type literal may hold `;` and span
 lines; `=>` belongs to a function type) and reads the value after that `=`
-as before. A `;`, `,`, closing bracket or line break at depth 0 before any
-`=` means a declaration without a value, and nothing after it is read. A key
+as before. A `;`, `,` or closing bracket at depth 0 before any `=` means a
+declaration without a value, and nothing after it is read; so does a line
+break at depth 0, unless the last non-space character before it is `:`, `|`
+or `&` or the next one after it is `|`, `&` or `=` — the continuation rule of
+the value scan, with the annotation's operators — so the Prettier-wrapped
+`const webServer:\n  | A\n  | B = { … }` and `const webServer: T\n  = { … }`
+are read. An earlier draft ended the annotation at any line break. A key
 in matching quotes (`'webServer':`, `"webServer":`) is recognised. A
 `webServer` inside any other string literal (`console.log('webServer: {…}')`)
 is not a key: string contents are blanked before matching, and values are

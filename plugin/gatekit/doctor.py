@@ -234,6 +234,11 @@ _WEBSERVER_RE = re.compile(
 _CONTINUES_BEFORE = frozenset("?:|&=(+-*/,")
 _CONTINUES_AFTER = frozenset("?:|&.")
 _NEXT_CHAR_RE = re.compile(r"\s*(\S)")
+#: In a type annotation a line break at depth 0 continues it only after
+#: ``:``/``|``/``&`` or before ``|``/``&``/``=`` (a union, an intersection or
+#: the value's ``=`` wrapped onto the next line, as Prettier does).
+_ANNOTATION_CONTINUES_BEFORE = frozenset(":|&")
+_ANNOTATION_CONTINUES_AFTER = frozenset("|&=")
 _FALLBACK = r"(?:[^,;{}\[\]\n]*?(?:\|\||\?\?)\s*)?"
 _PORT_RE = re.compile(r"\bport\s*:\s*" + _FALLBACK + r"(\d{1,5})\b")
 _URL_PORT_RE = re.compile(
@@ -336,10 +341,14 @@ def _annotation_end(text: str, start: int) -> tuple:
     starting at *start*: the index just after the ``=`` that ends it (-1 when
     the declaration has no value) and how far the search read. Brackets,
     braces, parentheses and ``<>`` nest (a type literal spans lines and holds
-    ``;``); ``=>`` is part of a function type. At depth 0 a ``;``, ``,``,
-    closing bracket or line break ends the declaration without a value."""
+    ``;``); ``=>`` is part of a function type. At depth 0 a ``;``, ``,`` or
+    closing bracket ends the declaration without a value, and so does a line
+    break unless :data:`_ANNOTATION_CONTINUES_BEFORE` /
+    :data:`_ANNOTATION_CONTINUES_AFTER` join it to the next line (the rule
+    :func:`_value_open` applies, with the annotation's operators)."""
     depth = 0
     quote = None
+    last = ""
     limit = min(len(text), start + WEBSERVER_WINDOW)
     i = start
     while i < limit:
@@ -364,8 +373,15 @@ def _annotation_end(text: str, start: int) -> tuple:
             if depth == 0:
                 return -1, i
             depth -= 1
-        elif depth == 0 and ch in ";,\n":
+        elif depth == 0 and ch in ";,":
             return -1, i
+        elif depth == 0 and ch == "\n":
+            after = _NEXT_CHAR_RE.match(text, i)
+            if last not in _ANNOTATION_CONTINUES_BEFORE and not (
+                    after and after.group(1) in _ANNOTATION_CONTINUES_AFTER):
+                return -1, i
+        if not ch.isspace():
+            last = ch
         i += 1
     return -1, limit
 

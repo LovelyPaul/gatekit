@@ -14,8 +14,9 @@ Fixes from a review of 0.16.3 (ADR-0026, amended).
   `const webServer: PlaywrightTestConfig['webServer'] = { port: 3800 }` and
   `const webServer: { command: string; port: number }[] = [ … ]` yielded no
   port: the type annotation was read as the value. After `const`/`let`/`var`
-  the annotation is now skipped to its `=`. `'webServer':` and
-  `"webServer":` keys are recognised, and a `webServer` inside another
+  the annotation is now skipped to its `=`, also when Prettier wraps it over
+  lines (`const webServer:\n  | A\n  | B = …`, `const webServer: T\n  = …`).
+  `'webServer':` and `"webServer":` keys are recognised, and a `webServer` inside another
   string literal is no longer taken for a key; a quoted string ends at a
   line break, so a quote in a regex literal (`/'/g`) does not hide the keys
   below it.
