@@ -2,6 +2,14 @@
 
 Status: 0.16.3 — early. License: MIT.
 
+> **Name change ahead.** gatekit will be renamed **gatebound** after the
+> current study cohort ends. Nothing changes until then: your installation,
+> the `/gatekit:` commands and your projects' `spec/` and `.gatekit/` keep
+> working. The repository has already moved to
+> [gatebound/gatebound](https://github.com/gatebound/gatebound); the old
+> `LovelyPaul/gatekit` URL redirects here. A migration guide will ship with
+> the rename.
+
 gatekit is a gate-enforced harness for AI-assisted development in
 [Claude Code](https://claude.com/claude-code). It turns the usual prose
 instructions you'd put in a `CLAUDE.md` or a slash command into hooks that

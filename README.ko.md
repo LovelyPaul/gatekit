@@ -2,6 +2,13 @@
 
 상태: 0.16.3 — 초기 단계. 라이선스: MIT.
 
+> **이름이 바뀔 예정입니다.** gatekit은 이번 스터디가 끝나면 **gatebound**로
+> 이름이 바뀝니다. 그때까지는 달라지는 것이 없습니다. 지금 설치,
+> `/gatekit:` 명령어, 프로젝트의 `spec/`과 `.gatekit/`은 그대로 동작합니다.
+> 저장소는 이미 [gatebound/gatebound](https://github.com/gatebound/gatebound)로
+> 옮겼고, 예전 주소 `LovelyPaul/gatekit`은 이곳으로 자동 연결됩니다.
+> 옮기는 방법은 이름 변경과 함께 안내합니다.
+
 gatekit은 [Claude Code](https://claude.com/claude-code)에서 AI 보조 개발을
 게이트(hook)로 강제하는 하네스입니다. `CLAUDE.md`나 슬래시 커맨드에 적어두는
 프롬프트 지침을, 실제로 매번 실행되는 훅으로 바꿔줍니다.
