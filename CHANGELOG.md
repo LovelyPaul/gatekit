@@ -4,6 +4,34 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.16.3 — 2026-10-03
+
+Fixes from a review of 0.16.2 (ADR-0026, amended).
+
+### Fixed
+
+- **Doctor's port probe finds a `webServer` that is not an object
+  literal.** `webServer: process.env.CI ? undefined : { port: 3100 }` and
+  `const webServer = { port: 3200 }; defineConfig({ webServer })` were
+  missed. The scan now searches a value for its first `{` or `[` up to the
+  value's end and also reads `webServer =` declarations. A `webServer`
+  inside a value already read is not read again, so a file of nested
+  matches no longer takes seconds.
+- **The prompt hook no longer walks the tree on every prompt.** The
+  `contract=` scope suffix fingerprinted the project (up to 20 000 files)
+  before checking whether the last run had left anything unjudged. It now
+  reads the record first and fingerprints only when something is
+  unjudged. What it shows is unchanged.
+- **The built-in evaluator brief names its scratch directory.** The brief
+  `jobs evaluate` uses without `--prompt` said any write is a finding; it
+  now names `.gatekit/eval/` as the one exception, as the spec-kit brief
+  does.
+- **Spec language: frontmatter after a BOM, and only when it closes.** A
+  PRD saved with a UTF-8 BOM had its English frontmatter read as prose, and
+  a leading `---` with no closing line hid the whole file. A BOM is now
+  ignored, and the block is frontmatter only when it closes within 60
+  lines; otherwise the `---` is a thematic break.
+
 ## 0.16.2 — 2026-10-03
 
 Fixes from a review of 0.16.1 (ADR-0026, amended).
