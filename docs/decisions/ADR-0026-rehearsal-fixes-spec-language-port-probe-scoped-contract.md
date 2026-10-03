@@ -267,3 +267,15 @@ in matching quotes (`'webServer':`, `"webServer":`) is recognised. A
 is not a key: string contents are blanked before matching, and values are
 still read from the unblanked text so `url: '…:3000'` keeps its port.
 
+
+### C2. The built-in brief puts the scratch exception on the write gate only
+
+B3's wording said "the CLI sandbox and the write gate both refuse writes"
+and named `.gatekit/eval/` as "the one exception", but only the write gate
+has that exception: Codex under `--force-read-only-evaluator`, or another
+backend's own sandbox, may refuse even the scratch directory. The built-in
+brief now says the write gate refuses every write except scratch under
+`.gatekit/eval/`, that the backend's own sandbox may refuse even those, and
+that the evaluator then keeps scratch in memory or reports the step it was
+for as `unverified`. The scratch bullet of `spec-kit/evaluator-brief.md`
+says the same.

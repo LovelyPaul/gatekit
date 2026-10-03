@@ -868,7 +868,10 @@ when the rest are not all `passed` (running, queued, or `blocked`), and
 `job.json.kind = "evaluate"`, env `GATEKIT_TASK_ID=evaluate` with
 `task.json.write_scope = "read-only"` so the write gate refuses writes inside
 the evaluator's own session regardless of backend, except its scratch
-directory `.gatekit/eval/**` inside the project root (ADR-0026). `state` ∈
+directory `.gatekit/eval/**` inside the project root (ADR-0026); the built-in
+brief (`jobs.EVALUATOR_BRIEF`, used without `--prompt`) puts that exception on
+the write gate alone — a backend's own sandbox may refuse even the scratch
+directory, and then scratch stays in memory or the step is `unverified`. `state` ∈
 `passed|failed|timeout`; anything but `passed` is `unverified` for every
 criterion. Its stdout ends with the evaluator's reply tail, which is the
 verdict table.

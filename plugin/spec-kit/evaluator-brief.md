@@ -110,7 +110,8 @@ The rest of the evaluator's prompt says, in `output_lang`:
 - Scratch files — a driver script, a server log, a screenshot you take
   yourself — go only under `.gatekit/eval/` in the project root (create it
   if it is missing). Write nothing outside the project: not `/tmp`, not your
-  home directory.
+  home directory. A CLI backend's own sandbox may refuse even those; then
+  keep scratch in memory, or report the step it was for as `unverified`.
 - Record the result under the **last-verification heading that already exists**
   in `spec/PROGRESS.md` (`## 마지막 검증` in Korean, `## Last verification` in
   English). Do not add a heading in another language — `spec validate` treats

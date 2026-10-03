@@ -3531,6 +3531,21 @@ class TestEvaluatorBriefScratch(unittest.TestCase):
         self.assertIn(".gatekit/eval/", text)
         self.assertIn("outside the project", text)
 
+    def test_default_brief_puts_the_scratch_exception_on_the_write_gate_only(self) -> None:
+        # Review of 0.16.3: the brief said the CLI sandbox and the write gate
+        # both refuse writes, with `.gatekit/eval/` "the one exception" —
+        # but only the write gate has it; a backend's sandbox may refuse it.
+        text = " ".join(jobs.evaluator_brief(None).split())
+        self.assertNotIn("sandbox and the write gate both", text)
+        self.assertIn("The write gate refuses every write except scratch files", text)
+        self.assertIn("own sandbox may refuse even those", text)
+        self.assertIn("unverified", text.split("own sandbox may refuse even those", 1)[1][:200])
+
+    def test_brief_says_what_to_do_when_the_sandbox_refuses_scratch(self) -> None:
+        bullet = " ".join(self.bullets[self.bullets.index("- Scratch files"):].split())
+        bullet = bullet[:bullet.index(" - ")]
+        self.assertIn("own sandbox may refuse even those", bullet)
+
     def test_scratch_rule_survives_for_a_cli_evaluator(self) -> None:
         # A CLI evaluator is given every bullet but "Record the result under".
         start = self.bullets.index("- Record the result under")
