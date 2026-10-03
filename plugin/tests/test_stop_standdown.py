@@ -1157,5 +1157,41 @@ class TestUnfinishedJobLine(Project):
         self.assertNotIn("jobs stop", prompt_gate.build_context(self.root, self.led()))
 
 
+class TestNonDictStopRecord(Project):
+    """`"stop": null` in a hand-edited ledger made the gate fail open, silently,
+    at every turn end. It is reset to a blank record instead."""
+
+    def corrupt(self, value) -> None:
+        path = self.root / ".gatekit" / "runs" / (self.session + ".json")
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["stop"] = value
+        path.write_text(json.dumps(data), encoding="utf-8")
+
+    def test_null_stop_still_judges(self) -> None:
+        self.write_contract(counting("c", exit_code=1))
+        self.prompt(BUILD_PROMPT)
+        for value in (None, "garbage", [1]):
+            self.corrupt(value)
+            result = self.stop()
+            self.assertEqual(result["decision"], "block", value)
+            data = self.led().data["stop"]
+            self.assertEqual(data["block_count"], 1)
+            self.assertIsNone(data["stood_down"])
+
+    def test_null_stop_records_a_verdict_on_allow(self) -> None:
+        self.write_contract(counting("c"))
+        self.prompt(BUILD_PROMPT)
+        self.corrupt(None)
+        self.assertIsNone(self.stop())
+        self.assertEqual(self.led().data["stop"]["final_verdict"], verdict.OK)
+
+    def test_null_stop_prompt_hook_still_answers(self) -> None:
+        self.write_contract(counting("c"))
+        self.prompt(BUILD_PROMPT)
+        self.corrupt(None)
+        self.assertIn("pipeline=build",
+                      self.prompt("hi")["hookSpecificOutput"]["additionalContext"])
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

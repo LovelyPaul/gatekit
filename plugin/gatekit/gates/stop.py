@@ -339,9 +339,9 @@ def _deferred_lines(lang: str, result: Dict[str, Any], budget_s: Optional[float]
 
 def _finish(led: "ledger.Ledger", final: str, reasons: Optional[List[str]] = None) -> None:
     """Record the outcome and allow the stop. ``final`` is never blank."""
-    stop_state = led.data.setdefault(
-        "stop", {"block_count": 0, "final_verdict": None, "last_reasons": []}
-    )
+    if not isinstance(led.data.get("stop"), dict):
+        led.data["stop"] = ledger._blank_stop()
+    stop_state = led.data["stop"]
     stop_state["final_verdict"] = final or verdict.UNVERIFIED
     if reasons is not None:
         stop_state["last_reasons"] = reasons
@@ -426,9 +426,9 @@ def handle(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         _finish(led, verdict.UNVERIFIED)
         return hookio.allow()
 
-    stop_state = led.data.setdefault(
-        "stop", {"block_count": 0, "final_verdict": None, "last_reasons": []}
-    )
+    if not isinstance(led.data.get("stop"), dict):
+        led.data["stop"] = ledger._blank_stop()
+    stop_state = led.data["stop"]
 
     # ADR-0024: the job this gate was armed for already has its verdict.
     # Judge nothing; `final_verdict` keeps what was recorded.

@@ -91,6 +91,10 @@ def _backfill(data: Dict[str, Any], session_id: str) -> Dict[str, Any]:
     for key, default in template.items():
         if key not in data:
             data[key] = default
+        elif isinstance(default, dict) and not isinstance(data[key], dict):
+            # `"stop": null` used to make the Stop gate fail open at every
+            # turn end; a record of the wrong type is replaced by a blank one.
+            data[key] = default
         elif isinstance(default, dict) and isinstance(data[key], dict):
             for sub_key, sub_default in default.items():
                 data[key].setdefault(sub_key, sub_default)

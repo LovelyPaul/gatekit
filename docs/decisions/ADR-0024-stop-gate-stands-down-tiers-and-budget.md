@@ -230,6 +230,11 @@ changes.
    — `jobs stop` ends judging`` (Korean under `ko`), and `RECOVERY.md` and
    the manual say the same. `jobs stop` marks those tasks `stopped`, the job
    settles, and the handoff records `fail` and stands down (amendment 3).
+6. **A ledger with `"stop": null` is repaired, not trusted.** Found in the
+   same review, older than this ADR: the ledger's backfill kept a non-object
+   `stop`, the gate's `setdefault` returned it, and the hook failed open on
+   every turn end with only a log line. Loading now replaces a non-object
+   `stop` (or `questions`) with the blank record, and the gate checks again.
 
 ## Consequences
 
