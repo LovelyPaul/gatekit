@@ -3204,7 +3204,9 @@ class TestGradingChangedAfterFailure(JobTestCase):
         self.assertEqual(self.st(second["job_id"])["grading_changed_after_failure"],
                          ["tests/check.py"])
 
-    def test_force_retry_clears_the_failed_grading(self) -> None:
+    def test_force_retry_keeps_the_failed_grading(self) -> None:
+        # Fail, loosen the test, --force-retry, pass: still flagged. The retry
+        # resets the count, not the evidence (ADR-0023 review F2).
         self.host_config()
         self.check(self.STRICT)
         self.write_tasks(self.task())
@@ -3215,10 +3217,22 @@ class TestGradingChangedAfterFailure(JobTestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             jobs.run(["start", "--root", str(self.root), "--no-preflight",
                       "--force-retry", "t"])
-        self.assertEqual(self.ledger_entry(), {})
+        entry = self.ledger_entry()
+        self.assertEqual(entry.get("failures"), 0)
+        self.assertNotIn("repeats", entry)
+        self.assertNotIn("last_failure_sha", entry)
+        self.assertIn("check", entry["failed_grading"])
+        self.assertEqual(jobs.consecutive_failures(self.root, "t"), 0)
+        self.assertEqual(jobs.repeated_failures(self.root, "t"), 0)
         final = jobs.complete_task(self.root, "t", jobs.latest_job_id(self.root))
         self.assertEqual(final["state"], "passed")
-        self.assertFalse(final.get("grading_changed_after_failure"))
+        self.assertEqual(final["grading_changed_after_failure"], ["tests/check.py"])
+        self.assertNotIn("failed_grading", self.ledger_entry())
+
+    def test_force_retry_without_failed_grading_drops_the_entry(self) -> None:
+        jobs.record_attempt(self.root, "t", "failed", job_id="j1", gate="check")
+        jobs.clear_attempts(self.root, "t")
+        self.assertEqual(self.ledger_entry(), {})
 
     def test_status_all_covers_every_job(self) -> None:
         self.host_config()

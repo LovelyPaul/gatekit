@@ -564,8 +564,8 @@ def note_grading(root, jdir, task_id: str, gates, passed: bool) -> list:
 
     The failed hashes live in the task's attempt-ledger entry
     (`.gatekit/attempts.json`, `failed_grading`), so a failure in one job and
-    a pass in the next are compared; a pass and `--force-retry` clear them
-    with the rest of the entry. Call it before `record_attempt`, whose pass
+    a pass in the next are compared; a pass clears them, `--force-retry`
+    does not (it resets the count only). Call it before `record_attempt`, whose pass
     resets the entry. The flag itself stays per job, in `status.json`.
     """
     try:
@@ -1696,12 +1696,26 @@ def _fold_attempt(root, task_id: str, state: str, job_id, gate, sha) -> int:
 
 def clear_attempts(root, task_id: str) -> None:
     """Forget one task's failures — `--force-retry`, the operator saying they
-    changed something. Per task, never global."""
+    changed something. Per task, never global.
+
+    The count, `repeats` and `last_failure_sha` go; `failed_grading` stays
+    (ADR-0023 review F2). A retry resets the budget, not the evidence: fail,
+    loosen the test, `--force-retry`, pass is still compared against the
+    failure and flagged. Only a pass's comparison clears it.
+    """
     with _ATTEMPTS_LOCK:
         data = read_attempts(root)
-        if str(task_id) in (data.get("tasks") or {}):
-            del data["tasks"][str(task_id)]
-            write_json(_attempts_path(root), data)
+        tasks = data.get("tasks") or {}
+        entry = tasks.get(str(task_id))
+        if entry is None:
+            return
+        failed = entry.get("failed_grading") if isinstance(entry, dict) else None
+        if isinstance(failed, dict) and failed:
+            tasks[str(task_id)] = {"failures": 0, "failed_grading": failed,
+                                   "updated_at": _now()}
+        else:
+            del tasks[str(task_id)]
+        write_json(_attempts_path(root), data)
 
 
 def _dependency_evidence(task: dict, dependency: dict) -> bool:

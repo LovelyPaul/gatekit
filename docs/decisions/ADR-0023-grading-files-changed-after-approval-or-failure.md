@@ -191,9 +191,12 @@ also `redelegate`; `complete_task`; `recheck`) calls
   added to this job's `status.json` `grading_changed_after_failure` (a sorted
   list, kept for the rest of the job, carried by `redelegate`), and
   `failed_grading` is cleared.
-- `note_grading` runs before `record_attempt`, whose pass resets the entry;
-  `jobs start --force-retry <id>` deletes the entry and the failed hashes
-  with it.
+- `note_grading` runs before `record_attempt`, whose pass resets the entry.
+  *Amended after review:* `jobs start --force-retry <id>` resets the count,
+  `repeats` and `last_failure_sha` but keeps `failed_grading`. Deleting it let
+  fail → loosen the test → `--force-retry` → pass go unflagged; a retry
+  resets the budget, not the evidence, so only a pass's comparison clears the
+  failed hashes.
 - Preflight failures count: an existing test that fails there and is loosened
   before the first attempt is flagged. A test not written yet hashes to
   nothing at preflight, so greenfield work stays unflagged. A pass at a later
