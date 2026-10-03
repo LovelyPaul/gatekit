@@ -324,3 +324,51 @@ which does not run from a user's project. They now name
 `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" …`, as the commands and the
 manual do, and `tools/gate_command_invocations.py` scans
 `plugin/spec-kit/templates/**/*.md` as well as commands and policies.
+
+## Amendment, 0.16.7 (2026-10-04)
+
+A review of 0.16.6 found the following. Each change below replaces the
+matching part of the decision or of the earlier amendments.
+
+### D1. The port scan follows template expressions, keys and strings
+
+Three inputs still gave a wrong port list:
+
+- A backtick inside a template literal's expression (`` `${"`"}` ``, or
+  `` `${f('`')}` ``) ended the template early; the next backtick then opened a
+  template that, when it spanned a line, blanked the rest of the file and hid
+  a `webServer` key below it.
+- A string `'webServer'` used as a value (`flag ? 'webServer' : { port: 9261 }`)
+  was taken for a quoted key, and the object after it read as its value.
+- `port:` or `url: '…:<n>'` text inside a string of the value
+  (`command: 'serve --port: 9264'`) was read as a property.
+
+Comment removal and string blanking are now one pass (`doctor._scan_js`) that
+returns the comment-free text and the same text with string literals blanked,
+both of equal length. A template literal ends at its own closing backtick:
+each `${…}` in it is followed to its matching `}` — braces counted, the
+strings, nested templates and comments inside read as such — and blanked with
+the template, so a `webServer` inside a template expression is not a key.
+`'…'`/`"…"` still end at a line break (C1). Every character is read once; the
+pass uses `re` only to skip runs that cannot change state, so it stays linear
+(1.2 MB in about 0.1 s; a test bounds 20 000 `${…}` templates and 5 000
+nested ones).
+
+A `webServer:` key counts only where an object key can stand: after `{` or
+`,` (spaces between) or at the start of the file. After `?`, `:` or anything
+else it is a value, quoted or not, and is skipped. `const|let|var
+webServer: <type>` (C1) and `webServer =` (B1) are unchanged.
+
+The value is located and balanced in the blanked text, so the structure
+scans (`_value_open`, `_annotation_end`, `_balanced_value`) no longer track
+quotes themselves. `port:`/`url:` are still matched in the comment-free text,
+so a URL keeps its port, but a match counts only when its key — and for
+`port:` the number too (`port: f('a || 9267')` is not 9267) — lies outside a
+string.
+
+Still out of scope, because this stays a scan and not a parser: a regex
+literal holding a quote or backtick (a `'`/`"` one blanks at most the rest of
+its line, as in C1; a backtick one opens a template); a port computed from a
+variable, a function call or a spread (`...base`); a `webServer` key reached
+through a computed name (`[key]: { … }`); and a `/` that starts a regex
+literal containing `//` or `/*`, which is read as a comment.

@@ -256,16 +256,17 @@ def axis_project_state(root) -> dict:
 # ADR-0026: a server already listening on the Playwright webServer port. With
 # `reuseExistingServer: true` the e2e tests run against whatever answers
 # there — in the 0.16.0 rehearsal, another project's app. The port is found
-# by a small scan, not by parsing JS/TS: comments are dropped, the value after
-# each `webServer:` (the key may be quoted; a match inside a string is not a
-# key) or `webServer =` (also `const webServer: <type> =`, the annotation
-# skipped) is taken from its first `{` or `[` up
-# to the balanced closing brace or bracket (strings respected), and in it
-# `port: <n>` / `url: '<scheme>://<host>:<n>'` are read, also as the fallback
-# after `||` or `??` (`process.env.PORT || 3000`). A value that does not open
-# with `{`/`[` (`process.env.CI ? undefined : { … }`) is searched for one up
-# to its end; a `webServer` inside a value already read is not read again. A
-# port set only from a variable is not found.
+# by a small scan, not by parsing JS/TS: one pass drops comments and blanks
+# string literals (a template literal's `${…}` expressions are followed, so a
+# quote inside one does not end it); then the value after each `webServer:`
+# key (quoted or not, after `{` or `,`) or `webServer =` (also
+# `const webServer: <type> =`, the annotation skipped) is taken from its first
+# `{` or `[` up to the balanced closing brace or bracket, and in it
+# `port: <n>` / `url: '<scheme>://<host>:<n>'` outside strings are read, also
+# as the fallback after `||` or `??` (`process.env.PORT || 3000`). A value
+# that does not open with `{`/`[` (`process.env.CI ? undefined : { … }`) is
+# searched for one up to its end; a `webServer` inside a value already read
+# is not read again. A port set only from a variable is not found.
 PLAYWRIGHT_CONFIGS = tuple("playwright.config." + ext for ext in ("ts", "js", "mjs", "cjs"))
 #: Also searched (recursively) for Playwright configs.
 E2E_CONFIG_DIR = ("spec", "design", "e2e")
@@ -296,62 +297,19 @@ PROBE_TIMEOUT_S = 0.3
 LSOF_TIMEOUT_S = 3
 
 
-def _strip_js_comments(text: str) -> str:
-    """*text* without ``//`` and ``/* */`` comments; string literals (where
-    ``//`` is part of a URL) are kept as they are."""
-    out = []
-    i, n = 0, len(text)
-    quote = None
-    while i < n:
-        ch = text[i]
-        if quote:
-            out.append(ch)
-            if ch == "\\" and i + 1 < n:
-                out.append(text[i + 1])
-                i += 2
-                continue
-            if ch == quote:
-                quote = None
-            i += 1
-            continue
-        if ch in "'\"`":
-            quote = ch
-            out.append(ch)
-            i += 1
-        elif text.startswith("//", i):
-            end = text.find("\n", i)
-            i = n if end < 0 else end
-        elif text.startswith("/*", i):
-            end = text.find("*/", i + 2)
-            out.append(" ")
-            i = n if end < 0 else end + 2
-        else:
-            out.append(ch)
-            i += 1
-    return "".join(out)
-
-
 def _balanced_value(text: str, start: int) -> str:
-    """The ``{…}`` or ``[…]`` value opening at *start*, up to its matching
-    close (strings respected), at most :data:`WEBSERVER_WINDOW` characters;
-    "" when no object or array opens there."""
+    """The ``{…}`` or ``[…]`` value opening at *start* of the blanked *text*
+    (see :func:`_scan_js`), up to its matching close, at most
+    :data:`WEBSERVER_WINDOW` characters; "" when no object or array opens
+    there."""
     if start >= len(text) or text[start] not in "{[":
         return ""
     depth = 0
-    quote = None
     limit = min(len(text), start + WEBSERVER_WINDOW)
     i = start
     while i < limit:
         ch = text[i]
-        if quote:
-            if ch == "\\":
-                i += 2
-                continue
-            if ch == quote:
-                quote = None
-        elif ch in "'\"`":
-            quote = ch
-        elif ch in "{[(":
+        if ch in "{[(":
             depth += 1
         elif ch in "}])":
             depth -= 1
@@ -364,24 +322,107 @@ def _balanced_value(text: str, start: int) -> str:
 #: A '...' or "..." literal stops at a line break (JS does not let one span
 #: lines), so a quote in a regex literal such as ``/'/g`` blanks at most the
 #: rest of its line, not the rest of the file. Template literals span lines.
-_STRING_RE = re.compile(
-    r"'(?:[^'\\\n]|\\.)*'?|\"(?:[^\"\\\n]|\\.)*\"?|`(?:[^`\\]|\\.)*`?", re.S)
+_QUOTED_RE = {
+    "'": re.compile(r"'(?:[^'\\\n]|\\.)*'?", re.S),
+    '"': re.compile(r'"(?:[^"\\\n]|\\.)*"?', re.S),
+}
+#: Template text up to its closing backtick or a ``${``.
+_TEMPLATE_TEXT_RE = re.compile(r"(?:[^`\\$]|\\.|\$(?!\{))*", re.S)
+#: The next character that changes state, outside and inside a ``${…}``.
+_CODE_STOP_RE = re.compile(r"['\"`]|//|/\*")
+_EXPR_STOP_RE = re.compile(r"['\"`{}]|//|/\*")
 _NOT_NEWLINE_RE = re.compile(r"[^\n]")
 
 
-def _blank_string(match) -> str:
-    literal = match.group(0)
-    if literal[1:-1] == "webServer" and literal[-1] == literal[0]:
-        return literal
-    return literal[0] + _NOT_NEWLINE_RE.sub(" ", literal[1:])
+def _scan_js(text: str) -> tuple:
+    """``(code, blanked)`` for JS/TS *text*, both of the same length.
+
+    *code* is *text* without ``//`` and ``/* */`` comments; *blanked* is
+    *code* with every string literal blanked after its opening quote (line
+    breaks kept), so that ``webServer`` or ``port:`` in a message is not
+    taken for a key. A literal that is exactly ``webServer`` in matching
+    quotes (a quoted key) is kept. A template literal ends at its own closing
+    backtick: each ``${…}`` in it is followed to its matching ``}``, with the
+    strings, templates and comments inside, and blanked with the template.
+    One pass, each character read once."""
+    code: list = []
+    blanked: list = []
+
+    def emit(part: str, blank: bool) -> None:
+        code.append(part)
+        blanked.append(_NOT_NEWLINE_RE.sub(" ", part) if blank else part)
+
+    depths: list = []  # one brace depth per open `${`, innermost last
+    in_text = False    # inside template text (not in a `${…}`)
+    i, n = 0, len(text)
+    while i < n:
+        inside = in_text or bool(depths)
+        if in_text:
+            end = _TEMPLATE_TEXT_RE.match(text, i).end()
+            emit(text[i:end], True)
+            i = end
+            if i >= n:
+                break
+            if text[i] == "`":
+                emit("`", True)
+                i += 1
+            else:  # `${`
+                emit("${", True)
+                i += 2
+                depths.append(0)
+            in_text = False
+            continue
+        found = (_EXPR_STOP_RE if depths else _CODE_STOP_RE).search(text, i)
+        if not found:
+            emit(text[i:], inside)
+            break
+        emit(text[i:found.start()], inside)
+        i = found.start()
+        token = found.group(0)
+        if token == "//":
+            end = text.find("\n", i)
+            i = n if end < 0 else end
+        elif token == "/*":
+            end = text.find("*/", i + 2)
+            emit(" ", inside)
+            i = n if end < 0 else end + 2
+        elif token in _QUOTED_RE:
+            literal = _QUOTED_RE[token].match(text, i).group(0)
+            if inside:
+                emit(literal, True)
+            elif literal[1:-1] == "webServer" and literal[-1] == literal[0]:
+                emit(literal, False)
+            else:
+                emit(literal[0], False)
+                emit(literal[1:], True)
+            i += len(literal)
+        elif token == "`":
+            emit("`", inside)
+            in_text = True
+            i += 1
+        elif token == "{":
+            depths[-1] += 1
+            emit("{", True)
+            i += 1
+        else:  # "}" inside `${…}`
+            if depths[-1]:
+                depths[-1] -= 1
+            else:
+                depths.pop()
+                in_text = True
+            emit("}", True)
+            i += 1
+    return "".join(code), "".join(blanked)
 
 
-def _mask_strings(text: str) -> str:
-    """*text* with each string literal blanked after its opening quote (same
-    length, line breaks kept), so that ``webServer`` in a message is not
-    taken for a key; a literal that is exactly ``webServer`` (a quoted key)
-    is kept."""
-    return _STRING_RE.sub(_blank_string, text)
+def _is_key(blanked: str, start: int) -> bool:
+    """Whether the ``webServer`` match at *start* stands where an object key
+    can: after ``{`` or ``,`` (spaces between), or at the start of the text.
+    After ``?`` it is a ternary's value, not a key."""
+    i = start - 1
+    while i >= 0 and blanked[i].isspace():
+        i -= 1
+    return i < 0 or blanked[i] in "{,"
 
 
 def _annotation_end(text: str, start: int) -> tuple:
@@ -395,21 +436,12 @@ def _annotation_end(text: str, start: int) -> tuple:
     :data:`_ANNOTATION_CONTINUES_AFTER` join it to the next line (the rule
     :func:`_value_open` applies, with the annotation's operators)."""
     depth = 0
-    quote = None
     last = ""
     limit = min(len(text), start + WEBSERVER_WINDOW)
     i = start
     while i < limit:
         ch = text[i]
-        if quote:
-            if ch == "\\":
-                i += 2
-                continue
-            if ch == quote:
-                quote = None
-        elif ch in "'\"`":
-            quote = ch
-        elif ch == "=":
+        if ch == "=":
             if text.startswith("=>", i):
                 i += 2
                 continue
@@ -439,24 +471,16 @@ def _value_open(text: str, start: int) -> tuple:
     index of the first ``{``/``[`` in it (-1 when there is none) and how far
     the search read. The value ends at a ``,`` or ``;`` or a closing
     brace, bracket or parenthesis at depth 0, or at a line break at depth 0
-    that no operator joins to the next line (strings respected); at most
+    that no operator joins to the next line; *text* is blanked
+    (:func:`_scan_js`), so no string holds one of these. At most
     :data:`WEBSERVER_WINDOW` characters are read."""
     depth = 0
-    quote = None
     last = ""
     limit = min(len(text), start + WEBSERVER_WINDOW)
     i = start
     while i < limit:
         ch = text[i]
-        if quote:
-            if ch == "\\":
-                i += 2
-                continue
-            if ch == quote:
-                quote = None
-        elif ch in "'\"`":
-            quote = ch
-        elif ch in "{[":
+        if ch in "{[":
             return i, i
         elif ch == "(":
             depth += 1
@@ -493,28 +517,35 @@ def webserver_ports(root) -> list:
     ports = set()
     for path in _playwright_configs(pathlib.Path(root)):
         try:
-            text = _strip_js_comments(path.read_text(encoding="utf-8", errors="replace"))
+            code, blanked = _scan_js(path.read_text(encoding="utf-8", errors="replace"))
         except OSError:
             continue
         read_to = 0
-        for match in _WEBSERVER_RE.finditer(_mask_strings(text)):
+        for match in _WEBSERVER_RE.finditer(blanked):
             if match.start() < read_to:
                 # Inside a value already read: reading it again finds
                 # nothing new and, nested, costs a window per match.
                 continue
             start = match.end()
             if match.group("decl") and match.group("sep") == ":":
-                start, read_to = _annotation_end(text, start)
+                start, read_to = _annotation_end(blanked, start)
                 if start < 0:
                     continue
-            opened, read_to = _value_open(text, start)
+            elif match.group("sep") == ":" and not _is_key(blanked, match.start()):
+                continue
+            opened, read_to = _value_open(blanked, start)
             if opened < 0:
                 continue
-            window = _balanced_value(text, opened)
+            window = _balanced_value(blanked, opened)
             read_to = opened + len(window)
-            for regex in (_PORT_RE, _URL_PORT_RE):
-                for found in regex.findall(window):
-                    port = int(found)
+            source = code[opened:read_to]
+            # Matched in the comment-free text so a URL keeps its port; a
+            # match counts only where the key (and a bare port) is code.
+            for regex, outside in ((_PORT_RE, (0, 1)), (_URL_PORT_RE, (0,))):
+                for found in regex.finditer(source):
+                    if any(window[found.start(g)] != source[found.start(g)] for g in outside):
+                        continue
+                    port = int(found.group(1))
                     if 0 < port < 65536:
                         ports.add(port)
     return sorted(ports)

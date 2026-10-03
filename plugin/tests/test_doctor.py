@@ -412,6 +412,60 @@ class TestAxisProjectStatePortProbe(DoctorTestCase):
         # One read per window of the unbalanced value, not one per match.
         self.assertLessEqual(len(calls), len("webServer: {") * 10000 // doctor.WEBSERVER_WINDOW + 1)
 
+    def test_backtick_inside_a_template_expression_does_not_hide_the_port(self) -> None:
+        # Review of 0.16.6: the backtick in `${"`"}` closed the template, and
+        # the next one opened a template that blanked the rest of the file.
+        self.assertEqual(self.ports_of(
+            'const s = `${"`"}\n`;\nexport default { webServer: { port: 3850 } }\n'), [3850])
+        self.assertEqual(self.ports_of(
+            "const s = `a${ f({ q: '`' }) }\nb`;\n"
+            "export default { webServer: { port: 3851 } }\n"), [3851])
+        self.assertEqual(self.ports_of(
+            "const s = `${`inner ${'`'}`}\n`;\n"
+            "export default { webServer: { port: 3852 } }\n"), [3852])
+        # A template expression is still part of the string around it.
+        self.assertEqual(self.ports_of(
+            "const t = `${ { webServer: { port: 9260 } } }`;\n"), [])
+
+    def test_webserver_as_a_value_is_not_a_key(self) -> None:
+        # Review of 0.16.6: `x ? 'webServer' : { … }` was read as a key.
+        self.assertEqual(self.ports_of(
+            "const k = flag ? 'webServer' : { port: 9261 };\n"), [])
+        self.assertEqual(self.ports_of(
+            "const k = flag\n  ? \"webServer\"\n  : { port: 9262 };\n"), [])
+        self.assertEqual(self.ports_of(
+            "const v = flag ? webServer : { port: 9263 };\n"), [])
+        # Keys after `{` or `,` still count, quoted or not.
+        self.assertEqual(self.ports_of(
+            "export default { use: {}, 'webServer': { port: 3853 } }"), [3853])
+        self.assertEqual(self.ports_of(
+            "export default {\n  use: {},\n  webServer: { port: 3854 },\n}\n"), [3854])
+
+    def test_port_inside_a_string_in_the_value_is_not_a_port(self) -> None:
+        # Review of 0.16.6: `port:` / `url:` text inside a command string was
+        # read as a property.
+        self.assertEqual(self.ports_of(
+            "export default { webServer: { command: 'serve --port: 9264', port: 3855 } }"),
+            [3855])
+        self.assertEqual(self.ports_of(
+            'export default { webServer: { command: "vite --port 4000 # port: 9265",\n'
+            "  url: 'http://localhost:4000' } }"), [4000])
+        self.assertEqual(self.ports_of(
+            "export default { webServer: { command: `run url: 'http://x:9266'`, port: 3856 } }"),
+            [3856])
+        self.assertEqual(self.ports_of(
+            "export default { webServer: { port: f('a || 9267') } }"), [])
+
+    def test_long_template_expressions_stay_linear(self) -> None:
+        import time
+
+        text = ("const s = `${'`'}${\"`\"}`;\n" * 20000
+                + "x = `" + "${`" * 5000 + "`}" * 5000 + "`;\n"
+                + "export default { webServer: { port: 3857 } }\n")
+        started = time.perf_counter()
+        self.assertEqual(self.ports_of(text), [3857])
+        self.assertLess(time.perf_counter() - started, 2.0)
+
     def test_no_config_no_ports(self) -> None:
         self.assertEqual(doctor.webserver_ports(self.root), [])
 
