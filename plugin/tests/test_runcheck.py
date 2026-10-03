@@ -430,6 +430,70 @@ class TestGradingFiles(unittest.TestCase):
         self.assertEqual(self.files(["python3", os.path.join(self.root, "tests", "test_a.py")]),
                          ["tests/test_a.py"])
 
+    def write(self, rel: str, body: str = "x") -> None:
+        full = os.path.join(self.root, *rel.split("/"))
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w") as h:
+            h.write(body)
+
+    def test_files_the_build_edits_are_not_grading_files(self) -> None:
+        # F2: a brownfield check names the code it inspects; the build edits
+        # or creates those files legitimately, so they do not judge anything.
+        for rel in ("src/app.py", "src/x.js", "src/app.js", "src/index.ts", "app.db",
+                    "dist/index.html", "scripts/e2e.sh"):
+            self.write(rel)
+        for argv in (["grep", "-q", "print", "src/app.py"],
+                     ["eslint", "src/x.js"],
+                     ["node", "--check", "src/app.js"],
+                     ["tsc", "src/index.ts"],
+                     ["sqlite3", "app.db", "select 1"],
+                     ["test", "-f", "dist/index.html"],
+                     ["grep", "-q", "<title>", "dist/index.html"],
+                     ["python3", "src/app.py", "--selftest"],
+                     ["bash", "scripts/e2e.sh"]):
+            with self.subTest(argv=argv):
+                self.assertEqual(self.files(argv), [])
+
+    def test_test_shaped_files_are_grading_files(self) -> None:
+        shapes = ("test/cart.js", "tests/check.py", "src/__tests__/x.js",
+                  "spec/models/user_spec.rb", "e2e/login.ts", "pkg/test_util.py",
+                  "pkg/util_test.go", "src/app.test.ts", "web/login.spec.ts",
+                  "conftest.py", "a/b/test/deep/data.json")
+        for rel in shapes:
+            self.write(rel)
+        for rel in shapes:
+            with self.subTest(rel=rel):
+                self.assertEqual(self.files(["runner", rel]), [rel])
+
+    def test_build_and_dependency_directories_never_count(self) -> None:
+        for rel in ("dist/tests/app.test.js", "node_modules/.bin/vitest",
+                    ".venv/bin/pytest", "build/test_x.py"):
+            self.write(rel)
+        self.assertEqual(self.files(["node", "dist/tests/app.test.js", "build/test_x.py"]), [])
+        self.assertEqual(self.files(["./node_modules/.bin/vitest", "run"]), [])
+        self.assertEqual(self.files([".venv/bin/pytest"]), [])
+
+    def test_option_values_and_runner_suffixes(self) -> None:
+        # F7: `--opt=path`, pytest `[param]` and `file:line` locations.
+        self.write("e2e/login.spec.ts")
+        self.write("src/app.test.ts")
+        self.assertEqual(self.files(["npx", "playwright", "test", "--spec=e2e/login.spec.ts"]),
+                         ["e2e/login.spec.ts"])
+        self.assertEqual(self.files(["pytest", "tests/test_a.py::test_x[1-2]"]),
+                         ["tests/test_a.py"])
+        self.assertEqual(self.files(["pytest", "tests/test_a.py[x]"]), ["tests/test_a.py"])
+        self.assertEqual(self.files(["npx", "vitest", "src/app.test.ts:12"]),
+                         ["src/app.test.ts"])
+        self.assertEqual(self.files(["npx", "jest", "src/app.test.ts:12:5"]),
+                         ["src/app.test.ts"])
+        self.assertEqual(self.files(["runner", "--config=jest.config.js", "--fast"]), [])
+
+    def test_the_patterns_come_from_the_data_file(self) -> None:
+        data = runcheck.grading_patterns()
+        self.assertIn("tests", data["dirs"])
+        self.assertIn("*.spec.*", data["basenames"])
+        self.assertIn("node_modules", data["exclude_dirs"])
+
     def test_a_bare_program_is_not_a_grading_file(self) -> None:
         # Even when a file of that name sits in the root.
         with open(os.path.join(self.root, "pytest"), "w") as h:
@@ -461,13 +525,13 @@ class TestGradingFiles(unittest.TestCase):
         os.makedirs(os.path.join(plugin, ".claude-plugin"))
         with open(os.path.join(plugin, ".claude-plugin", "plugin.json"), "w") as h:
             h.write("{}")
-        with open(os.path.join(plugin, "check.py"), "w") as h:
+        with open(os.path.join(plugin, "test_check.py"), "w") as h:
             h.write("x")
         old = os.environ.get("CLAUDE_PLUGIN_ROOT")
         os.environ["CLAUDE_PLUGIN_ROOT"] = plugin
         try:
-            self.assertEqual(self.files(["python3", "${CLAUDE_PLUGIN_ROOT}/check.py"]),
-                             ["plug/check.py"])
+            self.assertEqual(self.files(["python3", "${CLAUDE_PLUGIN_ROOT}/test_check.py"]),
+                             ["plug/test_check.py"])
         finally:
             if old is None:
                 os.environ.pop("CLAUDE_PLUGIN_ROOT", None)
@@ -475,9 +539,20 @@ class TestGradingFiles(unittest.TestCase):
                 os.environ["CLAUDE_PLUGIN_ROOT"] = old
 
     def test_each_once_and_hashed(self) -> None:
-        hashes = runcheck.grading_hashes(["bash", "scripts/e2e.sh", "./scripts/e2e.sh"], self.root)
+        hashes = runcheck.grading_hashes(["./scripts/e2e.sh", "./scripts/e2e.sh",
+                                          "tests/test_a.py"], self.root)
         import hashlib
-        self.assertEqual(hashes, {"scripts/e2e.sh": hashlib.sha256(b"e").hexdigest()})
+        self.assertEqual(hashes, {"scripts/e2e.sh": hashlib.sha256(b"e").hexdigest(),
+                                  "tests/test_a.py": hashlib.sha256(b"a").hexdigest()})
+
+    def test_a_large_file_hashes_in_chunks(self) -> None:
+        import hashlib
+        body = b"x" * (3 * 1024 * 1024 + 7)
+        with open(os.path.join(self.root, "tests", "test_big.py"), "wb") as h:
+            h.write(body)
+        hashes = runcheck.grading_hashes(["pytest", "tests/test_big.py"], self.root)
+        self.assertEqual(hashes, {"tests/test_big.py": hashlib.sha256(body).hexdigest()})
+        self.assertEqual(runcheck.changed_grading(hashes, self.root), [])
 
     def test_never_raises(self) -> None:
         self.assertEqual(runcheck.grading_hashes(None, self.root), {})

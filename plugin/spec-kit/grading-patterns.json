@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "description": "ADR-0023 decision 1. Which files a gate's or criterion's argv names that do the judging. A token counts when it names an existing regular file inside the project and either is argv[0] given as a path (a script) or looks like a test: a directory segment in 'dirs', or a basename matching one of 'basenames' (fnmatch, case-insensitive). Nothing under a directory segment in 'exclude_dirs' counts: those are build output and installed dependencies, which a build legitimately rewrites. Every other named file (src/app.py in a grep, app.db, dist/index.html) is what is being checked, not the check.",
+  "dirs": ["test", "tests", "__tests__", "spec", "e2e"],
+  "basenames": ["test_*", "*_test.*", "*.test.*", "*.spec.*", "*_spec.*", "conftest.py"],
+  "exclude_dirs": ["node_modules", ".venv", "venv", "dist", "build", "out", ".next",
+                   "coverage", "target", "__pycache__"]
+}

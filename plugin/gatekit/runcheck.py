@@ -17,6 +17,7 @@ Pure functions over strings and task dicts; nothing here runs a command.
 """
 from __future__ import annotations
 
+import fnmatch
 import functools
 import hashlib
 import json
@@ -410,15 +411,73 @@ def _inside(path: str, base: str) -> bool:
     return path == base or path.startswith(base.rstrip(os.sep) + os.sep)
 
 
+GRADING_PATTERNS_FILE = "grading-patterns.json"
+
+
+@functools.lru_cache(maxsize=1)
+def grading_patterns() -> Dict[str, tuple]:
+    """``{"dirs", "basenames", "exclude_dirs"}`` from
+    ``plugin/spec-kit/grading-patterns.json``, each a tuple of lower-case
+    strings. An unreadable or malformed file, or list, means none: only
+    argv[0] scripts then count. Never raises."""
+    try:
+        data = json.loads((paths.plugin_root() / "spec-kit" / GRADING_PATTERNS_FILE)
+                          .read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        data = {}
+    out: Dict[str, tuple] = {}
+    for key in ("dirs", "basenames", "exclude_dirs"):
+        raw = data.get(key) if isinstance(data, dict) else None
+        out[key] = tuple(str(v).lower() for v in raw if isinstance(v, str) and v) \
+            if isinstance(raw, list) else ()
+    return out
+
+
+def _test_shaped(rel: str, patterns: Dict[str, tuple]) -> bool:
+    parts = rel.lower().split("/")
+    if any(part in patterns["dirs"] for part in parts[:-1]):
+        return True
+    return any(fnmatch.fnmatchcase(parts[-1], glob) for glob in patterns["basenames"])
+
+
+#: ``file:12`` / ``file:12:5`` (vitest, jest) and pytest's ``[param]`` suffix.
+_LOCATION_SUFFIX = re.compile(r"(?::\d+)+$")
+_PARAM_SUFFIX = re.compile(r"\[[^\[\]]*\]$")
+
+
+def _grading_token(index: int, arg: Any, token: str, plugin: str) -> Optional[str]:
+    """The path part of one argv token, or None when it cannot name one."""
+    if not isinstance(arg, str):
+        return None
+    text = arg.replace(token, plugin).strip()
+    if text.startswith("-"):
+        # `--spec=e2e/login.spec.ts`: the value can be a path; a bare option not.
+        if index == 0 or "=" not in text:
+            return None
+        text = text.split("=", 1)[1].strip()
+    if not text or "\x00" in text:
+        return None
+    if index == 0 and "/" not in text and "\\" not in text:
+        return None
+    if "::" in text:
+        text = text.split("::", 1)[0]
+    text = _PARAM_SUFFIX.sub("", text)
+    text = _LOCATION_SUFFIX.sub("", text)
+    return text or None
+
+
 def grading_files(argv: Any, root: Any) -> List[str]:
     """ADR-0023: project-relative paths of the files *argv* names that do the
-    judging — each token (after ``${CLAUDE_PLUGIN_ROOT}`` expansion) naming an
-    existing regular file inside *root*, in argv order, each once.
+    judging, in argv order, each once.
 
-    argv[0] counts only as a path (a script); a bare program name is looked up
-    on PATH and never counts. Options are skipped; a pytest node id counts by
-    its part before ``::``. A file whose realpath leaves the root does not
-    count. Never raises.
+    A token (after ``${CLAUDE_PLUGIN_ROOT}`` expansion) counts when it names
+    an existing regular file inside *root* and either is argv[0] given as a
+    path (a script) or is test-shaped per :func:`grading_patterns`. Nothing
+    under an excluded (build output, dependency) directory counts. Options
+    are skipped except the value of ``--opt=path``; a pytest node id counts by
+    its part before ``::``, and ``[param]`` and ``:line`` suffixes are
+    dropped. A file whose realpath leaves the root does not count. Never
+    raises.
     """
     if not isinstance(argv, list) or not argv:
         return []
@@ -426,22 +485,21 @@ def grading_files(argv: Any, root: Any) -> List[str]:
         token = paths.PLUGIN_ROOT_TOKEN
         plugin = str(paths.plugin_root())
         real_root = os.path.realpath(str(root))
+        patterns = grading_patterns()
     except (OSError, ValueError, AttributeError):
         return []
     found: List[str] = []
     for index, arg in enumerate(argv):
-        if not isinstance(arg, str):
+        text = _grading_token(index, arg, token, plugin)
+        if text is None:
             continue
-        text = arg.replace(token, plugin).strip()
-        if not text or text.startswith("-") or "\x00" in text:
-            continue
-        if index == 0 and "/" not in text and "\\" not in text:
-            continue
-        if "::" in text:
-            text = text.split("::", 1)[0]
         try:
             rel = relativize(text, root)
             if rel is None or rel in found:
+                continue
+            if any(part.lower() in patterns["exclude_dirs"] for part in rel.split("/")[:-1]):
+                continue
+            if index != 0 and not _test_shaped(rel, patterns):
                 continue
             full = os.path.join(str(root), *rel.split("/"))
             if not os.path.isfile(full) or not _inside(os.path.realpath(full), real_root):
@@ -452,16 +510,31 @@ def grading_files(argv: Any, root: Any) -> List[str]:
     return found
 
 
+#: Grading files are read in pieces this size, so a large one is never held
+#: in memory whole.
+_HASH_CHUNK = 1024 * 1024
+
+
+def _sha256(path: str) -> Optional[str]:
+    """Hex SHA-256 of the file at *path*, or None when it cannot be read."""
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as handle:
+            for chunk in iter(lambda: handle.read(_HASH_CHUNK), b""):
+                digest.update(chunk)
+    except (OSError, ValueError):
+        return None
+    return digest.hexdigest()
+
+
 def grading_hashes(argv: Any, root: Any) -> Dict[str, str]:
     """``{relpath: sha256}`` of :func:`grading_files`; an unreadable file is
     left out. Never raises."""
     hashes: Dict[str, str] = {}
     for rel in grading_files(argv, root):
-        try:
-            with open(os.path.join(str(root), *rel.split("/")), "rb") as handle:
-                hashes[rel] = hashlib.sha256(handle.read()).hexdigest()
-        except (OSError, ValueError):
-            continue
+        digest = _sha256(os.path.join(str(root), *rel.split("/")))
+        if digest is not None:
+            hashes[rel] = digest
     return hashes
 
 
@@ -475,9 +548,8 @@ def changed_grading(recorded: Any, root: Any) -> List[str]:
         if not isinstance(rel, str):
             continue
         try:
-            with open(os.path.join(str(root), *rel.split("/")), "rb") as handle:
-                now = hashlib.sha256(handle.read()).hexdigest()
-        except (OSError, ValueError):
+            now = _sha256(os.path.join(str(root), *rel.split("/")))
+        except (TypeError, ValueError):
             now = None
         if now != digest:
             changed.append(rel)
