@@ -1,6 +1,6 @@
 # gatekit
 
-Status: 0.16.4 — early. License: MIT.
+Status: 0.16.5 — early. License: MIT.
 
 > **Name change ahead.** gatekit will be renamed **gatebound** after the
 > current study cohort ends. Nothing changes until then: your installation,
@@ -256,7 +256,7 @@ defaults.
 
 ## Status
 
-**0.16.4 — early.** The core gate/ledger/contract/approval kernel, worker
+**0.16.5 — early.** The core gate/ledger/contract/approval kernel, worker
 dispatch (host or a different-model worker), Codex evaluator support, and
 the CI enforcement tooling are all in place; expect rough edges. See
 `CHANGELOG.md` for what shipped and `docs/decisions/` for the architectural

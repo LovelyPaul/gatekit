@@ -46,7 +46,7 @@ gatekit은 Claude Code 플러그인이다. `CLAUDE.md`에 산문으로 적던 �
 
 - 이 매뉴얼의 모든 CLI 예시는 `python3 "${CLAUDE_PLUGIN_ROOT}/bin/gatekit.py" <서브커맨드>` 형식이다. 이유는 `08-cli.md`에 있다. **대부분의 작업은 CLI를 직접 칠 필요 없이 `/gatekit:<커맨드>` 슬래시 커맨드로 끝난다** — CLI는 커맨드가 내부에서 부르는 것이고, 직접 칠 일은 상태를 들여다볼 때 정도다.
 - 식별자(파일명·명령·플래그·JSON 키·펜스 이름·`ok`/`warn`/`fail`/`unverified`)는 번역하지 않는다.
-- 현재 버전은 0.16.4이다.
+- 현재 버전은 0.16.5이다.
 
 ## 노션으로 내보내기
 

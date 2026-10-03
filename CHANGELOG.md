@@ -4,6 +4,82 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.16.5 — 2026-10-04
+
+gatekit's own state is protected, and the Stop gate checks the approval and
+the contract before it judges (ADR-0027, with its amendment). The idea comes
+from a study member's Windows fork, github.com/yeoul9703/gatekit-cc-windows;
+only the idea is taken, the code is written here (clean-room rule).
+
+### Security
+
+- **Everything under `.gatekit/` is written only by gatekit.** A `Write` of
+  the current `05-gate.md` hash into `.gatekit/approvals.json` opened code
+  writing without the user, and after approval a shell redirect could rewrite
+  `approvals.json` or `contract.json`, forge `runs/contract-last.json` (reused
+  by the Stop gate as a run that never happened), set `stop.stood_down` in a
+  session ledger, or change `jobs/*/status.json` and `attempts.json`. Now
+  every path below a `.gatekit` directory except `config.json` (your
+  settings) and `eval/**` (the evaluator's scratch) is denied to every tool
+  call — `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `apply_patch` and Bash
+  — before and after approval, in any session, whatever
+  `enforce_spec_before_code` says; matched case-insensitively after
+  backslashes, NTFS stream suffixes, trailing dots and spaces and `..` are
+  removed, through symlinks and hard links. gatekit's hooks and CLI write
+  these files in process and are unaffected; reads (`cat`, `jq`, `grep`,
+  `git diff`/`add`/`commit`) and backups out of `.gatekit` stay allowed. The
+  deny message (en/ko) points to `/gatekit:gate`.
+- **The Stop gate and `contract run` check the approval and the contract
+  first.** Before any criterion runs: `contract_stale`, then
+  `gate_not_approved` when `approve check spec/05-gate.md` is not `ok` (a
+  broken grading pin keeps `grading_unapproved` with the paths), then
+  `contract_mismatch` when `05-gate.md` parsed again differs from
+  `contract.json` in any criterion field, the order or the budget. Each
+  blocks like any `unverified`. `contract baseline`, which `/gatekit:gate`
+  runs before approving, checks the contract only.
+- **A recorded result is reused only for the same contract.** The Stop
+  record now carries `contract_sha256`, the hash of the `contract.json` it
+  was judged under, and is not reused without a match.
+- **The Bash gate reads more shell forms for the protected state**, also
+  when no other rule is active: globs and braces in a target, `cd` behind
+  `{`/`then`/`do`/`!`, `pushd`/`popd`, a conditional `cd`, `cp -t`, a
+  destination symlinked to `.gatekit`, directories copied by contents; an
+  interpreter fed its script on stdin (`python3 <<PY`, `echo … | node`,
+  `python3 < s.py`), which is also `opaque` before approval; an `ln` (or
+  `cp -l`/`-s`) to a protected file or a directory holding one; paths built
+  from a variable assigned a `.gatekit` directory; `git
+  checkout`/`restore`/`reset`/`stash push` pathspecs that are or hold
+  `.gatekit` (`git -C dir` is now read as an option); `tar -C`/`unzip -d`
+  and `find -exec`/`-delete` into it; opaque commands that name a `.gatekit`
+  path or run inside one. `git checkout -- .`, `git reset --hard` and
+  `git clean -fdx` stay a documented trust boundary.
+
+### Changed
+
+- With `enforce_spec_before_code: false` and no approval, the Stop gate
+  under `build`/`verify` now returns `gate_not_approved` instead of judging
+  criteria nobody agreed to. `/gatekit:gate` always approves before
+  `/gatekit:build`, so the normal flow is unaffected.
+- `rm -rf .gatekit` from an agent session is refused while gatekit's hooks
+  are active. `UNINSTALL.md` keeps its order — remove the plugin first, then
+  delete the state yourself.
+- The evaluator prompt for `jobs evaluate --prompt` is written to
+  `.gatekit/eval/evaluator-prompt.md`, and the `RECOVERY.md` templates no
+  longer tell the agent to copy an attempt into `.gatekit/jobs/`.
+
+### Fixed
+
+- **Preflight names a line only by a whole argv token** (ADR-0009, amended).
+  A `COMMAND_ERROR_PATTERNS` line counted as naming one of the gate's own
+  arguments by substring, so `run` or `e2e` from `npm run e2e` matched
+  inside a path such as a Windows user folder, and a gate that only needed a
+  task-written file was refused as a command error before any worker ran.
+  A token now counts only when no letter, digit, `_` or `-` touches it.
+- **The Windows CI job is green again.** It had been failing since 0.16.0
+  for test-only reasons — fixtures written with `write_text` and then hashed
+  (CRLF on Windows), and `lsof` stub tests that are POSIX-only — and for the
+  preflight bug above, which was a real one.
+
 ## 0.16.4 — 2026-10-03
 
 Fixes from a review of 0.16.3 (ADR-0026, amended).
