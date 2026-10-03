@@ -188,13 +188,13 @@ never asked to be governed. Such a gate allows without reading further and
 **creates no state there** — no ledger, no `.gatekit/`, and no error log: a gate that fails there logs nothing, since creating `.gatekit/runs/` would make every later gate treat the project as managed. The one exception is
 `compact`, which already writes nothing when no job exists.
 
-- **prompt**: ensure ledger exists for `session_id`; detect `output_lang` from `prompt` (§8) and store it — for a slash command only the `<command-args>` content is the user's words, and empty args keep the stored language; **set `active_pipeline`** when the prompt invokes `/gatekit:<pipeline>`. Claude Code delivers a slash command as the tagged body `<command-message>…</command-message>` / `<command-name>/gatekit:<name></command-name>` / `<command-args>…</command-args>`; that tag, a bare `/gatekit:<name>` at the start of the prompt, and the `# /gatekit:<name>` title line of an expanded command body are recognised within the first 12 lines. A mid-sentence mention is not an invocation. `doctor` and `setup` clear it; an unknown name leaves it alone; a plain prompt keeps it. Entering a different pipeline resets `questions` to its defaults. This is the **only** production writer of `active_pipeline` — commands never set it by prose. Inject `additionalContext` (≤ 600 chars) with `output_lang`, question budget state, active pipeline, and unresolved gate count, plus `build=<job> n/m passed, next: <task>` while a job is unfinished (ADR-0013 decision 1a: the session that returns from a compaction is told a build is live and reads `spec/PROGRESS.md` for the rest). The question field is `questions=<asked>/<max>`, followed by the ADR-0012 signals when any is non-zero — `questions=6/2 (2 unjustified, 1 repeat, impl-choice)` — printing only what is set so the 600-char budget holds. Never blocks.
+- **prompt**: ensure ledger exists for `session_id`; detect `output_lang` from `prompt` (§8) and store it — for a slash command only the `<command-args>` content is the user's words, and empty args keep the stored language; **set `active_pipeline`** when the prompt invokes `/gatekit:<pipeline>`. Claude Code delivers a slash command as the tagged body `<command-message>…</command-message>` / `<command-name>/gatekit:<name></command-name>` / `<command-args>…</command-args>`; that tag, a bare `/gatekit:<name>` at the start of the prompt, and the `# /gatekit:<name>` title line of an expanded command body are recognised within the first 12 lines. A mid-sentence mention is not an invocation. `doctor` and `setup` clear it; an unknown name leaves it alone; a plain prompt keeps it. Entering a different pipeline resets `questions` to its defaults. Invoking `build` or `verify` — the same pipeline again included — also re-arms the Stop gate (ADR-0024): `stop` is reset to `{"block_count": 0, "final_verdict": null, "last_reasons": [], "stood_down": null, "deferred": []}` with a `stop_rearmed` event. This is the **only** production writer of `active_pipeline` — commands never set it by prose. Inject `additionalContext` (≤ 600 chars) with `output_lang`, question budget state, active pipeline, and unresolved gate count, plus `build=<job> n/m passed, next: <task>` while a job is unfinished, and — while a Stop-gate stand-down applies (ADR-0024, `stop.stand_down_applies`) — one line in `output_lang`, placed right after `pipeline=` so the 600-char cut never drops it, saying follow-up edits are not gated and `/gatekit:verify` re-checks the contract (ADR-0013 decision 1a: the session that returns from a compaction is told a build is live and reads `spec/PROGRESS.md` for the rest). The question field is `questions=<asked>/<max>`, followed by the ADR-0012 signals when any is non-zero — `questions=6/2 (2 unjustified, 1 repeat, impl-choice)` — printing only what is set so the 600-char budget holds. Never blocks.
 - **write**: for `apply_patch`, apply the rules below to every file the patch header names (a patch naming no file is denied while a rule is active). Otherwise deny when (a) `config.enforce_spec_before_code` is true, `spec/` exists, `.gatekit/approvals.json` has no valid approval for `spec/05-gate.md`, the target lies inside the project root (after realpath; a target outside the root is not this project's code and rule (a) allows it, ADR-0018), and the target path is outside the allowlist `spec/**, .gatekit/**, docs/**, README*, *.md at root`; or (b) env `GATEKIT_TASK_ID` is set and the target is outside that task's `write_scope` (from the job's `task.json`). Reason text is in `output_lang`.
 - **bash**: apply the write rules (a) and (b) to every file a Bash command would write, read statically from the command text: redirections (`>`, `>>`, `&>`, `>|`, `N>`), `tee`, `sed -i`/`perl -i`, `cp`/`mv`/`ln`/`install`/`rsync` destinations, `touch`/`rm`/`mkdir`/`truncate`/`chmod`/`chown` operands, `dd of=`, `sort -o`, `curl -o`, `wget -O`, `tar -C`/`-f`, `unzip -d`, `zip`, with `cd` tracked across `;`/`&&`/`||`/`|`/newlines, `VAR=`/`sudo`/`env`/`nohup` prefixes stripped, here-document bodies ignored, `/dev/*` targets ignored and `sh|bash|zsh -c "…"` parsed recursively. Fast path: when no rule could deny anything (no `GATEKIT_TASK_ID`, spec gate approved or absent) the command is allowed without parsing. When a rule is active and a write's target **cannot be determined** — `$VAR` or backticks in a path, `cd` to an unknown directory, `eval`, `xargs`, `patch`, `trap`, `find -exec/-delete`, working-tree `git` subcommands (`apply`, `checkout`, `restore`, `reset`, `merge`, `stash`, `init`, `clone`, …), inline interpreter code (`python3 -c`, `node -e`, `perl -e`, stdin scripts), `awk`, command-line editors (`ed`, `ex`, `vim`, `nano`), `busybox`, downloads that choose their own file name (`curl -O`, bare `wget`), process substitution, unbalanced quotes — **deny** with reason `opaque`: "could not tell" is never rounded to "allowed". Programs invoked by name (`npm run build`, `python3 script.py`) are outside its reach by design. Reason text is in `output_lang`.
 - **spawn**: under Codex the tool is `collaborationspawn_agent` and its payload carries only a task name and an encrypted message, so the fence cannot be read: allow, record `spawn_unscoped` in the ledger, and rely on the write/bash gates that the subagent's own tool calls meet (they carry `agent_id`). Otherwise the spawn prompt must contain a fenced block ` ```gatekit-scope ` with JSON `{"write_scope": [globs] | "read-only", "stop_when": "…", "tools": [...] | "inherit"}`. Deny if missing/invalid, or if `write_scope` intersects any scope already recorded in the ledger for this session. On allow, record the scope in the ledger. No regex over prose: parse the fence as JSON.
 - **compact** (PreCompact, ADR-0013): stamp the latest job's state — job id, execution mode, backend, and every task's state, gate tally and detail — into `spec/PROGRESS.md` between `<!-- gatekit:build-state -->` and its closing marker, replacing that block in place so repeated compactions leave one stamp and nothing outside it is touched. The heading belongs to neither language's canonical set, so `spec validate` is unaffected. Writes nothing when no job exists; an unwritable file is swallowed, since the job dir still holds every fact. Under host execution a build lives in one session, so a compaction is routine: this hook records the narrative, which is the only thing the files did not already hold.
 - **question**: increment `ledger.questions.asked`; if `asked > budget.max_calls` (default 2 for interview, unlimited otherwise) record `budget_exceeded=true` (informational; commands read it). ADR-0012 adds four signals, all informational and all confined to the budgeted pipeline, because a raw count permits waste inside the budget and forbids value outside it. Past `max_calls` a call must arrive with `questions.justification` — one line naming what the command would write differently depending on the answer — which the call **consumes** (set to `null`); a call without one raises `unjustified`. A justified call sets `awaiting_write`, and if the next `AskUserQuestion` arrives with it still set, `unrealized` is raised: the claim that the answer changes what gets written did not come true. The same gate is therefore also registered on **PostToolUse for `Write|Edit|MultiEdit|NotebookEdit`**, where it only calls `note_write` (clearing `awaiting_write`) and never counts a question — PreToolUse could not serve, since a write it sees may still be denied. Independently of the budget, each question's `header` + `question` is reduced to a content-word fingerprint (noise words dropped, ≥ `REPEAT_MIN_WORDS` 3 words) and compared against `questions.asked_topics` (last 50): overlap ≥ `REPEAT_OVERLAP` (0.7) of the smaller set raises `repeated` and records `repeat_of`. A call whose options are **all** code tokens (path, `call()`, dotted filename, `snake_case`, `camelCase`) sets `implementation_choice` — a `warn`-grade signature of handing the user a decision the command owned, never a verdict, since a question about implementation is sometimes right.
-- **stop**: if `.gatekit/contract.json` exists and the ledger's `active_pipeline` is `build` or `verify`: run the contract (§5) — unless nothing changed since the last recorded run (ADR-0020): `.gatekit/runs/contract-last.json` holds the last result with the contract's `source_sha256`, `signatures_sha256` (`runcheck.signatures_digest()`, the hash of `no-tests-signatures.json`; a record without it or with another hash is never reused, ADR-0022) and a fingerprint of the tree taken after that run (`contract.tree_fingerprint`: `(path, size, mtime_ns)` of every file except `.git`, `.gatekit`, `node_modules`, build output, `test-results`, `*.tsbuildinfo`, `spec/PROGRESS.md` and declared artifacts; none above 20 000 files). When both match, the gate judges that result again and says so (`stop_reused` event); otherwise it runs the contract with last run's `fail`/`unverified` criteria first. `contract run` never reuses but records its result, so the Stop ending a `/gatekit:verify` turn does not repeat it. On any `fail` or `unverified` criterion and `block_count < 3` and not `stop_hook_active`: block with a reason listing failing criteria; increment `block_count`. Otherwise allow and record `final_verdict` in the ledger (never a blank).
+- **stop**: if `.gatekit/contract.json` exists and the ledger's `active_pipeline` is `build` or `verify`: run the contract (§5) — unless nothing changed since the last recorded run (ADR-0020): `.gatekit/runs/contract-last.json` holds the last result with the contract's `source_sha256`, `signatures_sha256` (`runcheck.signatures_digest()`, the hash of `no-tests-signatures.json`; a record without it or with another hash is never reused, ADR-0022) and a fingerprint of the tree taken after that run (`contract.tree_fingerprint`: `(path, size, mtime_ns)` of every file except `.git`, `.gatekit`, `node_modules`, build output, `test-results`, `*.tsbuildinfo`, `spec/PROGRESS.md` and declared artifacts; none above 20 000 files). When both match, the gate judges that result again and says so (`stop_reused` event); otherwise it runs the contract with last run's `fail`/`unverified` criteria first. `contract run` never reuses but records its result, so the Stop ending a `/gatekit:verify` turn does not repeat it. On any `fail` or `unverified` criterion and `block_count < 3` and not `stop_hook_active`: block with a reason listing failing criteria; increment `block_count`. Otherwise allow and record `final_verdict` in the ledger (never a blank). **Stand-down (ADR-0024).** Under `build` the gate judges while the latest job (`jobs.latest_job_id`) is absent or unsettled — a job is settled when every task's `status.json` state is in `jobs.TERMINAL_STATES` — and once more after it settles. When a settled job gets a recorded verdict (an allow with `ok`, an allow after `block_count >= 3`, or a run with `no_criteria_in_tier`), the gate sets `stop.stood_down = {"pipeline", "job_id", "verdict", "at", "skipped": 0}` and logs `stop_stood_down`. While it applies (same pipeline, same latest job, still settled) every Stop exits 0 without running a criterion or touching `final_verdict`, incrementing `skipped`; when it no longer applies it is cleared and the gate judges again. An allow under `stop_hook_active` is a recorded verdict only when `ok`. Under `verify` the same holds with no job condition. **Tiers and budget (ADR-0024).** Under `build` the gate calls `execute(tiers=("turn",), start_budget_s=config.stop_budget_s(cfg)[0])`; under `verify` it runs every tier with no start budget. Criteria the run left out (`deferred`, reason `tier` or `budget`) are named in the block message as "deferred to /gatekit:verify" or "deferred: Stop-gate budget", recorded in `stop.deferred`, never block and are never reported `ok`. A `no_criteria_in_tier` result allows and records `unverified`. Reuse compares the record's `scope` with the ids the current tier selection covers (`contract.reusable_last(root, tiers)`).
 
 ## 4. Session ledger (`ledger.py`)
 
@@ -216,7 +216,9 @@ fallback. Schema (version 1):
                 "implementation_choice": false,
                 "asked_topics": [["word", "word"]]},
   "scopes": [{"owner": "agent-label-or-prompt-hash", "write_scope": ["src/auth/**"], "declared_at": "iso"}],
-  "stop": {"block_count": 0, "final_verdict": null, "last_reasons": []},
+  "stop": {"block_count": 0, "final_verdict": null, "last_reasons": [],
+           "stood_down": null | {"pipeline": "build|verify", "job_id": "…|null", "verdict": "ok|fail|unverified", "at": "iso", "skipped": 0},
+           "deferred": [{"id": "…", "tier": "turn|verify", "reason": "tier|budget"}]},
   "events": [{"ts": "iso", "kind": "…", "detail": {}}]
 }
 ```
@@ -232,6 +234,25 @@ Criteria are declared in `spec/05-gate.md` as fenced JSON blocks:
 {"id": "tests-pass", "argv": ["python3", "-m", "unittest", "discover"], "expect": {"exit": 0}, "timeout_s": 30, "artifacts": ["reports/junit.xml"]}
 ```
 ````
+
+A criterion may carry `"tier": "turn" | "verify"` (ADR-0024; default
+`"turn"`). Any other value is a `derive` error and a `spec validate` `fail`;
+the normalised criterion in `contract.json` always has `tier`.
+`execute(root, …, tiers=None, start_budget_s=None)` runs the criteria whose
+tier is in `tiers` (`None` = every tier) and returns the covered ids as
+`scope` (sorted) and the rest as `deferred: [{"id", "tier", "reason":
+"tier"}]`. With `start_budget_s`, a criterion not yet started once that many
+seconds have passed since the run began — while the run-wide budget still has
+time left — is not started either and joins `deferred` with reason
+`budget`; one started in time runs to its own timeout. Deferred criteria are
+not in `criteria`, not in `reasons` and not in the aggregate: they are not
+judged. When the tier selection covers no criterion, nothing runs and the
+result is `unverified` with reason `no_criteria_in_tier`. Only the Stop gate
+passes `tiers`/`start_budget_s`; `contract run` and `contract baseline` run
+every tier with none. `save_last` records `scope`; `reusable_last(root,
+tiers=None)` returns a record only when its `scope` equals the ids that
+`tiers` selects in the current contract (a record without `scope` is never
+reused).
 
 `gatekit contract derive` parses all fences into `.gatekit/contract.json`:
 
@@ -525,8 +546,16 @@ must say so once.
  }},
  "build": {"max_retries": 2, "parallel": 3, "task_timeout_s": 900},
  "questions": {"interview_max_calls": 2, "items_per_call": 4},
- "verify": {"evaluator": "agent"}}
+ "verify": {"evaluator": "agent"},
+ "stop": {"budget_s": 120}}
 ```
+
+`stop.budget_s` (ADR-0024) is how long the Stop gate under `build` keeps
+starting criteria; criteria it does not start are deferred to
+`/gatekit:verify`, never judged. `config.stop_budget_s(cfg)` returns
+`(value, problem)`: a non-number, boolean, zero or negative value yields the
+default 120, a value above 570 (`STOP_BUDGET_MAX_S`, the Stop gate's cap)
+yields 570, each with a problem string that `doctor` reports as `warn`.
 
 Sandboxing is never disabled by default; a backend with a bypass flag must set
 `"unsafe": true` and the job receipt records it. `read_only_argv` is the
@@ -839,7 +868,7 @@ runs `check` and the user confirms.
 
 1 plugin files present (plugin.json, hooks.json, all gate scripts exist and are non-empty);
 2 hooks registered in the running install (compare `~/.claude/plugins/…` cache when present, else `unverified`);
-3 project state (`.gatekit/config.json` valid, approvals valid JSON);
+3 project state (`.gatekit/config.json` valid, approvals valid JSON; an out-of-range `stop.budget_s` is `warn` (ADR-0024); the detail names a Stop-gate stand-down recorded in the most recently updated session ledger);
 4 spec set (`spec.validate` verdict, or `unverified` when no `spec/`);
 5 contract freshness (`source_sha256` matches);
 6 workers (default backend `check`);
@@ -929,6 +958,8 @@ proceeding with the writable `argv` once trusted; `--force-read-only-evaluator`
 bypassing the refusal and keeping `read_only_argv`; a non-Codex backend never
 triggering the check at all.
 
+ADR-0024 adds: the Stop gate judging with no job and with an unsettled job (an `ok` there not standing down), one handoff run after the last task passes, no criterion executed and exit 0 on every later Stop with `skipped` counted, a new job or a redelegated task clearing the stand-down, `/gatekit:build` and `/gatekit:verify` prompts re-arming (`block_count` reset, `stop_rearmed`), a settled job with `failed`/`blocked` tasks blocking up to `MAX_BLOCKS` then recording `final_verdict` then standing down, `stop_hook_active` with a non-`ok` verdict not standing down, the verify pipeline standing down after its verdict, the `stop_stood_down` event and field, the prompt line in English and Korean within 600 chars, and the hook still exiting 0 on an internal error after a stand-down; `tier` validated by `derive` and `spec validate`, the Stop gate under `build` running only `turn` criteria and naming `verify` ones as deferred without blocking or `ok`, a contract with no `turn` criterion allowing with `unverified`, `contract run`, `baseline` and the verify-pipeline Stop running every tier, and reuse refusing a record of another scope or with no `scope`; `stop.budget_s` default, cap and invalid values, criteria past the budget deferred and non-blocking, a `fail` before the budget still blocking, a timed-out or ran-no-tests `unverified` that ran still blocking, and the contract's own budget running out still giving `unverified`.
+
 ADR-0012 adds, in `gates/question.py`: a justified over-budget call consuming
 its line and raising nothing; an unjustified one raising `unjustified`; the
 line single-use across two calls; calls within budget needing none; a blank or
@@ -967,6 +998,7 @@ def from_msys(path: str, windows: bool | None = None) -> str   # "/c/x" → "C:/
 DEFAULTS: dict
 def load(root: pathlib.Path) -> dict                   # deep-merged with DEFAULTS; missing file → DEFAULTS
 def save(root: pathlib.Path, cfg: dict) -> None        # atomic
+def stop_budget_s(cfg: dict) -> tuple[float, str]      # ADR-0024: (value in force, problem or "")
 
 # lang.py
 def detect(text: str) -> str                           # "ko" | "en"
@@ -1015,7 +1047,9 @@ def derive(root: pathlib.Path) -> dict                 # writes .gatekit/contrac
 def approved_grading(root, gate_sha256: str) -> dict   # ADR-0023: {criterion id: {relpath: sha256}} an approval pins
 def unapproved_grading(root) -> list[str]              # ADR-0023: pinned files the derived contract no longer records as pinned
 def status(root: pathlib.Path) -> str                  # ok (fresh) | fail (stale) | unverified (absent)
-def execute(root: pathlib.Path, total_budget_s: float | None = None, cap_s: float | None = None) -> dict   # {"verdict", "criteria":[...], "reasons":[...], "total_budget_s"}; cap_s lowers the applied budget
+TIERS: tuple[str, ...]                                 # ("turn", "verify") — ADR-0024
+def execute(root: pathlib.Path, total_budget_s: float | None = None, cap_s: float | None = None, first: list[str] | None = None, tiers: tuple[str, ...] | None = None, start_budget_s: float | None = None) -> dict   # {"verdict", "criteria":[...], "reasons":[...], "total_budget_s", "scope", "deferred"}; cap_s lowers the applied budget
+def reusable_last(root: pathlib.Path, tiers: tuple[str, ...] | None = None) -> dict | None   # ADR-0020/0024: same contract, tree, signatures and scope
 def baseline(root: pathlib.Path, total_budget_s: float | None = None) -> dict   # writes .gatekit/baseline.json (ADR-0022)
 def run(argv: list[str]) -> int
 
