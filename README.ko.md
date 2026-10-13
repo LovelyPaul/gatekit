@@ -1,6 +1,6 @@
 # gatekit
 
-상태: 0.16.20 — 초기 단계. 라이선스: MIT.
+상태: 0.16.21 — 초기 단계. 라이선스: MIT.
 
 > **gatekit은 gatebound로 이어집니다.** 이 저장소는 이번 스터디 기간 동안
 > gatekit 0.16.x를 그대로 유지합니다. 지금 설치, `/gatekit:` 명령어,
@@ -104,7 +104,7 @@ Windows 문제(가짜 Python, 갱신 안 된 PATH, cp949, PowerShell로 실행�
 고치고, `PYTHONUTF8=1`을 설정한 뒤 gatekit을 설치하거나 업데이트합니다(ADR-0033).
 
 ```powershell
-irm https://raw.githubusercontent.com/loganmakes/gatekit/v0.16.20/install/install.ps1 | iex
+irm https://raw.githubusercontent.com/loganmakes/gatekit/v0.16.21/install/install.ps1 | iex
 ```
 
 그다음 PowerShell을 새로 열고, 프로젝트 폴더에서 `claude`를 실행해(처음이면
@@ -116,7 +116,7 @@ irm https://raw.githubusercontent.com/loganmakes/gatekit/v0.16.20/install/instal
 설치합니다(ADR-0033 결정 12).
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/loganmakes/gatekit/v0.16.20/install/install.ps1))) -WithCodex
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/loganmakes/gatekit/v0.16.21/install/install.ps1))) -WithCodex
 ```
 
 마지막 `codex-hooks` 줄은 Codex를 쓰는 프로젝트마다 두 가지를 하기 전까지

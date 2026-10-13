@@ -1154,7 +1154,9 @@ is checked instead: `codex exec --sandbox read-only` blocks a test runner's
 own scratch writes (Vitest's config cache, Playwright's `test-results/`) along
 with source edits, so most criteria come back `unverified` for a reason
 unrelated to the code under test. `evaluate` runs Codex's normal `argv`
-(`--sandbox workspace-write`) instead, but only when
+(`--sandbox workspace-write`, plus `-c sandbox_workspace_write.network_access=true`
+inserted after `exec` so the evaluator can bind a localhost port to start the app,
+Amendment A) instead, but only when
 `hosts.codex_hooks_trusted(root)` confirms this project's `.codex/hooks.json`
 has a matching `hooks.state` entry in Codex's own `$CODEX_HOME/config.toml`
 (default `~/.codex`) — a project's own `trust_level` is a separate record and
@@ -1314,7 +1316,8 @@ false with no config file, no matching entry, malformed TOML, an empty
 quote in the key; `evaluate` refusing with `EvaluatorSandboxError` naming
 `workspace-write` and the trust-check command when Codex hooks are untrusted;
 installing the host layer first when `.codex/hooks.json` is absent;
-proceeding with the writable `argv` once trusted; `--force-read-only-evaluator`
+proceeding with the writable `argv` once trusted, with the network override
+inserted once and never on the read-only path; `--force-read-only-evaluator`
 bypassing the refusal and keeping `read_only_argv`; a non-Codex backend never
 triggering the check at all.
 

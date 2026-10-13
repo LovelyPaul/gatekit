@@ -198,3 +198,30 @@ backend.
   write gate could be unenforced today with no test having caught it yet.
 - Whether `doctor` should report Codex hook-trust status as its own axis, so
   the gap is visible before a build or verify run hits it rather than after.
+
+## Amendment A (2026-10-13, owner approval in session): the evaluator run turns Codex's network on
+
+A study participant on Ubuntu (WSL) ran `/gatekit:verify` with Codex as the
+evaluator after trusting the hooks. The host's own `contract run` passed
+38 of 38 criteria; Codex passed 34 and failed 4, and could not carry out
+any E2E step. Every one of those failed the same way: `listen EPERM`. The
+workspace-write sandbox this ADR chose has no network by default, and that
+ban covers binding a localhost port, so the evaluator could not
+start the app it was grading. Reproduced on macOS with Codex 0.162.1: the
+same `listen(0, '127.0.0.1')` prints `EPERM` without the override and
+succeeds with it.
+
+This is the same shape as the original problem: a sandbox restriction that
+has nothing to do with the code makes criteria read `unverified` (or, as
+here, `fail`). The decision follows the same reasoning: the write gate is
+what keeps the evaluator from changing code, not the network ban.
+
+**Decision.** When `evaluate` runs Codex with `workspace-write`, it adds
+`-c sandbox_workspace_write.network_access=true` right after `exec`, once.
+The read-only path (`--force-read-only-evaluator`) is unchanged and gets no
+override. Worker jobs (`jobs start`) are unchanged.
+
+**Consequence.** The evaluator can also reach outside hosts. That is no
+wider than the `agent` evaluator, which runs under the host's own
+permissions. The earlier backlog note that left port-bind `EPERM` out of
+scope is superseded.

@@ -17,7 +17,7 @@ The gatekit kernel uses only the Python standard library. No `pip install` is ne
 A Windows PC has none of what gatekit assumes. No Claude Code, no Git, no Python, and typing `python` runs a Microsoft Store placeholder that prints only the word `Python` and exits. One line in **PowerShell** (not as administrator) does it (ADR-0033). If the window was opened as administrator, the install script stops and tells you to reopen it.
 
 ```powershell
-irm https://raw.githubusercontent.com/loganmakes/gatekit/v0.16.20/install/install.ps1 | iex
+irm https://raw.githubusercontent.com/loganmakes/gatekit/v0.16.21/install/install.ps1 | iex
 ```
 
 The script skips what is already there and installs only what is missing. It installs Git, a real Python 3.9 or newer (the Store placeholder does not count), Claude Code, and Node.js LTS with `winget` and the official installers, and fixes the user PATH (real Python ahead of the placeholder, `.local\bin` added). It reloads the current window's PATH, sets `PYTHONUTF8=1`, then installs or updates the plugin. At the end, each item shows `ok`/`warn`/`fail`/`unverified`. It does not touch the system PATH or administrator rights, and it is safe to run again. Updating is the same line.
@@ -25,7 +25,7 @@ The script skips what is already there and installs only what is missing. It ins
 Next, open a new PowerShell window, run `claude` in your project folder, log in, then run `/gatekit:doctor`. To see the plan without changing anything: `& ([scriptblock]::Create((irm <url>))) -DryRun`. Node.js is installed if missing without any extra flag (the `-WithNode` from earlier instructions is harmless if you add it, ADR-0033 decision 13). To use Codex too, use the line below.
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/loganmakes/gatekit/v0.16.20/install/install.ps1))) -WithCodex
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/loganmakes/gatekit/v0.16.21/install/install.ps1))) -WithCodex
 ```
 
 It installs the Codex CLI with `npm.cmd`, and the last row, `codex-hooks`, reports as `warn` the two steps left for each project (`install --host codex`, and trusting the hooks in `/hooks`). It does not install the Codex plugin (`codex plugin add`) (ADR-0033 decision 12).

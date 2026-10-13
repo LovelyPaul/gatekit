@@ -3616,6 +3616,73 @@ class TestEvaluatorSandbox(JobTestCase):
                 os.environ["CODEX_HOME"] = old_env
             codex_home.cleanup()
 
+    def saved_argv(self, trusted: bool, force_read_only: bool = False) -> list:
+        import tempfile as _tempfile
+        from gatekit import hosts
+
+        codex_home = _tempfile.TemporaryDirectory()
+        empty_bin = _tempfile.TemporaryDirectory()
+        old_env = os.environ.get("CODEX_HOME")
+        old_path = os.environ.get("PATH", "")
+        os.environ["CODEX_HOME"] = codex_home.name
+        try:
+            hosts.install(self.root, "codex")
+            # A machine with codex installed must not start a real run.
+            os.environ["PATH"] = empty_bin.name
+            if trusted:
+                hooks_path = str((self.root / ".codex" / "hooks.json").resolve())
+                pathlib.Path(codex_home.name, "config.toml").write_text(
+                    '[hooks.state.%s]\n'
+                    'trusted_hash = "sha256:deadbeef"\n' % json.dumps(hooks_path + ":pre_tool_use:0:0"),
+                    encoding="utf-8",
+                )
+            try:
+                jobs.evaluate(self.root, force_read_only_evaluator=force_read_only)
+            except jobs.EvaluatorSandboxError:
+                raise
+            except Exception:
+                pass  # no real codex binary in the test tree
+            job_id = jobs.latest_job_id(self.root)
+            saved = json.loads(
+                (self.root / ".gatekit" / "jobs" / job_id / "job.json").read_text(encoding="utf-8"))
+            return saved["backend"]["argv"]
+        finally:
+            os.environ["PATH"] = old_path
+            empty_bin.cleanup()
+            if old_env is None:
+                os.environ.pop("CODEX_HOME", None)
+            else:
+                os.environ["CODEX_HOME"] = old_env
+            codex_home.cleanup()
+
+    def test_workspace_write_evaluator_may_open_a_local_server(self) -> None:
+        # A WSL participant's evaluator failed 4 criteria and every E2E step
+        # with `listen EPERM`: Codex's workspace-write sandbox has no network
+        # by default, so the evaluator could not start the app it grades.
+        self.write_codex_config()
+        argv = self.saved_argv(trusted=True)
+        self.assertIn("sandbox_workspace_write.network_access=true", argv)
+        flag = argv.index("sandbox_workspace_write.network_access=true")
+        self.assertEqual(argv[flag - 1], "-c")
+        self.assertLess(argv.index("exec"), flag)
+
+    def test_read_only_evaluator_gets_no_network_override(self) -> None:
+        self.write_codex_config()
+        argv = self.saved_argv(trusted=False, force_read_only=True)
+        self.assertIn("read-only", argv)
+        self.assertNotIn("sandbox_workspace_write.network_access=true", argv)
+
+    def test_network_override_is_not_added_twice(self) -> None:
+        self.write_codex_config()
+        cfg_path = self.root / ".gatekit" / "config.json"
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+        cfg["worker"]["backends"]["codex"]["argv"] = [
+            "codex", "exec", "-c", "sandbox_workspace_write.network_access=true",
+            "--sandbox", "workspace-write"]
+        cfg_path.write_text(json.dumps(cfg), encoding="utf-8")
+        argv = self.saved_argv(trusted=True)
+        self.assertEqual(argv.count("sandbox_workspace_write.network_access=true"), 1)
+
 
 class TestEvaluatorBriefScratch(unittest.TestCase):
     """ADR-0026: in the 0.16.0 rehearsal the read-only evaluator wrote its

@@ -1108,6 +1108,22 @@ def evaluator_brief(root, lang: str = "en") -> str:
 _SANDBOX_NEEDS_TRUST = ("codex",)
 
 
+#: ADR-0015 Amendment A: Codex's workspace-write sandbox has no network by
+#: default, so an evaluator cannot start the app it grades — even a localhost
+#: `listen` fails with EPERM (seen on WSL, reproduced on macOS), and every E2E step reads
+#: `unverified`. The write gate, not the network ban, is what keeps the
+#: evaluator from changing code, so the evaluator run turns network on.
+_CODEX_NETWORK_OVERRIDE = "sandbox_workspace_write.network_access=true"
+
+
+def _with_codex_network(argv: list) -> list:
+    """Insert `-c <network override>` right after `exec`, once."""
+    if _CODEX_NETWORK_OVERRIDE in argv or "exec" not in argv:
+        return list(argv)
+    at = argv.index("exec") + 1
+    return list(argv[:at]) + ["-c", _CODEX_NETWORK_OVERRIDE] + list(argv[at:])
+
+
 class EvaluatorSandboxError(ValueError):
     """A Codex evaluator would run `workspace-write` with no write gate
     watching it, because this project's Codex hooks are not yet trusted."""
@@ -1163,6 +1179,8 @@ def evaluate(root, backend_name=None, prompt_path=None, timeout_s=None, lang: st
             )
 
     backend = workers.resolve(root, name, read_only=use_read_only)
+    if not use_read_only:
+        backend = dict(backend, argv=_with_codex_network(backend["argv"]))
     cfg = config.load(root)
     if timeout_s is None:
         timeout_s = float((cfg.get("build") or {}).get("task_timeout_s", 900))

@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## 0.16.21 — 2026-10-13
+
+### Fixed
+
+- **A Codex evaluator can start the app it grades.** `jobs evaluate` runs
+  Codex with `--sandbox workspace-write`, whose default bans the network,
+  and that includes binding a localhost port (seen on WSL, reproduced on
+  macOS). A participant's
+  verify run on WSL failed 4 criteria and could not run any E2E step, all
+  with `listen EPERM`, while the host's own run passed every criterion. The
+  evaluator run now adds `-c sandbox_workspace_write.network_access=true`
+  (ADR-0015 Amendment A). The read-only evaluator and build workers are
+  unchanged.
+
 ## 0.16.20 — 2026-10-10
 
 ### Fixed

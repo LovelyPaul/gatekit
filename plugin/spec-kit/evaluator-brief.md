@@ -39,7 +39,10 @@ project's Codex hooks are actually trusted. If they are not, `evaluate`
 refuses with `EvaluatorSandboxError` naming the exact fix — **show that
 message to the user verbatim**; do not retry with `--force-read-only-evaluator`
 on their behalf, since that silently trades the fix for an honest-but-mostly-
-`unverified` report.
+`unverified` report. The same run turns Codex's network on
+(`sandbox_workspace_write.network_access=true`, ADR-0015 Amendment A) so
+the evaluator can start the app on a local port; without it even a
+localhost `listen` fails with `EPERM` (seen on WSL, reproduced on macOS).
 
 It prints the evaluator's reply tail (the verdict table) and its state.
 `failed` or `timeout` means the evaluator did not finish; that is

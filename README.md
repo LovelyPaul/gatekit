@@ -1,6 +1,6 @@
 # gatekit
 
-Status: 0.16.20 — early. License: MIT.
+Status: 0.16.21 — early. License: MIT.
 
 > **gatekit continues as gatebound.** This repository keeps gatekit 0.16.x
 > working for the current study cohort: your installation, the `/gatekit:`
@@ -108,7 +108,7 @@ whatever is missing — Git, Python, Claude Code, Node.js LTS — fixes the user
 `PYTHONUTF8=1` and installs or updates gatekit (ADR-0033):
 
 ```powershell
-irm https://raw.githubusercontent.com/loganmakes/gatekit/v0.16.20/install/install.ps1 | iex
+irm https://raw.githubusercontent.com/loganmakes/gatekit/v0.16.21/install/install.ps1 | iex
 ```
 
 Then open a new PowerShell window, run `claude` in your project folder (it
@@ -120,7 +120,7 @@ to update. To see the plan without changing anything:
 (ADR-0033 decision 12):
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/loganmakes/gatekit/v0.16.20/install/install.ps1))) -WithCodex
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/loganmakes/gatekit/v0.16.21/install/install.ps1))) -WithCodex
 ```
 
 Its last row, `codex-hooks`, stays `warn` until you do two things in each
