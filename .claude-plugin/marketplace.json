@@ -1,7 +1,7 @@
 {
   "name": "gatekit",
   "description": "Gate-enforced harness for AI-assisted development: interview → spec, mockup → spec, gated autonomous build, evidence-based verify.",
-  "owner": { "name": "Paul", "url": "https://github.com/loganmakes" },
+  "owner": { "name": "Logan Kim", "url": "https://github.com/loganmakes" },
   "plugins": [
     {
       "name": "gatekit",
